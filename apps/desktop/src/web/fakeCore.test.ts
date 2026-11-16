@@ -102,3 +102,26 @@ describe("FakeCore review screens", () => {
     }
   });
 });
+
+describe("the demo case's notes (D-161)", () => {
+  it("sit on approved paragraphs only, are counted for the finish page, and go once their words are changed", async () => {
+    const core = new FakeCore();
+    await core.handle("unlock", { password: "x" });
+    const cases = (await core.handle("list_cases", {})) as { id: string; child_name: string | null }[];
+    const caseId = cases.find((c) => c.child_name === "נועם")?.id ?? "";
+    const detail = async () => (await core.handle("case_detail", { caseId })) as import("../ipc/generated/CaseDetail").CaseDetail;
+    const noted = (await detail()).sections.flatMap((s) => s.paragraphs).filter((p) => p.notes.length > 0);
+    expect(noted.every((p) => p.status === "approved")).toBe(true);
+    expect(noted.flatMap((p) => p.notes.map((n) => n.kind)).sort()).toEqual(["past_report_overlap", "polish", "polish", "score_mismatch", "verify_unsupported"]);
+    const check = (await core.handle("check_export", { caseId })) as import("../ipc/generated/ExportCheck").ExportCheck;
+    expect(check.polish_notes).toBe(2);
+    expect(check.blocking).toEqual([]);
+    // Every note is about words that are in its paragraph.
+    const scores = noted.find((p) => p.notes.some((n) => n.kind === "score_mismatch"));
+    expect(scores?.text).toContain("115");
+    await core.handle("edit_paragraph", { caseId, draftId: scores?.id, text: scores?.text.replace("115", "112").replace("של של", "של"), openedWith: null });
+    const after = (await detail()).sections.flatMap((s) => s.paragraphs).find((p) => p.id === scores?.id);
+    expect(after?.notes.map((n) => n.kind)).toEqual(["polish"]);
+    expect(after?.polish).toHaveLength(1);
+  });
+});

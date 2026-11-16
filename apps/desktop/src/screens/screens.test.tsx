@@ -87,7 +87,7 @@ describe("main screens", () => {
     await openCase(user);
     await user.click(screen.getByRole("button", { name: /הוצאת הדוח/ }));
     const side = await screen.findByRole("region", { name: "לפני שהקובץ יוצא" });
-    expect(await within(side).findByText("פסקה מאושרת אחת שווה מבט נוסף:")).toBeInTheDocument();
+    expect(await within(side).findByRole("button", { name: /כדאי לבדוק/ })).toHaveAttribute("aria-expanded", "true");
     expect(within(side).getByText(/כתוב 85, ובטבלה 95/)).toBeInTheDocument();
   });
 
@@ -121,9 +121,9 @@ describe("main screens", () => {
         sections: d.sections.map((s) => s.key !== "kindergarten" ? s : {
           ...s,
           paragraphs: [
-            { id: "p-ok", text: "פסקה מאושרת שבה הילד מפגין סקרנות.", status: "approved", by_ai: true, sources: [], warnings: [], replaces: null, has_versions: false, style_note: null, style },
-            { id: "p-new", text: "בגן הילד מפגין עניין במשחק.", status: "proposed", by_ai: true, sources: [], warnings: [], replaces: null, has_versions: false, style_note: null, style },
-            { id: "p-plain", text: "פסקה בלי ציון.", status: "proposed", by_ai: true, sources: [], warnings: [], replaces: null, has_versions: false, style_note: null, style: null },
+            { id: "p-ok", text: "פסקה מאושרת שבה הילד מפגין סקרנות.", status: "approved", by_ai: true, sources: [], warnings: [], polish: [], notes: [], replaces: null, has_versions: false, style_note: null, style },
+            { id: "p-new", text: "בגן הילד מפגין עניין במשחק.", status: "proposed", by_ai: true, sources: [], warnings: [], polish: [], notes: [], replaces: null, has_versions: false, style_note: null, style },
+            { id: "p-plain", text: "פסקה בלי ציון.", status: "proposed", by_ai: true, sources: [], warnings: [], polish: [], notes: [], replaces: null, has_versions: false, style_note: null, style: null },
           ],
         }),
       };

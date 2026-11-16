@@ -19,6 +19,8 @@ fn main() {
             "safety_net",
             "instrument_approvals",
             "set_instrument_status",
+            "critical_values",
+            "set_critical_values",
             "security_status",
             "export_security_pdf",
             "set_send_stopped",

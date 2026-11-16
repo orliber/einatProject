@@ -15,6 +15,7 @@ import { NameModelSettings } from "../components/NameModelSettings";
 import { ReadinessSettings } from "../components/ReadinessSettings";
 import { SafetyNet } from "../components/SafetyNet";
 import { InstrumentSettings } from "../components/InstrumentSettings";
+import { CriticalValuesSettings } from "../components/CriticalValuesSettings";
 import { SecuritySettings } from "../components/SecuritySettings";
 import { PrivacyStatus } from "../components/PrivacyStatus";
 import { Segmented, Switch } from "../components/Switch";
@@ -330,7 +331,12 @@ export function SettingsScreen({ pane: initial }: { pane?: SettingsPane | undefi
             </>
           )}
 
-          {pane === "tests" && <InstrumentSettings />}
+          {pane === "tests" && (
+            <>
+              <InstrumentSettings />
+              <CriticalValuesSettings />
+            </>
+          )}
 
           {pane === "backup" && (
             <>

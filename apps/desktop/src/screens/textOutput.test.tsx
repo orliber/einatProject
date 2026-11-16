@@ -197,7 +197,7 @@ describe("case materials and the report page", () => {
   it("a draft from the model with markup (text, sources, warnings, style note) is shown as text", async () => {
     const injected = {
       id: "d-model", text: `ניסוח מוצע של המודל. ${PAYLOAD}`, status: "proposed", by_ai: true,
-      sources: [`S1 · אינטייק · ${PAYLOAD}`], warnings: [`בדיקה: ${PAYLOAD}`], replaces: null, has_versions: false,
+      sources: [`S1 · אינטייק · ${PAYLOAD}`], warnings: [`בדיקה: ${PAYLOAD}`], polish: [], notes: [], replaces: null, has_versions: false,
       style_note: `הערת סגנון ${PAYLOAD}`,
     };
     const { user } = await openApp(async (cmd, args, core) => {

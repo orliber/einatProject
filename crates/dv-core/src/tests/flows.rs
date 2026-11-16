@@ -731,7 +731,8 @@ fn a_backup_restores_the_same_cases_settings_and_bin() {
 
     assert_eq!(other.list_cases().unwrap(), before_cases);
     for d in &before {
-        assert_eq!(&other.case_detail(&d.id).unwrap(), d);
+        // What the session said about the drafts stays with the session (D-161).
+        assert_eq!(other.case_detail(&d.id).unwrap(), from_the_vault(d.clone()));
     }
     assert_eq!(other.chat(&case, "kindergarten").unwrap(), before_chat);
     assert_eq!(other.folders().unwrap(), before_folders);
@@ -1808,7 +1809,7 @@ fn approving_every_clean_draft_takes_only_what_the_core_still_sees_clean_and_onc
     assert!(!proposed.is_empty());
     let clean = proposed
         .iter()
-        .filter(|p| p.warnings.is_empty() && p.replaces.is_none())
+        .filter(|p| p.notes.iter().all(|n| n.kind == NoteKind::Polish) && p.replaces.is_none())
         .count();
     let mut ids: Vec<String> = proposed.iter().map(|p| p.id.clone()).collect();
     ids.push("no-such-draft".to_owned());
@@ -1863,6 +1864,43 @@ fn a_number_in_no_source_stays_a_note_after_a_reload_and_approve_all_holds_it_ba
     assert!(clean.warnings.is_empty(), "{:?}", clean.warnings);
     let ids: Vec<String> = shown.iter().map(|p| p.id.clone()).collect();
     assert_eq!(core.approve_clean_paragraphs(&case, &ids).unwrap(), 1);
+}
+
+#[test]
+fn proofreading_notes_are_advice_and_never_hold_a_paragraph_back() {
+    // D-167: a doubled word and a missing full stop are noted under the paragraph and counted
+    // at the finish, but they are not warnings, and "approve all clean" still takes it.
+    let fake = FakeTransport::default();
+    let (_dir, mut core, case) = setup(Some(fake.clone()));
+    let p = core
+        .prepare_section(&case, "background", "תנסח את הסעיף")
+        .unwrap();
+    *fake.answer.lock().unwrap() = Some(api_json(&json!({
+        "reply": "הנה",
+        "paragraphs": [
+            {"text": "[ילד] גדל עם הוריו בבית בעיר.", "source_refs": ["S1"], "guide": 1},
+            {"text": "[ילד] הלך הלך לגן עם הוריו בבוקר", "source_refs": ["S1"], "guide": 1},
+        ],
+        "questions": [], "missing": [], "contradictions": [],
+    })));
+    core.send_section(&p.approval_id.unwrap()).unwrap();
+    let shown: Vec<ParagraphView> = core
+        .case_detail(&case)
+        .unwrap()
+        .sections
+        .into_iter()
+        .find(|s| s.key == "background")
+        .unwrap()
+        .paragraphs;
+    let rough = shown.iter().find(|p| p.text.contains("הלך הלך")).unwrap();
+    assert_eq!(rough.polish.len(), 2, "{:?}", rough.polish);
+    assert!(rough.polish.iter().any(|n| n.contains("\"הלך הלך\"")));
+    assert!(rough.warnings.is_empty(), "{:?}", rough.warnings);
+    let smooth = shown.iter().find(|p| !p.text.contains("הלך הלך")).unwrap();
+    assert!(smooth.polish.is_empty(), "{:?}", smooth.polish);
+    let ids: Vec<String> = shown.iter().map(|p| p.id.clone()).collect();
+    assert_eq!(core.approve_clean_paragraphs(&case, &ids).unwrap(), 2);
+    assert_eq!(core.check_export(&case).unwrap().polish_notes, 2);
 }
 
 // ------------------------------------------------------------ a name is never dropped silently

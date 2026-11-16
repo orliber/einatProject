@@ -26,6 +26,7 @@ mod instruments;
 mod intake;
 mod library;
 pub mod name_model;
+mod notes;
 mod own;
 mod prepare;
 use name_model::NameHints;
@@ -98,7 +99,7 @@ pub use followup::FollowUpView;
 pub use history::{
     HiddenWord, SentCursor, SentItem, SentPage, SentPart, SentText, SENT_PAGE, SENT_SCAN,
 };
-pub use instruments::{InstrumentApproval, InstrumentStatus};
+pub use instruments::{CriticalValuesView, InstrumentApproval, InstrumentStatus};
 pub use jobs::{
     BackupRun, BackupTask, DocumentRead, DrillJob, Drilled, ExportJob, Exported, PasswordCheckJob,
     PasswordChecked, ReadJob, RestoreJob, Restored, SlotJob, SlotMade, UnlockJob, Unlocked,
@@ -106,6 +107,7 @@ pub use jobs::{
 pub use layers::SecurityLayer;
 pub use library::TRASH_DAYS;
 pub use name_model::{HintJob, HintsRead};
+pub use notes::{NoteKind, ParagraphNote, SectionNotes};
 pub use own::SectionModeView;
 pub use prepare::{run_requests, Landed, RequestJob, RequestRun};
 pub use readiness::{Readiness, ReadinessItem};
@@ -223,6 +225,29 @@ const SLEEP_GAP: Duration = Duration::from_secs(60);
 const MAX_REQUEST_BYTES: usize = 900_000;
 /// Sections written from other, already approved sections.
 const DERIVED_SECTIONS: &[&str] = &["dsm", "summary", "diagnoses", "recommendations"];
+/// The section that holds the reason for the referral: what the closing sections answer.
+const REFERRAL_SECTION: &str = "referral";
+/// Her diagnoses: the psychologist's decision, which the other closing sections use as it is.
+const DIAGNOSES_SECTION: &str = "diagnoses";
+
+/// The approved closing sections that go with another closing section (D-162), so the end of
+/// the report is written with the whole picture: her diagnoses go to the DSM section, the
+/// summary and the recommendations; the DSM section to the summary and the recommendations;
+/// the recommendations to the summary. Never a section to itself, and nothing to the
+/// diagnoses, which are hers to decide.
+fn closing_passed_to(section_key: &str) -> &'static [&'static str] {
+    match section_key {
+        "dsm" => &["diagnoses"],
+        "summary" => &["dsm", "diagnoses", "recommendations"],
+        "recommendations" => &["dsm", "diagnoses"],
+        _ => &[],
+    }
+}
+
+/// The closing sections that get the case's key scores, worked out here (D-162).
+fn gets_key_scores(section_key: &str) -> bool {
+    matches!(section_key, "summary" | "dsm" | "recommendations")
+}
 
 /// The cloud-synced folder (OneDrive, Dropbox…) that holds `path`, if any. A report with real
 /// names is not saved where it would be uploaded on its own.
@@ -702,6 +727,20 @@ fn age_ok(age: dv_domain::Age) -> bool {
     age.months <= 11 && age.years <= 24
 }
 
+/// The case's key scores as they go with the closing sections (D-162): the totals, indexes
+/// and scales of every sheet, on the lines of the score material, and the patterns of the
+/// scores. Worded by the fixed tables only, leaving out what she does not write beside
+/// scores; `None` when the case has no such score.
+fn key_scores_text(
+    v: &Vault,
+    sheets: &[dv_domain::ScoreSheet],
+) -> Result<Option<String>, CoreError> {
+    if sheets.is_empty() {
+        return Ok(None);
+    }
+    Ok(dv_domain::key_scores(sheets, style::sheet_habits(v)?))
+}
+
 /// A consent is a record the psychologist may have to show: a real, past date and who signed.
 fn check_meta(meta: &CaseMeta) -> Result<(), CoreError> {
     if meta
@@ -783,11 +822,13 @@ enum PendingKind {
         groups: Vec<dv_ai::InterpretationGroup>,
     },
     /// The check of a section's proposed paragraphs against its sources: the drafts in the
-    /// order of `P1`…, and the `S#` ids that were sent.
+    /// order of `P1`…, the stored (tagged) wording of each as it was sent, and the `S#` ids
+    /// that were sent.
     Verify {
         case_id: String,
         section_key: String,
         draft_ids: Vec<String>,
+        wordings: Vec<String>,
         source_ids: Vec<String>,
     },
     /// The check of the whole approved report (D-097): the keys of the sections sent, in the
@@ -1012,6 +1053,9 @@ pub struct Core {
     section_nonces: HashMap<(String, String), String>,
     /// The name model's hints by text, so a material is read once (dropped on lock).
     hint_cache: HashMap<String, Vec<dv_privacy::NameHint>>,
+    /// Set only inside [`Core::request_name_texts`]: `case_hints` lists the texts it would
+    /// have the model read, and reads none. The request begun meanwhile is dropped unsent.
+    name_texts: Option<Vec<String>>,
     /// The case whose stored texts were last settled against its tags, and the vault's write
     /// counts right after: while they have not moved, no text or name changed, and settling
     /// again would find nothing (dropped on lock).
@@ -1023,6 +1067,9 @@ pub struct Core {
     memory_lock: Option<bool>,
     /// The cases opened this session, so each opening is logged once (L3; dropped on lock).
     opened_cases: HashSet<String>,
+    /// What the answers and the checks against the sources said this session (D-161):
+    /// memory only, wiped on lock.
+    notes: notes::SessionNotes,
     /// What this opening has to say about the time since the last one (L4; dropped on lock).
     since_last: Option<String>,
     /// Moves when the Drive copy turns on or off (D-099): an upload or a cleanup begun before

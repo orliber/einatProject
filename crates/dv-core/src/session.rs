@@ -171,11 +171,13 @@ impl Core {
             ner: None,
             ner_exe: None,
             hint_cache: HashMap::new(),
+            name_texts: None,
             settled: None,
             section_nonces: HashMap::new(),
             computer_seal: Arc::new(WindowsSeal),
             memory_lock: None,
             opened_cases: HashSet::new(),
+            notes: notes::SessionNotes::default(),
             since_last: None,
             drive_generation: Arc::default(),
             drive_cleanup_at: None,
@@ -515,6 +517,9 @@ impl Core {
                 // The gate and the sending rules try themselves once per opening; a failure
                 // stops sending until the program is fixed (D-078, fail-closed).
                 crate::layers::stop_if_broken(crate::layers::SelfChecks::run());
+                // Her past reports measured again when the measuring changed (C3, C6). Only
+                // numbers; best effort, never keeps the vault from opening.
+                self.refresh_style_measures();
                 if purge {
                     // Best effort: a case that fails to erase now is tried again next time, and
                     // never keeps the vault from opening.
@@ -588,6 +593,8 @@ impl Core {
         self.settled = None;
         self.section_nonces.clear();
         self.opened_cases.clear();
+        // What the answers said about the drafts (D-161) holds words of the case.
+        self.notes.wipe();
         self.since_last = None;
         // A cleanup owed at Google is tried again soon after the next unlock.
         self.drive_cleanup_at = None;

@@ -14,66 +14,250 @@
   flex-direction: column;
   gap: 14px;
 }
+/* The state of the report, in one sentence. */
 .finish-side h1 {
-  font-size: var(--text-3xl);
+  font-size: var(--text-2xl);
+  line-height: 1.3;
+  text-wrap: balance;
 }
-.finish-checks {
+.fin-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+/* Nothing stops the file: one quiet line. */
+.fin-ok {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ok);
+  font-size: var(--text-base);
+}
+/* Three folded lists, each with its counter. */
+.fin-group {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+.fin-group.is-must {
+  border: 1.5px solid var(--warn-line);
+  background: var(--warn-paper);
+}
+.fin-group h2 {
+  margin: 0;
+  font-size: var(--text-base);
+}
+.fin-head {
+  width: 100%;
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: var(--radius-lg);
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-weight: 700;
+  text-align: start;
+  cursor: pointer;
+}
+.fin-head:hover {
+  background: var(--sand);
+}
+.is-must .fin-head:hover {
+  background: var(--warn-soft);
+}
+.fin-chevron {
+  width: 12px;
+  color: var(--ink-muted);
+  font-size: var(--text-xl);
+  font-weight: 400;
+  line-height: 1;
+  text-align: center;
+  transition: transform var(--dur-hover) var(--ease-out);
+}
+.fin-head[aria-expanded="true"] .fin-chevron {
+  transform: rotate(90deg);
+}
+.fin-count {
+  min-width: 26px;
+  height: 26px;
+  padding: 0 8px;
+  border-radius: 13px;
+  display: grid;
+  place-items: center;
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-size: var(--text-sm);
+}
+.is-must .fin-count {
+  background: var(--warn-soft);
+  color: var(--warn-ink);
+}
+.is-polish .fin-count {
+  background: var(--sand-strong);
+  color: var(--ink-muted);
+}
+.fin-body {
+  padding: 0 10px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.fin-cards,
+.fin-notes,
+.fin-left ul {
   list-style: none;
   margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 10px;
 }
-.finish-checks li {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  padding: 12px 14px;
-  border-radius: var(--radius-lg);
-  background: var(--surface);
-  border: 1px solid var(--line);
-  font-size: var(--text-base);
+.fin-cards {
+  gap: 8px;
 }
-.finish-checks li.warn {
-  background: var(--warn-paper);
-  border: 1.5px solid var(--warn-line);
-}
-.finish-mark {
-  width: 28px;
-  height: 28px;
-  flex-shrink: 0;
-  border-radius: 50%;
-  display: grid;
-  place-items: center;
-  font-weight: 700;
-}
-.ok .finish-mark {
-  background: var(--ok-soft);
-  color: var(--ok);
-}
-.warn .finish-mark {
-  background: var(--warn-soft);
-  color: var(--warn-ink);
-}
-.info .finish-mark {
-  background: var(--primary-soft);
-  color: var(--primary);
-}
-.complete-item {
+/* A note: what it is, the sentence it is about, why, and what she can do. */
+.fin-card {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding: 8px 10px;
-  border: 1px dashed var(--warn-line);
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
   border-radius: var(--radius-md);
-  background: var(--surface);
-  text-align: start;
-  font-size: var(--text-base);
-  line-height: 1.6;
+  background: var(--surface-alt);
+  transition: border-color var(--dur-enter) var(--ease-out);
 }
-.complete-item:hover {
+.is-must .fin-card {
+  background: var(--surface);
+  border-color: var(--warn-line);
+}
+.fin-card.is-shown {
   border-color: var(--primary);
+}
+.fin-where {
+  font-size: var(--text-sm);
+  color: var(--ink-muted);
+}
+.fin-notes {
+  gap: 10px;
+}
+.fin-note {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+}
+.fin-title-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.fin-title-row .fin-link {
+  flex-shrink: 0;
+}
+.fin-note + .fin-note {
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+.fin-title {
+  font-size: var(--text-base);
+}
+.fin-quote {
+  width: 100%;
+  margin: 2px 0;
+  padding: 0 10px;
+  border: 0;
+  border-inline-start: 3px solid var(--line-strong);
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink-soft);
+  font-size: var(--text-base);
+  line-height: 1.5;
+  text-align: start;
+  cursor: pointer;
+}
+.fin-quote:not(.serif) {
+  font-family: inherit;
+}
+.fin-quote:hover {
+  border-inline-start-color: var(--primary);
+  color: var(--ink);
+}
+.fin-why {
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--ink-muted);
+}
+.fin-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 20px;
+}
+.fin-link {
+  min-height: 28px;
+  /* A little air around the words, taken back so the link still lines up with the text. */
+  margin: 0 -6px;
+  padding: 0 6px;
+  border: 0;
+  background: transparent;
+  color: var(--primary);
+  font: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+.fin-link:hover {
+  text-decoration: underline;
+}
+/* What she left as it is: one quiet line at the end of the list. */
+.fin-left {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  padding: 0 4px;
+}
+.fin-left > .fin-link {
+  color: var(--ink-muted);
+}
+.fin-left ul {
+  width: 100%;
+  gap: 2px;
+}
+.fin-left li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: var(--text-sm);
+  color: var(--ink-muted);
+}
+/* The check of the whole report: a quiet row. */
+.fin-report-check {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0 4px;
+}
+/* The paragraph a card pointed at, lit for a moment in the preview. */
+.finish-preview .a4-p,
+.finish-preview .a4-section {
+  border-radius: 4px;
+  transition: background-color 600ms var(--ease-out), box-shadow 600ms var(--ease-out);
+}
+.finish-preview .a4-p.is-shown,
+.finish-preview .a4-section.is-shown {
+  background: var(--primary-soft);
+  box-shadow: 0 0 0 6px var(--primary-soft);
+}
+@media (prefers-reduced-motion: reduce) {
+  .fin-chevron,
+  .fin-card,
+  .finish-preview .a4-p,
+  .finish-preview .a4-section {
+    transition: none;
+  }
 }
 .finish-file {
   display: flex;

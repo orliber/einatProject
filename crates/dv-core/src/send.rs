@@ -338,18 +338,41 @@ impl Core {
         let everyone = v.all_identities()?;
         let inputs = v.inputs(&case_id)?;
         let sheets = score_sheets(v, &case_id, &inputs)?;
+        // What is found now and not worked out again when the case is read (D-161): each
+        // paragraph's lines with what they are about, kept for the session with the draft.
+        let mut found: Vec<Vec<ParagraphNote>> = Vec::new();
         for p in &mut reply.paragraphs {
+            let mut notes: Vec<ParagraphNote> = p
+                .warnings
+                .iter()
+                .zip(&p.kinds)
+                .filter_map(|(w, kind)| match kind {
+                    dv_ai::WarningKind::Source => {
+                        Some(ParagraphNote::new(NoteKind::NoSource, w.clone()))
+                    }
+                    // A number is checked again each time the case is read, except in a
+                    // section worded from her points, which are not kept.
+                    dv_ai::WarningKind::Number => from_points
+                        .then(|| ParagraphNote::new(NoteKind::NumberNotInSources, w.clone())),
+                })
+                .collect();
             p.warnings.extend(dv_domain::check_scores(&p.text, &sheets));
             for s in scan_model_output(&p.text, &case_tags, &everyone) {
-                p.warnings
-                    .push(format!("{}: {}", s.message.replace("Claude", ai), s.token));
+                let line = format!("{}: {}", s.message.replace("Claude", ai), s.token);
+                notes.push(ParagraphNote::new(NoteKind::NameInAnswer, line.clone()));
+                p.warnings.push(line);
             }
+            found.push(notes);
         }
         // D-043: a paragraph that repeats a past report word for word.
         let texts: Vec<&str> = reply.paragraphs.iter().map(|p| p.text.as_str()).collect();
         let overlaps = style::overlap_warning(v, &texts)?;
         let interpretations = style::InterpretationCheck::new(v, &sheets)?;
-        for (p, w) in reply.paragraphs.iter_mut().zip(overlaps) {
+        for ((p, w), notes) in reply.paragraphs.iter_mut().zip(overlaps).zip(&mut found) {
+            notes.extend(
+                w.iter()
+                    .map(|w| ParagraphNote::new(NoteKind::PastReportOverlap, w.clone())),
+            );
             p.warnings.extend(w);
             p.warnings.extend(interpretations.notes(&p.text));
         }
@@ -382,6 +405,8 @@ impl Core {
         };
         // A rewrite of one paragraph stays in its place; if it was approved or removed
         // meanwhile, the answer is added as a new proposal instead of touching it.
+        // The drafts the answer became, each with its tagged text and what was found in it.
+        let mut stored: Vec<(String, String, Vec<ParagraphNote>)> = Vec::new();
         let rewritten = match (&replaces, reply.paragraphs.is_empty()) {
             (Some(id), false) => {
                 let text: Vec<&str> = reply.paragraphs.iter().map(|p| p.text.as_str()).collect();
@@ -390,8 +415,30 @@ impl Core {
                 let text = text.join("\n\n");
                 // A proposal is rewritten in place; an approved paragraph gets a new wording
                 // beside it, which replaces it only when she approves (D-032).
-                v.rewrite_proposal(&case_id, id, &text, &refs)?
-                    || v.propose_rewording(&case_id, id, &text, &refs)?
+                let in_place = v.rewrite_proposal(&case_id, id, &text, &refs)?;
+                let beside = !in_place && v.propose_rewording(&case_id, id, &text, &refs)?;
+                let landed = if in_place {
+                    Some(id.clone())
+                } else if beside {
+                    v.drafts(&case_id, &section_key)?
+                        .into_iter()
+                        .find(|d| {
+                            d.status == DraftStatus::Proposed && d.replaces.as_ref() == Some(id)
+                        })
+                        .map(|d| d.id)
+                } else {
+                    None
+                };
+                if let Some(draft_id) = landed {
+                    let mut all: Vec<ParagraphNote> = Vec::new();
+                    for n in found.iter().flatten() {
+                        if !all.contains(n) {
+                            all.push(n.clone());
+                        }
+                    }
+                    stored.push((draft_id, text, all));
+                }
+                in_place || beside
             }
             _ => false,
         };
@@ -399,8 +446,9 @@ impl Core {
             if replaces.is_none() && !reply.paragraphs.is_empty() {
                 v.supersede_proposals(&case_id, &section_key)?;
             }
-            for p in &reply.paragraphs {
-                v.add_draft(&case_id, &section_key, &p.text, Author::Ai, &input_ids(p))?;
+            for (p, notes) in reply.paragraphs.iter().zip(&found) {
+                let d = v.add_draft(&case_id, &section_key, &p.text, Author::Ai, &input_ids(p))?;
+                stored.push((d.id, p.text.clone(), notes.clone()));
             }
         }
 
@@ -418,6 +466,27 @@ impl Core {
         };
         let practitioner = v.practitioner()?.names.first().cloned();
         let show = |t: &str| restore(t, &identities, practitioner.as_deref(), &masks);
+        // D-161: nothing the answer said is lost when the page drops this result. Kept for
+        // the session, by the stored wording each paragraph has now.
+        for (draft_id, text, notes) in stored {
+            self.notes.keep_answer(&case_id, &draft_id, text, notes);
+        }
+        let said = SectionNotes {
+            questions: reply.questions.iter().map(|q| show(q)).collect(),
+            missing: reply
+                .missing
+                .iter()
+                .map(|q| show(q))
+                .chain(left_out.then(|| LEFT_OUT_NOTE.to_owned()))
+                .collect(),
+            contradictions: reply.contradictions.iter().map(|q| show(q)).collect(),
+            unanswered: unanswered.iter().map(|l| show(l)).collect(),
+        };
+        if replaces.is_some() {
+            self.notes.keep_rewording(&case_id, &section_key, said);
+        } else {
+            self.notes.keep_section(&case_id, &section_key, said);
+        }
         Ok(SectionResult {
             reply: show(&reply.reply),
             paragraphs: reply

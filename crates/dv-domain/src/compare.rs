@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::scores::{classify, instruments, Instrument, Measure, ScoreScale, ScoreSheet};
+use crate::scores::{classify, table, Instrument, Measure, ScoreScale, ScoreSheet};
 
 /// One measure in both assessments.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -45,31 +45,54 @@ fn measure_of<'a>(
     Some((inst, inst.measures.iter().find(|m| m.key == key)?))
 }
 
-/// Measures entered in both assessments, with the same key and scale (so WPPSI-IV and WISC-V
-/// indexes compare, but not a subtest that exists in only one of them), in the order entered.
+/// Tests of one family, whose shared measures (FSIQ, the indexes) mean the same thing.
+const WECHSLER: [&str; 3] = ["wppsi_iii", "wppsi_iv", "wisc_v"];
+
+/// Measures entered in both assessments, in the order entered. A measure is paired with the
+/// same instrument's earlier score; only when that instrument was not used before, and only
+/// inside the Wechsler family, with another test's measure of the same key and scale (so
+/// WPPSI-IV and WISC-V indexes compare, but a Bayley motor score never meets a Vineland one).
 #[must_use]
 pub fn compare(before: &[ScoreSheet], after: &[ScoreSheet]) -> Vec<ComparisonRow> {
-    let all = instruments();
+    let all = table();
     let mut rows = Vec::new();
+    let mut seen: Vec<(&str, &str, &str)> = Vec::new();
     for a in after {
         for entry in &a.entries {
-            let Some((a_inst, a_m)) = measure_of(&all, a, &entry.measure) else {
+            let Some((a_inst, a_m)) = measure_of(all, a, &entry.measure) else {
                 continue;
             };
-            let earlier = before.iter().find_map(|b| {
-                let (b_inst, b_m) = measure_of(&all, b, &entry.measure)?;
-                let e = b.entries.iter().find(|e| e.measure == entry.measure)?;
-                (b_m.scale == a_m.scale).then_some((b_inst, b_m, e.value))
-            });
-            let Some((b_inst, b_m, value)) = earlier else {
+            let earlier_in = |same_instrument: bool| {
+                before.iter().find_map(|b| {
+                    let fits = if same_instrument {
+                        // The same module too: ADOS-2 modules are scored differently, and a
+                        // total of module 1 is not comparable with a total of module 2.
+                        b.instrument == a.instrument && b.module == a.module
+                    } else {
+                        b.instrument != a.instrument
+                            && WECHSLER.contains(&a.instrument.as_str())
+                            && WECHSLER.contains(&b.instrument.as_str())
+                    };
+                    if !fits {
+                        return None;
+                    }
+                    let (b_inst, b_m) = measure_of(all, b, &entry.measure)?;
+                    let e = b.entries.iter().find(|e| e.measure == entry.measure)?;
+                    (b_m.scale == a_m.scale).then_some((b_inst, b_m, e.value))
+                })
+            };
+            let Some((b_inst, b_m, value)) = earlier_in(true).or_else(|| earlier_in(false)) else {
                 continue;
             };
-            if rows
-                .iter()
-                .any(|r: &ComparisonRow| r.abbr == a_m.abbr && r.measure == a_m.name_he)
-            {
+            let id = (
+                a.instrument.as_str(),
+                a.module.as_str(),
+                entry.measure.as_str(),
+            );
+            if seen.contains(&id) {
                 continue;
             }
+            seen.push(id);
             let change = entry.value - value;
             let band =
                 |m: &Measure, v: f64| classify(m, v).map(|b| b.label.clone()).unwrap_or_default();
@@ -90,6 +113,16 @@ pub fn compare(before: &[ScoreSheet], after: &[ScoreSheet]) -> Vec<ComparisonRow
     rows
 }
 
+/// More than one test is compared, so every row names its test ("ציון כולל" alone would not
+/// say whose total it is).
+#[must_use]
+pub fn several_instruments(rows: &[ComparisonRow]) -> bool {
+    rows.first().is_some_and(|first| {
+        rows.iter()
+            .any(|r| r.after_instrument != first.after_instrument)
+    })
+}
+
 fn num(v: f64) -> String {
     if (v - v.round()).abs() < 1e-9 {
         format!("{v:.0}")
@@ -102,28 +135,38 @@ fn num(v: f64) -> String {
 #[must_use]
 pub fn comparison_text(rows: &[ComparisonRow]) -> String {
     let mut out = String::from("השוואה לאבחון הקודם (מדדים שנמדדו בשני האבחונים):\n");
+    let several = several_instruments(rows);
     for r in rows {
         let sign = if r.change > 0.0 { "+" } else { "" };
         let same = r.before_instrument == r.after_instrument;
+        let abbr = if r.abbr.is_empty() {
+            String::new()
+        } else {
+            format!(" ({})", r.abbr)
+        };
+        let bands = match (r.before_band.is_empty(), r.after_band.is_empty()) {
+            (true, true) => String::new(),
+            (false, false) => format!("; טווח: {} ← {}", r.before_band, r.after_band),
+            (false, true) => format!("; טווח קודם: {}", r.before_band),
+            (true, false) => format!("; טווח עכשיו: {}", r.after_band),
+        };
+        let tests = if !same {
+            format!(" ({} ← {})", r.before_instrument, r.after_instrument)
+        } else if several {
+            format!(" ({})", r.after_instrument)
+        } else {
+            String::new()
+        };
         out.push_str(&format!(
-            "{} ({}): {} ← {} (שינוי {}{}{}); טווח: {} ← {}{}\n",
+            "{}{abbr}: {} ← {} (שינוי {sign}{}{}){bands}{tests}\n",
             r.measure,
-            r.abbr,
             num(r.before),
             num(r.after),
-            sign,
             num(r.change),
             if r.notable {
                 ", שינוי ששווה לבדוק"
             } else {
                 ""
-            },
-            r.before_band,
-            r.after_band,
-            if same {
-                String::new()
-            } else {
-                format!(" ({} ← {})", r.before_instrument, r.after_instrument)
             },
         ));
     }
@@ -156,6 +199,7 @@ mod tests {
                 })
                 .collect(),
             notes: String::new(),
+            basis: None,
         }
     }
 
@@ -195,5 +239,84 @@ mod tests {
         let before = [sheet("abas_3", &[("gac", 90.0)])];
         let after = [sheet("wisc_v", &[("fsiq", 101.0)])];
         assert!(compare(&before, &after).is_empty());
+    }
+
+    #[test]
+    fn a_measure_is_paired_with_the_same_test_and_never_with_another_family() {
+        let before = [
+            sheet("bayley_4", &[("motor", 85.0)]),
+            sheet("vineland_3", &[("motor", 95.0)]),
+        ];
+        let after = [sheet("vineland_3", &[("motor", 90.0)])];
+        let rows = compare(&before, &after);
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        assert_eq!((rows[0].before, rows[0].after), (95.0, 90.0));
+        let rows = compare(
+            &[sheet("asrs", &[("total", 70.0)])],
+            &[sheet("cbcl_1_5", &[("total", 66.0)])],
+        );
+        assert!(rows.is_empty(), "{rows:?}");
+    }
+
+    #[test]
+    fn two_tests_with_a_total_give_two_rows_that_name_their_test() {
+        let before = [
+            sheet("ados_2", &[("total", 14.0)]),
+            sheet("cars_2", &[("total", 38.0)]),
+        ];
+        let after = [
+            sheet("ados_2", &[("total", 12.0)]),
+            sheet("cars_2", &[("total", 31.0)]),
+        ];
+        let rows = compare(&before, &after);
+        assert_eq!(rows.len(), 2, "{rows:?}");
+        let text = comparison_text(&rows);
+        assert!(text.contains("38 ← 31"), "{text}");
+        assert!(
+            text.contains("(ADOS-2)") && text.contains("(CARS-2)"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn an_empty_abbreviation_or_range_is_left_out_of_the_text() {
+        let rows = compare(
+            &[
+                sheet("cbcl_1_5", &[("total", 68.0)]),
+                sheet("ados_2", &[("total", 14.0)]),
+            ],
+            &[
+                sheet("cbcl_1_5", &[("total", 72.0)]),
+                sheet("ados_2", &[("total", 12.0)]),
+            ],
+        );
+        assert_eq!(rows.len(), 2, "{rows:?}");
+        let text = comparison_text(&rows);
+        assert!(!text.contains("()"), "{text}");
+        assert!(
+            !text.contains("טווח:  ←") && !text.contains("טווח: ;"),
+            "{text}"
+        );
+        for line in text.lines() {
+            assert!(!line.trim_end().ends_with("טווח:"), "{line}");
+        }
+    }
+
+    #[test]
+    fn another_module_of_the_same_test_is_not_compared() {
+        let module = |m: &str, total: f64| {
+            let mut s = sheet("ados_2", &[("total", total)]);
+            s.module = m.into();
+            s
+        };
+        assert!(compare(&[module("1", 14.0)], &[module("2", 12.0)]).is_empty());
+        let rows = compare(&[module("2", 14.0)], &[module("2", 12.0)]);
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        // Two sheets of the same test, one per module, each against its own earlier sheet.
+        let rows = compare(
+            &[module("1", 16.0), module("2", 14.0)],
+            &[module("1", 15.0), module("2", 12.0)],
+        );
+        assert_eq!(rows.len(), 2, "{rows:?}");
     }
 }

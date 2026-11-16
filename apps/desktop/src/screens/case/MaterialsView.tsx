@@ -689,12 +689,16 @@ function FollowUpPanel({ api }: { api: CaseApi }) {
                 </thead>
                 <tbody>
                   {view.rows.map((r) => (
-                    <tr key={r.abbr + r.measure} className={r.notable ? "notable" : undefined}>
-                      <td>{r.measure} <span className="muted">({r.abbr})</span></td>
+                    <tr key={r.after_instrument + r.abbr + r.measure} className={r.notable ? "notable" : undefined}>
+                      <td>
+                        {r.measure}
+                        {r.abbr && <span className="muted"> ({r.abbr})</span>}
+                        {view.rows.some((x) => x.after_instrument !== r.after_instrument) && <span className="muted small"> · {r.after_instrument}</span>}
+                      </td>
                       <td className="num">{num(r.before)}</td>
                       <td className="num">{num(r.after)}</td>
                       <td className="num"><b dir="ltr">{r.change > 0 ? "+" : ""}{num(r.change)}</b>{r.notable && <span className="small"> · ששווה לבדוק</span>}</td>
-                      <td className="small">{r.before_band} ← {r.after_band}</td>
+                      <td className="small">{r.before_band && r.after_band ? `${r.before_band} ← ${r.after_band}` : r.before_band || r.after_band}</td>
                     </tr>
                   ))}
                 </tbody>

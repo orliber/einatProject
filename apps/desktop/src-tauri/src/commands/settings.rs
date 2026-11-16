@@ -42,6 +42,23 @@ pub(crate) async fn set_instrument_status(
     with_core(&state, move |c| c.set_instrument_status(&key, status)).await
 }
 
+/// Settings → המבחנים: the manual's critical values for relative strengths (D-190).
+#[tauri::command]
+pub(crate) async fn critical_values(
+    state: tauri::State<'_, AppState>,
+) -> Res<dv_core::CriticalValuesView> {
+    with_core(&state, |c| c.critical_values()).await
+}
+
+/// Her critical values, all at once (an empty list clears them).
+#[tauri::command]
+pub(crate) async fn set_critical_values(
+    state: tauri::State<'_, AppState>,
+    values: Vec<dv_domain::CriticalValue>,
+) -> Res<dv_core::CriticalValuesView> {
+    with_core(&state, move |c| c.set_critical_values(values)).await
+}
+
 /// The security status list (S4): what is on, what is not.
 #[tauri::command]
 pub(crate) async fn security_status(state: tauri::State<'_, AppState>) -> Res<SecurityStatus> {

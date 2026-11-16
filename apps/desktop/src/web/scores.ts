@@ -8,6 +8,9 @@ import tables from "./instruments.json";
 
 export const instruments = tables as Instrument[];
 
+/** Totals and composites, never one of the domains they sum up (as dv_domain's `is_total`). */
+const TOTALS = ["fsiq", "gac", "abc", "elc", "total", "gec"];
+
 function fmt(v: number): string {
   return Number.isInteger(v) ? String(v) : v.toFixed(1);
 }
@@ -37,7 +40,8 @@ export function formatSheet(sheet: ScoreSheet): string {
   if (sheet.module.trim()) out += `מודול: ${sheet.module.trim()}\n`;
   let group = "";
   const indexes: [string, number][] = [];
-  const groups = new Map<string, [string, number][]>();
+  const groups = new Map<string, { group: string; rows: [string, number][] }>();
+  const checked: { m: Measure; v: number; name: string }[] = [];
   let anyPercentile = false;
   for (const e of sheet.entries) {
     const m = inst.measures.find((x) => x.key === e.measure);
@@ -69,8 +73,13 @@ export function formatSheet(sheet: ScoreSheet): string {
     const value = p ? `ציון ${fmt(e.value)}, אחוזון ${p}` : `ציון ${fmt(e.value)}`;
     const note = e.note.trim() ? `. ${e.note.trim()}` : "";
     out += range ? `- ${name}: ${value} – ${range}${note}\n` : `- ${name}: ${value}${note}\n`;
-    if (m.scale === "standard" && m.group === "מדדים" && m.key !== "fsiq" && m.key !== "gac") indexes.push([m.name_he, e.value]);
-    if (!["fsiq", "gac", "total"].includes(m.key)) groups.set(m.group, [...(groups.get(m.group) ?? []), [name, e.value]]);
+    checked.push({ m, v: e.value, name });
+    if (m.scale === "standard" && m.group === "מדדים" && !TOTALS.includes(m.key)) indexes.push([m.name_he, e.value]);
+    // D-165: no total or composite, no raw scores, and one scale to a list.
+    if (!TOTALS.includes(m.key) && m.scale !== "raw_cutoff") {
+      const key = `${m.group}|${m.scale}`;
+      groups.set(key, { group: m.group, rows: [...(groups.get(key)?.rows ?? []), [name, e.value]] });
+    }
   }
   if (indexes.length > 1) {
     const hi = indexes.reduce((a, b) => (b[1] > a[1] ? b : a));
@@ -80,11 +89,32 @@ export function formatSheet(sheet: ScoreSheet): string {
     }
   }
   // As in dv_domain::format_sheet: the order from the highest to the lowest, worked out here.
-  for (const [g, rows] of groups) {
+  for (const { group: g, rows } of groups.values()) {
     if (rows.length < 2) continue;
     const order = [...rows].sort((a, b) => b[1] - a[1]).map(([n, v]) => `${n} – ציון ${fmt(v)}`);
     out += `${g} מהגבוה לנמוך: ${order.join("; ")}\n`;
   }
+  // As in dv_domain: relative strengths and weaknesses (three subtests or more, 3 points from
+  // their mean), and questionnaire scales outside the typical band of their table.
+  const sub = checked.filter((c) => c.m.scale === "scaled" || c.m.scale === "v_scale");
+  if (sub.length >= 3) {
+    const mean = sub.reduce((a, c) => a + c.v, 0) / sub.length;
+    const item = (c: (typeof sub)[number]) => `${c.name} – ציון ${fmt(c.v)}`;
+    const strong = sub.filter((c) => c.v - mean >= 3).map(item);
+    const weak = sub.filter((c) => mean - c.v >= 3).map(item);
+    if (strong.length || weak.length) {
+      const parts = [...(strong.length ? [`חוזקה יחסית: ${strong.join("; ")}`] : []), ...(weak.length ? [`חולשה יחסית: ${weak.join("; ")}`] : [])];
+      const subGroups = Array.from(new Set(sub.map((c) => c.m.group)));
+      out += `חוזקות וחולשות יחסיות לפי כלל אצבע, שחושב בתוכנה: הפרש של 3 נקודות ומעלה מהממוצע של הציונים ב${subGroups.join(" וב")} שהוזנו בטבלה. מובהקות ההפרש נבדקת לפי טבלאות מדריך המבחן. ${parts.join(". ")}\n`;
+    }
+  }
+  const elevated = checked
+    .filter((c) => c.m.scale === "t_concern")
+    .flatMap((c) => {
+      const b = c.m.bands.find((x) => c.v >= x.min && c.v <= x.max);
+      return b && b.level >= 1 ? [`${c.name} – ציון ${fmt(c.v)}, ${b.label}`] : [];
+    });
+  if (elevated.length) out += `סולמות בטווח חריג לפי הטבלה: ${elevated.join("; ")}\n`;
   out += `${inst.scale_note_he}\n`;
   if (anyPercentile) out += "האחוזונים חושבו לפי העקומה הנורמלית.\n";
   out += "הטווחים חושבו בתוכנה לפי טבלה קבועה, לא על ידי מודל השפה.\n";
@@ -101,17 +131,25 @@ export function compareSheets(before: ScoreSheet[], after: ScoreSheet[]): Compar
   };
   const band = (m: Measure, v: number) => m.bands.find((b) => v >= b.min && v <= b.max)?.label ?? "";
   const rows: ComparisonRow[] = [];
+  const seen = new Set<string>();
   for (const a of after) {
     for (const e of a.entries) {
       const now = find(a, e.measure);
       if (!now) continue;
       let prev: { inst: Instrument; m: Measure; v: number } | null = null;
-      for (const b of before) {
-        const f = find(b, e.measure);
-        const be = b.entries.find((x) => x.measure === e.measure);
-        if (f && be && f.m.scale === now.m.scale) { prev = { ...f, v: be.value }; break; }
+      for (const sameTest of [true, false]) {
+        for (const b of before) {
+          const fits = sameTest ? b.instrument === a.instrument : b.instrument !== a.instrument && WECHSLER.includes(a.instrument) && WECHSLER.includes(b.instrument);
+          if (!fits) continue;
+          const f = find(b, e.measure);
+          const be = b.entries.find((x) => x.measure === e.measure);
+          if (f && be && f.m.scale === now.m.scale) { prev = { ...f, v: be.value }; break; }
+        }
+        if (prev) break;
       }
-      if (!prev || rows.some((r) => r.abbr === now.m.abbr)) continue;
+      const id = `${a.instrument}/${e.measure}`;
+      if (!prev || seen.has(id)) continue;
+      seen.add(id);
       const change = e.value - prev.v;
       const at = ["standard", "t_concern", "t_ability"].includes(now.m.scale) ? 10 : now.m.scale === "scaled" || now.m.scale === "v_scale" ? 3 : Infinity;
       rows.push({
@@ -123,8 +161,16 @@ export function compareSheets(before: ScoreSheet[], after: ScoreSheet[]): Compar
   return rows;
 }
 
+const WECHSLER = ["wppsi_iii", "wppsi_iv", "wisc_v"];
+
 export function comparisonText(rows: ComparisonRow[]): string {
-  const lines = rows.map((r) => `${r.measure} (${r.abbr}): ${fmt(r.before)} ← ${fmt(r.after)} (שינוי ${r.change > 0 ? "+" : ""}${fmt(r.change)}${r.notable ? ", שינוי ששווה לבדוק" : ""}); טווח: ${r.before_band} ← ${r.after_band}${r.before_instrument === r.after_instrument ? "" : ` (${r.before_instrument} ← ${r.after_instrument})`}`);
+  const several = rows.some((r) => r.after_instrument !== rows[0]?.after_instrument);
+  const lines = rows.map((r) => {
+    const abbr = r.abbr ? ` (${r.abbr})` : "";
+    const bands = r.before_band && r.after_band ? `; טווח: ${r.before_band} ← ${r.after_band}` : r.before_band ? `; טווח קודם: ${r.before_band}` : r.after_band ? `; טווח עכשיו: ${r.after_band}` : "";
+    const tests = r.before_instrument !== r.after_instrument ? ` (${r.before_instrument} ← ${r.after_instrument})` : several ? ` (${r.after_instrument})` : "";
+    return `${r.measure}${abbr}: ${fmt(r.before)} ← ${fmt(r.after)} (שינוי ${r.change > 0 ? "+" : ""}${fmt(r.change)}${r.notable ? ", שינוי ששווה לבדוק" : ""})${bands}${tests}`;
+  });
   const careful = rows.some((r) => r.before_instrument !== r.after_instrument) ? "המבחנים שונים בין שני האבחונים, ולכן ההשוואה זהירה." : "";
   return ["השוואה לאבחון הקודם (מדדים שנמדדו בשני האבחונים):", ...lines, `הפרש קטן מ-10 נקודות בציון תקן (3 בציון מותאם) הוא לרוב בגבולות טעות המדידה. ${careful}`.trim()].join("\n");
 }

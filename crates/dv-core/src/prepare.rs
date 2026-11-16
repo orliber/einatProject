@@ -121,7 +121,12 @@ struct SectionRead {
     interpretations: Option<String>,
     patterns: Vec<dv_domain::ScorePattern>,
     guide: String,
+    /// `guide` is the template's text alone (no line of hers, learned or of the case): fixed
+    /// app text, which the name model does not read.
+    guide_is_template: bool,
     severity: Option<String>,
+    /// The case's key scores (D-162), for the summary, the DSM section and the recommendations.
+    key_scores: Option<String>,
 }
 
 impl Drop for SectionRead {
@@ -138,6 +143,7 @@ impl Drop for SectionRead {
         self.guide.zeroize();
         self.interpretations.zeroize();
         self.severity.zeroize();
+        self.key_scores.zeroize();
         self.age.zeroize();
         for p in &mut self.patterns {
             p.key.zeroize();
@@ -464,12 +470,34 @@ fn build_section(
         &mut review,
         stop,
     )?;
+    // In a closing section (D-162) the referral is the question the section answers, and
+    // her diagnoses are her decision; a letter gets its sections as they are.
+    let closing = DERIVED_SECTIONS.contains(&ask.section_key.as_str());
     let mut approved_context = Vec::new();
     for (s, text) in &read.approved {
         let out = run(text)?;
         review.add(format!("סעיף מאושר · {}", s.title), &out);
-        approved_context.push((fixed_title(s)?, out.tagged));
+        let role = match s.key.as_str() {
+            REFERRAL_SECTION if closing => dv_ai::ApprovedRole::Referral,
+            DIAGNOSES_SECTION if closing => dv_ai::ApprovedRole::Decision,
+            _ => dv_ai::ApprovedRole::Section,
+        };
+        approved_context.push(dv_ai::ApprovedSection {
+            title: fixed_title(s)?,
+            text_tagged: out.tagged,
+            role,
+        });
     }
+    // The key scores (D-162): worked out on the computer, filtered and shown like every
+    // other text that goes out.
+    let key_scores_tagged = match &read.key_scores {
+        Some(text) => {
+            let out = run(text)?;
+            review.add(KEY_SCORES_LABEL.to_owned(), &out);
+            Some(out.tagged)
+        }
+        None => None,
+    };
     let mut current = Vec::new();
     for t in &read.current {
         let out = run(t)?;
@@ -502,13 +530,16 @@ fn build_section(
         &instr,
     );
     // Her approved style profile (D-043), as it goes out with this case's names hidden.
-    // The items that fit this section's material best go out (D-052).
-    let query: String = tagged_sources
-        .iter()
-        .map(|s| s.content_tagged.as_str())
-        .chain([instr.tagged.as_str()])
-        .collect::<Vec<_>>()
-        .join("\n");
+    // The items that fit this section's material best go out (D-052): its sources, the
+    // approved sections it is written from (all a closing section has, C5), and her request.
+    // Her request is part of the ranking only when it is the material itself (her points):
+    // elsewhere it changes on every turn, and a different pick of items would change the
+    // fixed part of the request that the service keeps between turns.
+    let query = style_query(
+        &tagged_sources,
+        &approved_context,
+        if points { &instr.tagged } else { "" },
+    );
     stop()?;
     let mut style_profile = read
         .style
@@ -522,8 +553,13 @@ fn build_section(
             None => text.clone(),
         });
     }
-    if let Some(text) = &style_profile {
-        review.add_context("פרופיל הסגנון שלך".to_owned(), &run(text)?);
+    // What the review screen shows is what goes out: the text after the filter, not the text
+    // before it. Each item was already left out if the filter would change it; the joined
+    // text and the interpretations go through the filter once more, and that output is sent.
+    if let Some(text) = style_profile.take() {
+        let shown = run(&text)?;
+        review.add_context("פרופיל הסגנון שלך".to_owned(), &shown);
+        style_profile = Some(shown.tagged);
     }
     // How she wants the section written (round 29), filtered like her request: the case's own
     // lines may name someone.
@@ -570,6 +606,7 @@ fn build_section(
         gender: read.gender,
         sources: tagged_sources,
         approved_context,
+        key_scores_tagged,
         current_draft: current,
         history,
         instruction_tagged: instr.tagged.clone(),
@@ -581,14 +618,17 @@ fn build_section(
         sources_in_order: (read.section.per_source || ask.section_key == sorting::PRIOR_SECTION)
             && !points,
     };
-    // From her points, the numbers in the answer are checked against the points.
+    // From her points, the numbers in the answer are checked against the points. In a closing
+    // section, against the approved sections that went and the key scores: a score quoted
+    // from them is a known number.
     let approved = if points {
         vec![instr.tagged.clone()]
     } else {
         input
             .approved_context
             .iter()
-            .map(|(_, t)| t.clone())
+            .map(|a| a.text_tagged.clone())
+            .chain(input.key_scores_tagged.clone())
             .collect::<Vec<_>>()
     };
     stop()?;
@@ -605,6 +645,44 @@ fn build_section(
         from_points: points,
     };
     Ok((body, review, kind))
+}
+
+/// The texts of a section's request, besides the materials, that the name model reads: her
+/// request or points, the current draft, the conversation, the approved sections it is written
+/// from and the guide, each exactly as `build_section` filters it. Fixed app text is left out
+/// (the template's guide, the request "write the whole report" sends with no wish of hers, the
+/// severity and key-score lines): the model is slow and could find nothing there. Her style
+/// profile is not the case's and is rendered only in the job.
+fn section_name_texts<'a>(ask: &'a SectionAsk, read: &'a SectionRead) -> Vec<&'a str> {
+    let mut out: Vec<&str> = Vec::new();
+    if ask.instruction != FULL_DRAFT_INSTRUCTION {
+        out.push(&ask.instruction);
+    }
+    out.extend(read.current.iter().map(String::as_str));
+    out.extend(read.history.iter().map(|(_, t)| t.as_str()));
+    out.extend(read.approved.iter().map(|(_, t)| t.as_str()));
+    if !read.guide_is_template {
+        out.push(&read.guide);
+    }
+    out
+}
+
+/// What her style items are ranked against for a section (D-052, C5): the section's filtered
+/// sources, the filtered approved sections it is written from, and, when the section is
+/// written from her points, the points. The same texts give the same query, so the same
+/// items go out turn after turn.
+fn style_query(
+    sources: &[dv_ai::TaggedInput],
+    approved: &[dv_ai::ApprovedSection],
+    instruction: &str,
+) -> String {
+    sources
+        .iter()
+        .map(|s| s.content_tagged.as_str())
+        .chain(approved.iter().map(|a| a.text_tagged.as_str()))
+        .chain([instruction])
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// The check against the sources (the verify stage): the section's sources and its proposed
@@ -628,12 +706,17 @@ fn build_check(
     )?;
     let mut paragraphs = Vec::new();
     let mut draft_ids = Vec::new();
+    let mut wordings = Vec::new();
     for (id, text) in &read.paragraphs {
         stop()?;
-        let out = filter(text, ctx).map_err(|e| CoreError::Internal(e.to_string()))?;
+        let out = job
+            .hints
+            .filter(text, ctx)
+            .map_err(|e| CoreError::Internal(e.to_string()))?;
         review.add("פסקה לבדיקה".to_owned(), &out);
         paragraphs.push(out.tagged);
         draft_ids.push(id.clone());
+        wordings.push(text.clone());
     }
     let input = dv_ai::VerifyInput {
         section_title: model_title(&read.section, ctx)?,
@@ -647,6 +730,7 @@ fn build_check(
         case_id: ask.case_id.clone(),
         section_key: ask.section_key.clone(),
         draft_ids,
+        wordings,
         source_ids,
     };
     Ok((body, review, kind))
@@ -670,8 +754,9 @@ fn build_consult(
         stop()?;
         let label = |who: &str| format!("{who} ({})", n / 2 + 1);
         if role == "user" {
-            // Her own words: filtered again, with today's names and decisions.
-            let out = filter(shown, ctx).map_err(internal)?;
+            // Her own words: filtered again, with today's names and decisions, and what the
+            // name model reads in them.
+            let out = job.hints.filter(shown, ctx).map_err(internal)?;
             review.add(label("שאלה קודמת"), &out);
             history.push(TaggedTurn {
                 role: role.clone(),
@@ -692,15 +777,23 @@ fn build_consult(
     let mut case_context = None;
     if !read.approved.is_empty() {
         let mut lines = Vec::new();
+        // Where each paragraph starts in the joined text, for the name model's hints on it.
+        let mut placed: Vec<(usize, &str)> = Vec::new();
+        let mut at = 0;
         for (s, text) in &read.approved {
-            lines.push(format!("{}: {}", model_title(s, ctx)?, text));
+            let title = model_title(s, ctx)?;
+            placed.push((at + title.len() + 2, text.as_str()));
+            let line = format!("{title}: {text}");
+            at += line.len() + 1;
+            lines.push(line);
         }
         stop()?;
         let mut joined = lines.join("\n");
         for l in &mut lines {
             l.zeroize();
         }
-        let out = filter(&joined, ctx).map_err(internal);
+        let hints = job.hints.placed(&placed);
+        let out = dv_privacy::filter_with_hints(&joined, ctx, &hints).map_err(internal);
         joined.zeroize();
         let out = out?;
         review.add("סיכום התיק (סעיפים מאושרים)".to_owned(), &out);
@@ -829,6 +922,8 @@ fn build_report_check(
             title: model_title(s, ctx)?,
             text_tagged: text.join("\n"),
             closing: CLOSING_SECTIONS.contains(&s.key.as_str()),
+            // Which section it is, for the supervisor's notes (D-169): a fixed word.
+            role: dv_ai::ReportRole::of_key(&s.key),
         });
         keys.push(s.key.clone());
     }
@@ -1016,6 +1111,9 @@ impl Core {
                 .flat_map(|r| r.feeds)
                 .collect()
         };
+        // The wish she kept "for this section in future reports" (D-140) goes with the run's
+        // request exactly as it goes with a draft she asks for herself (D-163).
+        let wishes = self.draft_briefs()?.sections;
         let mut out: Vec<(String, RequestJob)> = Vec::new();
         for s in structure
             .sections()
@@ -1033,7 +1131,7 @@ impl Core {
                     SectionAsk {
                         case_id: case_id.to_owned(),
                         section_key: s.key.clone(),
-                        instruction: FULL_DRAFT_INSTRUCTION.to_owned(),
+                        instruction: full_draft_instruction(wishes.get(&s.key).map(String::as_str)),
                         replaces: None,
                         points: false,
                         check: false,
@@ -1217,7 +1315,6 @@ impl Core {
             data.masks = book;
         }
         let fingerprint = data.fingerprint()?;
-        let hints = self.case_hints(case_id, &[])?;
         let demo_mode = self.demo_mode()?;
 
         let read = {
@@ -1243,11 +1340,13 @@ impl Core {
                 let wanted = |key: &str| match letter {
                     Some(l) => l.written_from().contains(&key),
                     // D-156: the summary, diagnoses, recommendations and DSM are written
-                    // from this assessment only, never from the previous ones.
+                    // from this assessment only, never from the previous ones. D-162: with
+                    // the closing sections that are theirs to see, never themselves.
                     None => {
                         key != section_key
-                            && !DERIVED_SECTIONS.contains(&key)
                             && key != sorting::PRIOR_SECTION
+                            && (!DERIVED_SECTIONS.contains(&key)
+                                || closing_passed_to(section_key).contains(&key))
                     }
                 };
                 // The recommendations she left out of the letters (round 44); the rest go in.
@@ -1275,7 +1374,15 @@ impl Core {
                     "המכתב נכתב מתוך ההמלצות שאישרת בדוח, ועוד אין המלצות מאושרות. מאשרים קודם את סעיף ההמלצות.".to_owned(),
                 ));
             }
-            if derived && !points && approved.is_empty() {
+            // The body of the report is what a closing section is written from: her diagnoses
+            // or another closing section alone are not enough to write one.
+            if derived
+                && !points
+                && letter.is_none()
+                && !approved
+                    .iter()
+                    .any(|(s, _)| !DERIVED_SECTIONS.contains(&s.key.as_str()))
+            {
                 return Err(CoreError::Refused(
                     "הסעיף הזה נכתב מתוך הסעיפים שכבר אישרת, ועוד לא אישרת אף סעיף. מאשרים קודם את הטיוטות בסעיפים האחרים, ואז חוזרים לכאן."
                         .to_owned(),
@@ -1294,29 +1401,51 @@ impl Core {
             let history: Vec<(ChatRole, String)> = if points {
                 Vec::new()
             } else {
-                v.messages(case_id, section_key)?
-                    .into_iter()
-                    .map(|m| (m.role, m.text_tagged))
-                    .collect()
+                recent_turns(
+                    v.messages(case_id, section_key)?
+                        .into_iter()
+                        .map(|m| (m.role, m.text_tagged))
+                        .collect(),
+                )
             };
+            // The referral first (D-162): the question the closing sections answer.
+            if letter.is_none() {
+                approved.sort_by_key(|(s, _)| s.key != REFERRAL_SECTION);
+            }
             // In a section written from the scores: the patterns of this case's scores
             // (D-100), worked out here, for her inferences about them.
             let from_scores = section.inputs.contains(&InputKind::TestScores) && !points;
-            let sheets = if from_scores {
+            // The summary, the DSM section and the recommendations (D-162): the key scores.
+            let with_key_scores =
+                derived && !points && letter.is_none() && gets_key_scores(section_key);
+            let sheets = if from_scores || with_key_scores {
                 score_sheets(v, case_id, &v.inputs(case_id)?)?
             } else {
                 Vec::new()
             };
-            let patterns = dv_domain::sheet_patterns(&sheets);
+            let key_scores = if with_key_scores {
+                key_scores_text(v, &sheets)?
+            } else {
+                None
+            };
+            // The patterns choose her style items only where they did before (D-100); in the
+            // closing sections they go in the key scores block instead.
+            let patterns = if from_scores {
+                dv_domain::sheet_patterns(&sheets)
+            } else {
+                Vec::new()
+            };
             let interpretations = if from_scores {
                 style::interpretations_for_request(v, &sheets)?
             } else {
                 None
             };
-            let guide = if letter.is_some() {
-                String::new()
+            let (guide, guide_is_template) = if letter.is_some() {
+                (String::new(), true)
             } else {
-                guides::guide_for(v, &meta, &section)?.text()
+                let g = guides::guide_for(v, &meta, &section)?;
+                let template = g.is_default && g.learned_from == 0 && g.case.trim().is_empty();
+                (g.text(), template)
             };
             let severity = (section.key == "dsm" && !points && letter.is_none())
                 .then(|| dv_domain::severity_request(meta.dsm_severity.as_ref()));
@@ -1332,9 +1461,20 @@ impl Core {
                 interpretations,
                 patterns,
                 guide,
+                guide_is_template,
                 severity,
+                key_scores,
                 section,
             }))
+        };
+        // The name model reads every text of the request that is hers or the case's, not only
+        // the materials (D-053): what it finds nowhere else it could not hide otherwise.
+        let hints = match &read {
+            Texts::Section(r) => {
+                let extra = section_name_texts(&ask, r);
+                self.case_hints(case_id, &extra)?
+            }
+            _ => self.case_hints(case_id, &[])?,
         };
 
         let nonce = match self
@@ -1436,7 +1576,6 @@ impl Core {
         let model = self.model_for(Task::Light)?;
         let data = self.privacy_data(case_id)?;
         let fingerprint = data.fingerprint()?;
-        let hints = self.case_hints(case_id, &[])?;
         let demo_mode = self.demo_mode()?;
         let read = {
             let v = self.vault.as_ref().ok_or(CoreError::Locked)?;
@@ -1466,6 +1605,14 @@ impl Core {
                 sources,
                 paragraphs,
             })
+        };
+        // The proposed paragraphs are not materials: the name model reads them as well.
+        let hints = match &read {
+            Texts::Check(r) => {
+                let extra: Vec<&str> = r.paragraphs.iter().map(|(_, t)| t.as_str()).collect();
+                self.case_hints(case_id, &extra)?
+            }
+            _ => self.case_hints(case_id, &[])?,
         };
         let nonce = dv_ai::nonce_from(&dv_vault::crypto::random_array::<16>()?);
         let hasher = self.vault_ref()?.token_hasher();
@@ -1555,7 +1702,6 @@ impl Core {
         let key = ask.case_id.clone().unwrap_or_default();
         let data = self.privacy_data(&key)?;
         let fingerprint = data.fingerprint()?;
-        let hints = self.case_hints(&key, &[ask.message.as_str()])?;
         let demo_mode = self.demo_mode()?;
         let read = {
             let v = self.vault.as_ref().ok_or(CoreError::Locked)?;
@@ -1581,6 +1727,23 @@ impl Core {
                 }
             }
             Texts::Consult(ConsultRead { earlier, approved })
+        };
+        // Her question, her earlier questions and the approved paragraphs all go out filtered
+        // again: the name model reads each of them, not only today's question. A name only
+        // the model found in an earlier question is hidden again in the history.
+        let hints = match &read {
+            Texts::Consult(r) => {
+                let mut extra: Vec<&str> = vec![ask.message.as_str()];
+                extra.extend(
+                    r.earlier
+                        .iter()
+                        .filter(|(role, _, _)| role == "user")
+                        .map(|(_, shown, _)| shown.as_str()),
+                );
+                extra.extend(r.approved.iter().map(|(_, t)| t.as_str()));
+                self.case_hints(&key, &extra)?
+            }
+            _ => self.case_hints(&key, &[ask.message.as_str()])?,
         };
         let nonce = dv_ai::nonce_from(&dv_vault::crypto::random_array::<16>()?);
         let hasher = self.vault_ref()?.token_hasher();
@@ -1873,9 +2036,48 @@ impl Core {
     }
 }
 
+/// The key scores on the review screen ("מה יוצא מהמחשב"), D-162.
+pub(crate) const KEY_SCORES_LABEL: &str = "הציונים המרכזיים · חושבו במחשב מדפי הציונים";
+
 /// Said when she sends a request whose material changed after it was prepared.
 pub(crate) const MATERIAL_CHANGED: &str =
     "החומר השתנה אחרי שהבקשה הוכנה, ולכן היא לא נשלחה. צריך להכין אותה מחדש.";
 
 /// The request each section of "write the empty sections" is sent with.
 const FULL_DRAFT_INSTRUCTION: &str = "כתוב/י טיוטה לסעיף מתוך המקורות, עם מקור לכל פסקה.";
+
+/// What comes before her wish in a drafting request (the report page writes the same words
+/// when she drafts one section herself).
+pub(crate) const WISH_LEAD: &str = "מה שחשוב לי שייכתב בסעיף:";
+
+/// The request "write the whole report" sends for a section: the fixed one, and after it the
+/// wish she kept for the section, when there is one (D-163).
+pub(crate) fn full_draft_instruction(wish: Option<&str>) -> String {
+    match wish.map(str::trim).filter(|w| !w.is_empty()) {
+        Some(w) => format!("{FULL_DRAFT_INSTRUCTION} {WISH_LEAD} {w}"),
+        None => FULL_DRAFT_INSTRUCTION.to_owned(),
+    }
+}
+
+/// How many turns of a section's conversation go out again with its next request (D-163):
+/// the last three exchanges. The draft as it stands goes with every request anyway, so the
+/// older turns only repeat what the page already holds.
+pub(crate) const HISTORY_TURNS: usize = 6;
+
+/// The most recent turns of a section's conversation, beginning with one of hers. The older
+/// ones stay in the vault and are not sent again.
+pub(crate) fn recent_turns(mut all: Vec<(ChatRole, String)>) -> Vec<(ChatRole, String)> {
+    let from = all.len().saturating_sub(HISTORY_TURNS);
+    let mut recent = all.split_off(from);
+    if recent
+        .first()
+        .is_some_and(|(role, _)| *role != ChatRole::User)
+    {
+        let mut answer = recent.remove(0);
+        zeroize::Zeroize::zeroize(&mut answer.1);
+    }
+    for (_, text) in &mut all {
+        zeroize::Zeroize::zeroize(text);
+    }
+    recent
+}

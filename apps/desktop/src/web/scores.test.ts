@@ -17,6 +17,39 @@ describe("browser preview score text matches the core", () => {
     expect(text).toContain("- מטריצות (MR): ציון 13, אחוזון 84 – ממוצע גבוה");
     expect(text).toContain("פער של 24 נקודות");
   });
+  it("gives relative places, elevated scales and an order without totals, like the core (D-165)", () => {
+    const wppsi = formatSheet({
+      instrument: "wppsi_iv", module: "", cutoff: null, notes: "",
+      entries: [
+        { measure: "block_design", value: 6, note: "" },
+        { measure: "matrix", value: 13, note: "" },
+        { measure: "information", value: 10, note: "" },
+        { measure: "fsiq", value: 98, note: "" },
+      ],
+    });
+    expect(wppsi).toContain("חוזקות וחולשות יחסיות לפי כלל אצבע, שחושב בתוכנה: הפרש של 3 נקודות ומעלה מהממוצע של הציונים בתת-מבחנים שהוזנו בטבלה. מובהקות ההפרש נבדקת לפי טבלאות מדריך המבחן. חוזקה יחסית: מטריצות (MR) – ציון 13. חולשה יחסית: קוביות (BD) – ציון 6\n");
+    const brief = formatSheet({
+      instrument: "brief_p", module: "", cutoff: null, notes: "",
+      entries: [
+        { measure: "inhibit", value: 66, note: "" },
+        { measure: "shift", value: 50, note: "" },
+        { measure: "isci", value: 70, note: "" },
+        { measure: "fi", value: 55, note: "" },
+        { measure: "gec", value: 66, note: "" },
+      ],
+    });
+    expect(brief).toContain("סולמות בטווח חריג לפי הטבלה: עכבה (INH) – ציון 66, מוגבר באופן מובהק קלינית; שליטה עצמית מעכבת (ISCI) – ציון 70, מוגבר באופן מובהק קלינית; מדד ניהולי כללי (GEC) – ציון 66, מוגבר באופן מובהק קלינית\n");
+    expect(brief).toContain("מדדים מהגבוה לנמוך: שליטה עצמית מעכבת (ISCI) – ציון 70; מדד גמישות (FI) – ציון 55\n");
+    const ados = formatSheet({
+      instrument: "ados_2", module: "1", cutoff: 11, notes: "",
+      entries: [
+        { measure: "social_affect", value: 10, note: "" },
+        { measure: "rrb", value: 4, note: "" },
+        { measure: "comparison", value: 7, note: "" },
+      ],
+    });
+    expect(ados).not.toContain("מהגבוה לנמוך");
+  });
   it("reads a half-point CARS score and refuses an impossible one", () => {
     const one = (v: number) => formatSheet({ instrument: "cars_2", module: "", cutoff: null, notes: "", entries: [{ measure: "total", value: v, note: "" }] });
     expect(one(29.5)).toContain("ציון 29.5 – מעט או ללא תסמינים");

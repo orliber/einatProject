@@ -1,21 +1,30 @@
 // The check of the whole report (G2 stage two, D-097): once every draft is approved, one
 // request with the approved sections only asks where two sections contradict each other,
-// where something is said twice, and where a finding is in the summary but not in the body.
+// where something is said twice, and where a finding is in the summary but not in the body;
+// and, as a supervisor would read it (D-169), whether the summary answers the referral, a
+// difficulty has no recommendation, a recommendation has no finding, the diagnosis differs
+// between sections, or a professional term is left unexplained.
 // Off until she turns it on in settings, where its cost is shown first. The notes are plain
 // text; they only point at a section, and nothing in the report changes.
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useApp } from "../App";
 import { ipc, type ReportCheckResult, type ReportNoteKind } from "../ipc/client";
-import { useKept } from "../kept";
+import { useKept, useKeptValue } from "../kept";
 import type { CaseApi } from "../screens/CaseScreen";
 import { Switch } from "./Switch";
 import { ErrorLine, Spinner } from "./ui";
 
-const KIND: Record<ReportNoteKind, string> = {
+/** A note of the check, by kind: what it is called. */
+export const REPORT_NOTE_TITLE: Record<ReportNoteKind, string> = {
   contradiction: "סתירה בין סעיפים",
   repetition: "חזרה",
   summary_only: "מופיע רק בסיכום",
+  referral_unanswered: "סיבת ההפניה בלי מענה בסיכום",
+  no_recommendation: "קושי בלי המלצה",
+  unfounded_recommendation: "המלצה בלי ממצא",
+  diagnosis_mismatch: "האבחנה לא זהה בין הסעיפים",
+  unexplained_term: "מונח מקצועי בלי הסבר",
   other: "הערה",
 };
 
@@ -48,7 +57,7 @@ export function ReportCheckSettings() {
     <section className="card setting" aria-labelledby="s-report-check">
       <h2 id="s-report-check">בדיקת הדוח כולו</h2>
       <Switch id="report-check" label="לאפשר בדיקה של הדוח כולו לפני ההפקה" checked={setting.data?.on ?? false} disabled={setting.data === undefined}
-        hint={`אחרי שכל הסעיפים אושרו, ה-AI קורא את הסעיפים המאושרים בלבד ומצביע על סתירות בין סעיפים, חזרות, וממצא שמופיע בסיכום ולא בגוף הדוח. בקשה אחת לדוח, באותו סינון, בלי לשנות שום מילה. ${cost}.`}
+        hint={`אחרי שכל הסעיפים אושרו, ה-AI קורא את הסעיפים המאושרים בלבד ומצביע על סתירות בין סעיפים, חזרות, וממצא שמופיע בסיכום ולא בגוף הדוח; וגם על סיבת הפניה שהסיכום לא עונה עליה, קושי בלי המלצה, המלצה בלי ממצא, אבחנה שלא זהה בין הסעיפים, ומונח מקצועי בלי הסבר. בקשה אחת לדוח, באותו סינון, בלי לשנות שום מילה. ${cost}.`}
         onChange={(v) => (v ? setAsking(true) : void change(false))} />
       {asking && (
         <div className="note-warn stack" role="group" aria-label="לפני ההפעלה" style={{ gap: 8 }}>
@@ -66,19 +75,27 @@ export function ReportCheckSettings() {
   );
 }
 
-/** The line in the finish screen: the button, and then the notes, each opening its section. */
-export function ReportCheckItem({ api, onOpen }: { api: CaseApi; onOpen: (key: string) => void }) {
+const resultKey = (caseId: string) => `case:${caseId}:finish:report-check`;
+
+/** What the last check of this case found (kept while the vault is open), for the finish
+ *  page's list; `null` before a check. */
+export function useReportCheckResult(caseId: string): ReportCheckResult | null {
+  return useKeptValue<ReportCheckResult | null>(resultKey(caseId)) ?? null;
+}
+
+/** The quiet row in the finish screen: the button, and what the check said in one line. Its
+ *  notes are cards in the page's list, with the other things worth a look. */
+export function ReportCheckItem({ api }: { api: CaseApi }) {
   const { fail } = useApp();
   const { caseId, detail } = api;
   const setting = useQuery({ queryKey: ["report-check"], queryFn: ipc.reportCheckSetting });
   // Kept while the vault is open: leaving the finish screen and coming back keeps the notes.
-  const [result, setResult] = useKept<ReportCheckResult | null>(`case:${caseId}:finish:report-check`, null);
+  const [result, setResult] = useKept<ReportCheckResult | null>(resultKey(caseId), null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   if (!setting.data?.on) return null;
 
   const content = detail.sections.filter((s) => s.key !== "signature");
-  const title = (key: string) => content.find((s) => s.key === key)?.title ?? key;
   const waiting = content.filter((s) => s.paragraphs.some((p) => p.status === "proposed" && !p.replaces));
   const approved = content.filter((s) => s.paragraphs.some((p) => p.status === "approved")).length;
   const ready = waiting.length === 0 && approved >= 2;
@@ -107,51 +124,31 @@ export function ReportCheckItem({ api, onOpen }: { api: CaseApi; onOpen: (key: s
   }
 
   return (
-    <li className="info">
-      <span className="finish-mark" aria-hidden="true">i</span>
-      <div className="grow stack" style={{ gap: 6 }}>
-        <b>בדיקת הדוח כולו</b>
-        {!ready && (
-          <span className="small muted">
-            {waiting.length > 0 ? `אחרי שכל הטיוטות אושרו. עוד מחכות: ${waiting.map((s) => s.title).join(", ")}.` : "צריך לפחות שני סעיפים מאושרים."}
-          </span>
-        )}
-        {busy && <span className="muted"><Spinner /> קוראת את הדוח כולו…</span>}
-        {result && !busy && (
-          <>
-            {result.notes.length === 0 ? (
-              <span>לא נמצאו סתירות בין סעיפים, חזרות או ממצא שמופיע רק בסיכום.</span>
-            ) : (
-              <span>{result.notes.length === 1 ? "הערה אחת לבדיקה:" : `${result.notes.length} הערות לבדיקה:`}</span>
-            )}
-            {result.notes.map((n, i) => {
-              const where = n.sections.map(title).join(" · ");
-              const body = (
-                <>
-                  <span className="small muted">{KIND[n.kind]}{where && ` · ${where}`}</span>
-                  <span>{n.note}</span>
-                </>
-              );
-              const first = n.sections[0];
-              return first !== undefined ? (
-                <button key={i} type="button" className="complete-item" onClick={() => onOpen(first)}>{body}</button>
-              ) : (
-                <div key={i} className="complete-item">{body}</div>
-              );
-            })}
-            <span className="small muted">
-              {result.demo ? "מצב הדגמה: נמצאו רק משפטים שחוזרים מילה במילה ומספרים שמופיעים רק בסיכום, בלי שליחה. " : ""}
-              ההערות רק מצביעות; שום דבר בדוח לא השתנה, וההחלטה שלך.
-            </span>
-          </>
-        )}
-        <ErrorLine error={error} />
-        <div className="row">
-          <button type="button" className="btn btn-small" disabled={!ready || busy} onClick={() => void run()}>
-            {result ? "לבדוק שוב" : "לבדוק את הדוח כולו"}
-          </button>
-        </div>
+    <section className="fin-report-check" aria-label="בדיקת הדוח כולו">
+      <div className="row">
+        <b className="grow">בדיקת הדוח כולו</b>
+        <button type="button" className="btn btn-small" disabled={!ready || busy} onClick={() => void run()}>
+          {result ? "לבדוק שוב" : "לבדוק את הדוח כולו"}
+        </button>
       </div>
-    </li>
+      {!ready && (
+        <span className="small muted">
+          {waiting.length > 0 ? `אחרי שכל הטיוטות אושרו. עוד מחכות: ${waiting.map((s) => s.title).join(", ")}.` : "צריך לפחות שני סעיפים מאושרים."}
+        </span>
+      )}
+      {busy && <span className="muted"><Spinner /> קוראת את הדוח כולו…</span>}
+      {result && !busy && (
+        <span className="small muted">
+          {result.notes.length === 0
+            ? "לא נמצאו הערות: אין סתירות בין סעיפים, חזרות, ממצא שמופיע רק בסיכום, או פער בין סיבת ההפניה, הממצאים, האבחנה וההמלצות."
+            : result.notes.length === 1
+              ? "נמצאה הערה אחת. היא ברשימה \"כדאי לבדוק\"."
+              : `נמצאו ${result.notes.length} הערות. הן ברשימה "כדאי לבדוק".`}
+          {result.demo ? " מצב הדגמה: נמצאו רק משפטים שחוזרים מילה במילה ומספרים שמופיעים רק בסיכום, בלי שליחה." : ""}
+          {" "}שום דבר בדוח לא השתנה, וההחלטה שלך.
+        </span>
+      )}
+      <ErrorLine error={error} />
+    </section>
   );
 }

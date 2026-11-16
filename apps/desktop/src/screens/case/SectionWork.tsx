@@ -368,7 +368,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
           <SectionGuide caseId={caseId} sectionKey={section.key} guide={section.guide} isDefault={section.guide_is_default}
             learnedFrom={section.guide_learned_from} caseGuide={section.case_guide} onSaved={reload} />
           {section.key === "dsm" && <DsmSeverityPanel caseId={caseId} severity={api.detail.meta.dsm_severity} onSaved={reload} />}
-          <SectionLibraryPanel caseId={caseId} sectionKey={section.key} onAdded={reload} />
+          <SectionLibraryPanel caseId={caseId} sectionKey={section.key} present={section.paragraphs.map((p) => p.text)} onAdded={reload} />
 
           {job && (
             <div className="writing-card">

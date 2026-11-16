@@ -104,6 +104,7 @@ fn the_style_model_keeps_numbers_never_words() {
         "global",
         "sections",
         "function",
+        "connectors",
         "n",
         "mean",
         "m2",

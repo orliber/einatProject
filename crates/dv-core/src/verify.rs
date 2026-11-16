@@ -56,6 +56,7 @@ impl Core {
             case_id,
             section_key: _,
             draft_ids,
+            wordings,
             source_ids,
         } = kind
         else {
@@ -80,10 +81,62 @@ impl Core {
                 });
             }
         }
+        // D-161: the verdicts are kept for the session with the paragraphs, by the stored
+        // wording each has now, so the report page shows them after any reload and "approve
+        // all" sees them.
+        // A verdict is about the wording that was sent: a paragraph worded again or edited
+        // while the check was out was not checked, and the verdict says nothing about it.
+        let mut said: Vec<(String, String, Vec<ParagraphNote>)> = Vec::new();
+        for ((draft_id, sent), c) in draft_ids.iter().zip(&wordings).zip(&mut checks) {
+            let Some(d) = style::find_draft(v, &case_id, draft_id)? else {
+                continue;
+            };
+            if d.text_tagged != *sent {
+                c.verdict = dv_ai::Verdict::Unchecked;
+                c.notes.clear();
+                continue;
+            }
+            // The demo check reads for numbers only and calls everything else "partial":
+            // that is "not read", not a finding, and it holds nothing back.
+            let notes = if demo && c.verdict == dv_ai::Verdict::Partial {
+                Vec::new()
+            } else {
+                verdict_notes(c)
+            };
+            said.push((draft_id.clone(), d.text_tagged, notes));
+        }
+        for (draft_id, wording, notes) in said {
+            self.notes.keep_verdict(&case_id, &draft_id, wording, notes);
+        }
         Ok(VerifyResult {
             draft_ids,
             checks,
             demo,
         })
     }
+}
+
+/// A verdict worth her look, as notes under the paragraph: what the check wrote, or one
+/// plain line when it wrote nothing. Supported and not checked say nothing.
+fn verdict_notes(check: &dv_ai::ParagraphCheck) -> Vec<ParagraphNote> {
+    let (kind, plain) = match check.verdict {
+        dv_ai::Verdict::Contradicted => (
+            NoteKind::VerifyContradicted,
+            "הפסקה סותרת את מה שכתוב בחומרים",
+        ),
+        dv_ai::Verdict::Unsupported => (NoteKind::VerifyUnsupported, "לא נמצא לפסקה בסיס בחומרים"),
+        dv_ai::Verdict::Partial => (NoteKind::VerifyPartial, "רק חלק מהפסקה נשען על החומרים"),
+        dv_ai::Verdict::Supported | dv_ai::Verdict::Unchecked => return Vec::new(),
+    };
+    let mut notes: Vec<ParagraphNote> = Vec::new();
+    for n in &check.notes {
+        let note = ParagraphNote::new(kind, n.note.trim());
+        if !note.text.is_empty() && !notes.contains(&note) {
+            notes.push(note);
+        }
+    }
+    if notes.is_empty() {
+        notes.push(ParagraphNote::new(kind, plain));
+    }
+    notes
 }

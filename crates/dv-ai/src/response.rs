@@ -25,8 +25,22 @@ pub struct ProposedParagraph {
     pub source_refs: Vec<String>,
     /// Problems found locally (unknown source, a number not found in the sources…).
     pub warnings: Vec<String>,
+    /// What each of the parser's `warnings` is about, in the same order (D-161). Not part of
+    /// the answer as it travels: a warning added after parsing has no kind here.
+    #[serde(skip)]
+    #[ts(skip)]
+    pub kinds: Vec<WarningKind>,
     /// The line of the section's guide it answers, from 1; 0: none (round 29).
     pub guide: u32,
+}
+
+/// What a warning of the parser is about.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WarningKind {
+    /// The paragraph cites no source, or one that was not sent.
+    Source,
+    /// A number that nothing the paragraph rests on holds.
+    Number,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -126,6 +140,7 @@ pub fn parse_section(
         .into_iter()
         .map(|p| {
             let mut warnings = Vec::new();
+            let mut kinds = Vec::new();
             let cited: Vec<&str> = p
                 .source_refs
                 .iter()
@@ -138,21 +153,25 @@ pub fn parse_section(
                 .collect();
             if p.source_refs.is_empty() {
                 warnings.push("הפסקה לא מציינת מקור".to_owned());
+                kinds.push(WarningKind::Source);
             }
             for r in &p.source_refs {
                 if !sources.iter().any(|(id, _)| id == r) {
                     warnings.push(format!("מקור לא קיים: {r}"));
+                    kinds.push(WarningKind::Source);
                 }
             }
             for n in numbers(&p.text) {
                 if !cited.iter().any(|t| numbers(t).contains(&n)) {
                     warnings.push(format!("המספר {n} לא מופיע במקורות שצוינו – לבדוק"));
+                    kinds.push(WarningKind::Number);
                 }
             }
             ProposedParagraph {
                 text: p.text,
                 source_refs: p.source_refs,
                 warnings,
+                kinds,
                 guide: p
                     .guide
                     .as_u64()
@@ -198,10 +217,12 @@ fn parse_without_sources(
             .iter()
             .map(|r| format!("מקור לא קיים: {r}"))
             .collect();
+        p.kinds = vec![WarningKind::Source; p.warnings.len()];
         for n in numbers(&p.text) {
             if !sent.iter().any(|t| numbers(t).contains(&n)) {
                 p.warnings
                     .push(format!("המספר {n} לא מופיע {where_} – לבדוק"));
+                p.kinds.push(WarningKind::Number);
             }
         }
     }

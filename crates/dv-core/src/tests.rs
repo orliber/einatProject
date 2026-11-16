@@ -17,6 +17,7 @@ mod access;
 mod binding;
 mod briefs;
 mod clinic;
+mod closing_context;
 mod flows;
 mod guides;
 mod history;
@@ -28,7 +29,9 @@ mod large_case;
 mod layers;
 mod library;
 mod masks;
+mod name_hints;
 mod newer_version;
+mod notes;
 mod off_lock;
 mod own;
 mod parents;
@@ -68,6 +71,20 @@ impl Transport for FakeTransport {
         let parsed: Value = serde_json::from_str(&body).unwrap();
         Ok(dv_ai::demo::respond(&parsed))
     }
+}
+
+/// A case as the vault alone tells it: without what the open session keeps about the drafts
+/// (D-161), which a restored or reopened vault does not have.
+fn from_the_vault(mut d: CaseDetail) -> CaseDetail {
+    for s in &mut d.sections {
+        s.notes = SectionNotes::default();
+        for p in &mut s.paragraphs {
+            let warnings = p.warnings.clone();
+            p.notes
+                .retain(|n| n.kind == NoteKind::Polish || warnings.contains(&n.text));
+        }
+    }
+    d
 }
 
 fn api_json(v: &Value) -> Value {
@@ -1683,6 +1700,7 @@ fn entered_scores_feed_the_section_with_ranges_from_the_table() {
             },
         ],
         notes: "אלון שיתף פעולה לאורך כל ההעברה.".into(),
+        basis: None,
     };
     let saved = core.save_scores(&case, None, &sheet).unwrap();
     assert_eq!(saved.kind, InputKind::TestScores);
@@ -1692,9 +1710,21 @@ fn entered_scores_feed_the_section_with_ranges_from_the_table() {
         "{}",
         saved.content
     );
+    // Stored as entered, with what its relative places were computed with (D-190).
+    let stored = core.score_sheet(&case, &saved.id).unwrap().unwrap();
     assert_eq!(
-        core.score_sheet(&case, &saved.id).unwrap().as_ref(),
-        Some(&sheet)
+        stored
+            .basis
+            .as_ref()
+            .map(|b| (b.critical.is_empty(), b.age_months.is_some())),
+        Some((true, true))
+    );
+    assert_eq!(
+        dv_domain::ScoreSheet {
+            basis: None,
+            ..stored
+        },
+        sheet
     );
 
     // Editing keeps one material and replaces its text.
@@ -1771,8 +1801,16 @@ fn every_instrument_sheet_passes_the_filter_without_questions() {
             cutoff: Some(8.0),
             entries,
             notes: String::new(),
+            basis: None,
         };
-        let text = dv_domain::format_sheet(&sheet).unwrap();
+        // With the scores spread (D-165): the lines of relative strengths and weaknesses
+        // and of scales in an elevated range go out unchanged too.
+        let spread = ScoreSheet {
+            entries: spread_entries(&inst),
+            ..sheet.clone()
+        };
+        let text =
+            dv_domain::format_sheet(&sheet).unwrap() + &dv_domain::format_sheet(&spread).unwrap();
         let outcome = core.preview_filter(&case, &text).unwrap();
         assert_eq!(
             outcome.tagged, text,
@@ -1794,6 +1832,20 @@ fn every_instrument_sheet_passes_the_filter_without_questions() {
     }
 }
 
+/// Every measure of an instrument, at the top and the bottom of its scale in turn: a sheet
+/// with relative strengths and weaknesses and with scales in an elevated range (D-165).
+fn spread_entries(inst: &dv_domain::Instrument) -> Vec<dv_domain::ScoreEntry> {
+    inst.measures
+        .iter()
+        .enumerate()
+        .map(|(i, m)| dv_domain::ScoreEntry {
+            measure: m.key.clone(),
+            value: if i % 2 == 0 { m.max } else { m.min },
+            note: String::new(),
+        })
+        .collect()
+}
+
 #[test]
 fn a_half_point_score_is_not_mistaken_for_a_date() {
     use dv_domain::{ScoreEntry, ScoreSheet};
@@ -1808,6 +1860,7 @@ fn a_half_point_score_is_not_mistaken_for_a_date() {
             note: String::new(),
         }],
         notes: String::new(),
+        basis: None,
     };
     let text = dv_domain::format_sheet(&sheet).unwrap();
     assert!(text.contains("ציון 29.5 – מעט או ללא תסמינים"), "{text}");
@@ -1883,6 +1936,12 @@ fn fixed_prompt_text_never_collides_with_a_childs_name() {
         dv_ai::prompts::RESEARCH_RULES,
         dv_ai::prompts::SORTING_RULES,
         dv_ai::prompts::VERIFY_RULES,
+        dv_ai::prompts::REPORT_CHECK_RULES,
+        dv_ai::prompts::CRAFT_HEADING,
+        dv_ai::REFERRAL_LINE,
+        dv_ai::REFERRAL_LINE_SUMMARY,
+        dv_ai::DECISION_LINE,
+        dv_ai::KEY_SCORES_LINE,
         dv_ai::prompts::LETTER_PARENTS,
         dv_ai::prompts::LETTER_SCHOOL,
         dv_ai::prompts::LETTER_TITLE_PARENTS,
@@ -1894,8 +1953,47 @@ fn fixed_prompt_text_never_collides_with_a_childs_name() {
             .into_iter()
             .filter_map(dv_ai::prompts::quick_action),
     )
+    // The craft of every kind of section (D-164): it goes out with the section's request.
+    .chain(
+        dv_ai::prompts::CRAFT_SECTIONS
+            .iter()
+            .filter_map(|key| dv_ai::prompts::section_craft(key)),
+    )
     .map(|t| Value::String(t.to_owned()))
     .collect();
+    assert!(
+        dv_ai::prompts::CRAFT_SECTIONS
+            .iter()
+            .all(|key| dv_ai::prompts::section_craft(key).is_some()),
+        "every listed section has craft lines"
+    );
+    // The check of the whole report (D-097, D-169): its frames, roles and schema.
+    body.push(
+        dv_ai::build_report_check_request(
+            &dv_ai::ModelConfig::default(),
+            &dv_ai::ReportCheckInput {
+                sections: [
+                    "referral",
+                    "cognitive",
+                    "dsm",
+                    "summary",
+                    "diagnoses",
+                    "recommendations",
+                ]
+                .into_iter()
+                .map(|key| dv_ai::ReportCheckSection {
+                    title: String::new(),
+                    text_tagged: String::new(),
+                    closing: crate::drafts::CLOSING_SECTIONS.contains(&key),
+                    role: dv_ai::ReportRole::of_key(key),
+                })
+                .collect(),
+            },
+            &dv_ai::nonce_from(&[7; 16]),
+        )
+        .0,
+    );
+
     // A whole section request as the builder writes it: every kind label, both grammatical
     // genders, the age line, the data frames, the history opener and the JSON schema.
     for gender in [GrammaticalGender::Male, GrammaticalGender::Female] {
@@ -1923,7 +2021,20 @@ fn fixed_prompt_text_never_collides_with_a_childs_name() {
             age: Some("5:4".into()),
             gender: Some(gender),
             sources,
-            approved_context: vec![(String::new(), String::new())],
+            approved_context: vec![
+                dv_ai::ApprovedSection::plain("", ""),
+                dv_ai::ApprovedSection {
+                    title: String::new(),
+                    text_tagged: String::new(),
+                    role: dv_ai::ApprovedRole::Referral,
+                },
+                dv_ai::ApprovedSection {
+                    title: String::new(),
+                    text_tagged: String::new(),
+                    role: dv_ai::ApprovedRole::Decision,
+                },
+            ],
+            key_scores_tagged: Some("-".into()),
             current_draft: vec![String::new()],
             history: vec![dv_ai::TaggedTurn {
                 role: "assistant".into(),
@@ -2132,6 +2243,21 @@ fn fixed_prompt_text_never_collides_with_a_childs_name() {
     body.push(Value::String(
         dv_ai::render_for_section(&profile, "cognitive", &|_| true, &[]).unwrap(),
     ));
+    // The DSM section also takes the whole report's criteria (D-166).
+    body.push(Value::String(
+        dv_ai::render_for_section(&profile, "dsm", &|_| true, &[]).unwrap(),
+    ));
+    // The rhythm card (D-166): its fixed lines, and every linking word it may name.
+    for line in dv_style::stylometry::RHYTHM_FIXED {
+        body.push(Value::String(line.to_owned()));
+    }
+    body.push(Value::String(
+        dv_style::text::CONNECTORS
+            .iter()
+            .map(|c| format!("«{c}»"))
+            .collect::<Vec<_>>()
+            .join(", "),
+    ));
     let body = Value::Array(body);
     let tags: HashSet<String> = HashSet::from(["[ילד]".to_owned()]);
     let collisions = found_for_every_child_name(|identities| {
@@ -2163,6 +2289,51 @@ fn fixed_prompt_text_never_collides_with_a_childs_name() {
         })
     });
     assert!(collisions.is_empty(), "{collisions:#?}");
+}
+
+/// The rhythm card goes out as part of her profile, item by item filtered (D-166): with any
+/// figures it can hold, the filter must leave it as it is, or it would be left out. ("בדרך כלל
+/// בין 9" once read as an address.)
+#[test]
+fn the_rhythm_card_is_never_changed_by_the_filter_whatever_its_figures() {
+    let ctx = PrivacyContext {
+        case_id: "c",
+        identities: &[],
+        practitioner: &[],
+        allowlisted: &|_| false,
+        confirmed_names: &|_| false,
+        past_names: &|_| false,
+        today: (2026, 9, 28),
+        masks: None,
+    };
+    let lines = dv_style::stylometry::RHYTHM_FIXED;
+    let used = dv_style::text::CONNECTORS
+        .iter()
+        .map(|c| format!("«{c}»"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let mut cards = Vec::new();
+    for w in 3..=45u32 {
+        let card: Vec<String> = lines
+            .iter()
+            .map(|l| {
+                l.replace("{w}", &w.to_string())
+                    .replace("{lo}", &(w.saturating_sub(4).max(3)).to_string())
+                    .replace("{hi}", &(w + 4).to_string())
+                    .replace("{k}", &(w % 9 + 1).to_string())
+                    .replace("{h}", &(w % 16 + 1).to_string())
+                    .replace("{f}", &(w % 12 + 1).to_string())
+                    .replace("{used}", &used)
+                    .replace("{unused}", &used)
+            })
+            .collect();
+        cards.push(card.join("\n"));
+    }
+    for card in cards {
+        let out = dv_privacy::filter(&card, &ctx).unwrap();
+        assert!(out.auto_hidden.is_empty(), "{:?}", out.auto_hidden);
+        assert_eq!(out.tagged, card);
+    }
 }
 
 /// Section titles and score tables are case text: they pass the filter and the review screen,
@@ -2204,9 +2375,55 @@ fn score_tables_and_section_titles_are_never_rewritten_silently() {
             cutoff: Some(1.0),
             entries,
             notes: String::new(),
+            basis: None,
         };
         texts.push(dv_domain::format_sheet(&sheet).unwrap());
+        // The key scores of the closing sections (D-162): the same lines, under the test's name.
+        texts.extend(dv_domain::key_scores(
+            std::slice::from_ref(&sheet),
+            dv_domain::SheetHabits::default(),
+        ));
+        // D-165: the relative and elevated lines are case text too.
+        let spread = ScoreSheet {
+            entries: spread_entries(&inst),
+            ..sheet
+        };
+        let text = dv_domain::format_sheet(&spread).unwrap();
+        assert!(
+            !matches!(inst.key.as_str(), "wppsi_iv" | "wisc_v") || text.contains("חוזקה יחסית"),
+            "{text}"
+        );
+        assert!(
+            inst.key != "brief_p" || text.contains("סולמות בטווח חריג"),
+            "{text}"
+        );
+        texts.push(text);
     }
+    // The line of patterns the key scores end with, as it is written for a real gap; and the
+    // name of every pattern there can be.
+    let gap = ScoreSheet {
+        instrument: "wppsi_iv".into(),
+        module: String::new(),
+        cutoff: None,
+        entries: [("fsiq", 98.0), ("vci", 112.0), ("psi", 82.0)]
+            .into_iter()
+            .map(|(m, value)| ScoreEntry {
+                measure: m.into(),
+                value,
+                note: String::new(),
+            })
+            .collect(),
+        notes: String::new(),
+        basis: None,
+    };
+    let with_patterns = dv_domain::key_scores(&[gap], dv_domain::SheetHabits::default()).unwrap();
+    assert!(with_patterns.contains("דפוסי התוצאות"), "{with_patterns}");
+    texts.push(with_patterns);
+    texts.extend(
+        dv_domain::pattern_keys()
+            .iter()
+            .filter_map(|key| dv_domain::pattern_label(key)),
+    );
     // A word that holds the name ("שאלון" for a child "אלון") or is spelled close to it may
     // be hidden, but only as an item on the card: "להחזיר" there must bring the text back
     // exactly. Nothing may change without being listed.

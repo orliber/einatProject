@@ -32,6 +32,7 @@ fn sheet(instrument: &str, entries: &[(&str, f64)]) -> ScoreSheet {
             })
             .collect(),
         notes: String::new(),
+        basis: None,
     }
 }
 
@@ -82,7 +83,7 @@ fn a_measure_on_a_different_scale_is_not_compared() {
 }
 
 #[test]
-fn a_measure_entered_twice_gives_one_row_from_the_first_sheet_that_has_it() {
+fn a_measure_entered_twice_gives_one_row_against_the_same_test() {
     let before = [
         sheet("wppsi_iv", &[("vci", 90.0)]),
         sheet("wisc_v", &[("vci", 70.0)]),
@@ -90,8 +91,9 @@ fn a_measure_entered_twice_gives_one_row_from_the_first_sheet_that_has_it() {
     let after = [sheet("wisc_v", &[("vci", 104.0), ("vci", 50.0)])];
     let rows = compare(&before, &after);
     assert_eq!(rows.len(), 1, "{rows:?}");
-    assert_eq!((rows[0].before, rows[0].after), (90.0, 104.0));
-    assert_eq!(rows[0].before_instrument, "WPPSI-IV");
+    // The earlier WISC-V score, not the WPPSI-IV one that happens to come first.
+    assert_eq!((rows[0].before, rows[0].after), (70.0, 104.0));
+    assert_eq!(rows[0].before_instrument, "WISC-V");
 }
 
 #[test]

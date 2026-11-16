@@ -79,6 +79,9 @@ impl Core {
                 by_ai: d.author == Author::Ai,
                 sources: Vec::new(),
                 warnings: Vec::new(),
+                // The report's proofreading (D-167) is for its sections, not the letters.
+                polish: Vec::new(),
+                notes: Vec::new(),
                 replaces: d.replaces,
             })
             .collect())
@@ -403,6 +406,7 @@ impl Core {
             .collect();
         let mut empty_sections = Vec::new();
         let mut included = 0u32;
+        let mut polish_notes = 0usize;
         let mut parts = Vec::new();
         let mut signature = settings.signature.clone();
         for part in &structure.parts {
@@ -414,6 +418,16 @@ impl Core {
                     .filter(|d| d.status == DraftStatus::Approved)
                     .map(|d| show(&d))
                     .collect();
+                // Proofreading (D-167), of the text as the case page shows it: counted for the
+                // sections that go into the file.
+                let polished: usize = if s.key == "signature" {
+                    0
+                } else {
+                    paragraphs
+                        .iter()
+                        .map(|p| dv_domain::polish_notes(p).len())
+                        .sum()
+                };
                 for p in &mut paragraphs {
                     for tag in dv_privacy::restore::remaining_tags(p) {
                         if known_tags.contains(&tag) || dv_privacy::is_mask_tag(&tag) {
@@ -453,6 +467,7 @@ impl Core {
                     empty_sections.push(s.title.clone());
                 } else {
                     included += 1;
+                    polish_notes += polished;
                     sections.push(dv_export::ReportSection {
                         title: s.title.clone(),
                         paragraphs,
@@ -590,6 +605,7 @@ impl Core {
                 file_name,
                 parents_left_out: 0,
                 parents_chart_rows: 0,
+                polish_notes: u32::try_from(polish_notes).unwrap_or(u32::MAX),
             },
         ))
     }

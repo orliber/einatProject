@@ -23,14 +23,19 @@ impl Core {
             )?;
             self.opened_cases.insert(case_id.to_owned());
         }
+        // Her learned style, opened and parsed once for the whole view (PERF-5).
+        let style = style::LoadedStyle::load(self.vault_ref()?)?;
         // What she usually changes in the AI's wording (ST9); only with the profile on.
-        let habits = if style::style_model(self.vault_ref()?)?.is_some() {
+        let habits = if style.model().is_some() {
             self.style_habits().unwrap_or_default()
         } else {
             dv_style::EditModel::default()
         };
         let sample = self.is_sample(case_id)?;
-        let v = self.vault_ref()?;
+        // The vault and the session's notes side by side (two fields of the core).
+        self.vault_ref()?;
+        let v = self.vault.as_ref().ok_or(CoreError::Locked)?;
+        let kept = &self.notes;
         let meta = v.case_meta(case_id)?;
         let identities = v.identities(case_id)?;
         let masks = v.masks(case_id)?;
@@ -60,8 +65,8 @@ impl Core {
             .filter_map(|k| with_record.get(k).map(|i| i.id.clone()))
             .collect();
         let sheets = score_sheets(v, case_id, &inputs)?;
-        let style_model = style::style_model(v)?;
-        let interpretations = style::InterpretationCheck::new(v, &sheets)?;
+        let style_model = style.model();
+        let interpretations = style::InterpretationCheck::with(style.interpretations(), &sheets);
         // This case's own dates: not the whole case list and recycle bin for two numbers.
         let (created_at, updated_at) = v.case_times(case_id)?;
         let retention_default = retention::default_until(created_at, updated_at, meta.age.as_ref());
@@ -71,7 +76,7 @@ impl Core {
             .collect();
         let with_versions = v.drafts_with_versions(case_id)?;
         // One name for one thing (ST10): hers from her past reports, else the report's own.
-        let her_terms = style::style_terms(v)?;
+        let her_terms = style.terms();
         // Each section's paragraphs are read (and decrypted) once, for the checks across the
         // report and for the view (deep review 3.6).
         let mut shown: std::collections::HashMap<String, Vec<dv_domain::DraftParagraph>> =
@@ -98,25 +103,145 @@ impl Core {
             .map(|(_, _, t)| t.as_str())
             .collect();
         let report_terms = dv_style::terms::usual(report_texts.iter().map(String::as_str), 1);
+        // What a closing section is also written from (D-162): the approved closing sections
+        // that go with it, and the key scores worked out here. A number quoted from them is
+        // a known number, here as when the answer came.
+        let approved_closing: Vec<(String, String)> = DERIVED_SECTIONS
+            .iter()
+            .flat_map(|key| {
+                shown
+                    .get(*key)
+                    .into_iter()
+                    .flatten()
+                    .filter(|d| d.status == DraftStatus::Approved)
+                    .map(|d| ((*key).to_owned(), d.text_tagged.clone()))
+            })
+            .collect();
+        let key_scores = key_scores_text(v, &sheets)?;
+        // Every paragraph on the page with its stored wording, for the notes kept about it
+        // (D-161). The stored wording, not the names put back: correcting a name keeps them.
+        let mut on_page: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
         let mut sections = Vec::new();
         for part in &structure.parts {
             for s in &part.sections {
+                let mut rests_on = body.clone();
+                rests_on.extend(
+                    approved_closing
+                        .iter()
+                        .filter(|(key, _)| closing_passed_to(&s.key).contains(&key.as_str()))
+                        .map(|(_, text)| text.as_str()),
+                );
+                if gets_key_scores(&s.key) {
+                    rests_on.extend(key_scores.as_deref());
+                }
                 let paragraphs: Vec<ParagraphView> = shown
                     .remove(&s.key)
                     .unwrap_or_default()
                     .into_iter()
                     .map(|d| {
-                        let unfounded = unfounded_numbers(&d, &s.key, s.mode, &inputs, &body);
+                        let unfounded = unfounded_numbers(&d, &s.key, s.mode, &inputs, &rests_on);
+                        let text = shown_paragraph(
+                            &d.text_tagged,
+                            d.author,
+                            &identities,
+                            practitioner.as_deref(),
+                            &masks,
+                        );
+                        // Proofreading (D-167), of the text as she sees it: advice for the
+                        // finish, never a warning, so it holds nothing back. Not the signature,
+                        // whose lines are a name and titles.
+                        let polish = if s.key == "signature" {
+                            Vec::new()
+                        } else {
+                            dv_domain::polish_notes(&text)
+                        };
+                        // Every score in the text against the score table, each time (AI-6).
+                        // And an age that is not the child's age in the details. Each line
+                        // with what it is about, said where it is made (D-161).
+                        let tag = |kind: NoteKind, lines: Vec<String>| {
+                            lines
+                                .into_iter()
+                                .map(move |l| ParagraphNote::new(kind, l))
+                                .collect::<Vec<_>>()
+                        };
+                        let mut notes: Vec<ParagraphNote> =
+                            dv_domain::check_scores_tagged(&d.text_tagged, &sheets)
+                                .into_iter()
+                                .map(|(kind, line)| {
+                                    let kind = match kind {
+                                        dv_domain::ScoreNoteKind::Mismatch => {
+                                            NoteKind::ScoreMismatch
+                                        }
+                                        dv_domain::ScoreNoteKind::BandWord => NoteKind::BandWord,
+                                        dv_domain::ScoreNoteKind::Percentile => {
+                                            NoteKind::Percentile
+                                        }
+                                        dv_domain::ScoreNoteKind::Cutoff => NoteKind::Cutoff,
+                                    };
+                                    ParagraphNote::new(kind, line)
+                                })
+                                .collect();
+                        notes.extend(tag(
+                            NoteKind::Age,
+                            dv_domain::check_age(&d.text_tagged, meta.age),
+                        ));
+                        notes.extend(tag(
+                            NoteKind::Gender,
+                            dv_domain::check_gender(&d.text_tagged, meta.child_gender),
+                        ));
+                        notes.extend(tag(
+                            NoteKind::Grade,
+                            dv_domain::check_grade(
+                                &d.text_tagged,
+                                &report
+                                    .iter()
+                                    .filter(|(_, _, t)| *t != d.text_tagged)
+                                    .map(|(_, _, t)| t.as_str())
+                                    .collect::<Vec<_>>(),
+                            ),
+                        ));
+                        if s.key == "recommendations" {
+                            notes.extend(tag(
+                                NoteKind::RecommendationBasis,
+                                dv_domain::check_recommendations(&d.text_tagged, &body),
+                            ));
+                        }
+                        // A level in the DSM section that is not the one she set (round 43).
+                        if s.key == "dsm" {
+                            notes.extend(tag(
+                                NoteKind::DsmSeverity,
+                                dv_domain::check_dsm_severity(
+                                    &d.text_tagged,
+                                    meta.dsm_severity.as_ref(),
+                                ),
+                            ));
+                        }
+                        notes.extend(tag(
+                            NoteKind::Term,
+                            dv_style::terms::notes(&d.text_tagged, her_terms, &report_terms),
+                        ));
+                        notes.extend(tag(
+                            NoteKind::Interpretation,
+                            interpretations.notes(&d.text_tagged),
+                        ));
+                        notes.extend(tag(NoteKind::NumberNotInSources, unfounded));
+                        let warnings: Vec<String> = notes.iter().map(|n| n.text.clone()).collect();
+                        // What the answer and the check against the sources said about this
+                        // wording (D-161), then the proofreading. Nothing is said twice.
+                        for n in kept.of_paragraph(&d.id, &d.text_tagged) {
+                            if !notes.contains(&n) {
+                                notes.push(n);
+                            }
+                        }
+                        notes.extend(tag(NoteKind::Polish, polish.clone()));
+                        on_page.insert(d.id.clone(), d.text_tagged.clone());
                         ParagraphView {
                             has_versions: with_versions.contains(&d.id),
                             id: d.id,
-                            text: shown_paragraph(
-                                &d.text_tagged,
-                                d.author,
-                                &identities,
-                                practitioner.as_deref(),
-                                &masks,
-                            ),
+                            text,
+                            polish,
+                            notes,
                             status: d.status,
                             by_ai: d.author == Author::Ai,
                             sources: d
@@ -129,50 +254,13 @@ impl Core {
                                     )
                                 })
                                 .collect(),
-                            // Every score in the text against the score table, each time (AI-6).
-                            // And an age that is not the child's age in the details.
-                            warnings: dv_domain::check_scores(&d.text_tagged, &sheets)
-                                .into_iter()
-                                .chain(dv_domain::check_age(&d.text_tagged, meta.age))
-                                .chain(dv_domain::check_gender(&d.text_tagged, meta.child_gender))
-                                .chain(dv_domain::check_grade(
-                                    &d.text_tagged,
-                                    &report
-                                        .iter()
-                                        .filter(|(_, _, t)| *t != d.text_tagged)
-                                        .map(|(_, _, t)| t.as_str())
-                                        .collect::<Vec<_>>(),
-                                ))
-                                .chain(if s.key == "recommendations" {
-                                    dv_domain::check_recommendations(&d.text_tagged, &body)
-                                } else {
-                                    Vec::new()
-                                })
-                                // A level in the DSM section that is not the one she set (round 43).
-                                .chain(if s.key == "dsm" {
-                                    dv_domain::check_dsm_severity(
-                                        &d.text_tagged,
-                                        meta.dsm_severity.as_ref(),
-                                    )
-                                } else {
-                                    Vec::new()
-                                })
-                                .chain(dv_style::terms::notes(
-                                    &d.text_tagged,
-                                    &her_terms,
-                                    &report_terms,
-                                ))
-                                .chain(interpretations.notes(&d.text_tagged))
-                                .chain(unfounded)
-                                .collect(),
+                            warnings,
                             style_note: style_model
-                                .as_ref()
                                 .filter(|_| {
                                     d.author == Author::Ai && d.status == DraftStatus::Proposed
                                 })
                                 .and_then(|m| style::style_note(m, &s.key, &d.text_tagged)),
                             style: style_model
-                                .as_ref()
                                 .filter(|_| {
                                     d.author == Author::Ai && d.status == DraftStatus::Proposed
                                 })
@@ -202,7 +290,7 @@ impl Core {
                     u32::try_from(routing.iter().filter(|r| r.feeds.contains(&s.key)).count())
                         .unwrap_or(0);
                 let approved = paragraphs.iter().any(|p| p.status == DraftStatus::Approved);
-                let guide = guides::guide_for(v, &meta, s)?;
+                let guide = guides::guide_with(v, &meta, s, Some(&style))?;
                 sections.push(SectionView {
                     key: s.key.clone(),
                     title: s.title.clone(),
@@ -216,9 +304,12 @@ impl Core {
                     guide_is_default: guide.is_default,
                     guide_learned_from: guide.learned_from,
                     case_guide: guide.case,
+                    notes: kept.section(case_id, &s.key),
                 });
             }
         }
+        // Notes about a wording that is gone are dropped with it.
+        self.notes.prune(case_id, &on_page);
         Ok(CaseDetail {
             id: case_id.to_owned(),
             meta,
@@ -288,8 +379,10 @@ impl Core {
     }
 
     /// "✓ לאשר את כל הטיוטות" (D-139): of the paragraphs she saw waiting, only those still
-    /// clean as the core sees them now: no note of any kind, and not a new wording of an
-    /// approved paragraph. What the screen showed may be older than the case.
+    /// clean as the core sees them now: no note but proofreading (D-161: a warning, what the
+    /// answer's scan found, a verdict of the check against the sources that is not
+    /// "supported"), and not a new wording of an approved paragraph. What the screen showed
+    /// may be older than the case.
     pub fn approve_clean_paragraphs(
         &mut self,
         case_id: &str,
@@ -301,7 +394,9 @@ impl Core {
             .into_iter()
             .flat_map(|s| s.paragraphs)
             .filter(|p| {
-                p.status == DraftStatus::Proposed && p.warnings.is_empty() && p.replaces.is_none()
+                p.status == DraftStatus::Proposed
+                    && p.notes.iter().all(|n| n.kind == NoteKind::Polish)
+                    && p.replaces.is_none()
             })
             .map(|p| p.id)
             .collect();
@@ -500,8 +595,9 @@ pub(crate) fn paragraph_to_send(
 /// A number the AI wrote that nothing the paragraph rests on holds (D-150): the same check as
 /// when the answer came (`dv_ai::parse_section`), made again each time like the scores, so the
 /// note is still on the page, and "approve all" still holds the paragraph back, after a reload.
-/// The materials it cites, the body of the report for a closing section; her own sections are
-/// worded from her points, which are not kept, so they are not checked here.
+/// The materials it cites; for a closing section the body of the report, the closing sections
+/// that went with it and the key scores (D-162). Her own sections are worded from her points,
+/// which are not kept, so they are not checked here.
 fn unfounded_numbers(
     d: &dv_domain::DraftParagraph,
     section_key: &str,

@@ -22,6 +22,32 @@ use crate::{Core, CoreError};
 
 const PREFIX: &str = "instrument/";
 
+/// The critical values she copied from the manuals (D-190), as JSON.
+const CRITICAL_KEY: &str = "relative_critical_values";
+
+/// Settings → המבחנים → ערכים קריטיים: the comparison sets and the values she entered.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct CriticalValuesView {
+    pub sets: Vec<dv_domain::RelativeSet>,
+    pub values: Vec<dv_domain::CriticalValue>,
+}
+
+/// Her critical values for relative strengths and weaknesses. A stored value that no longer
+/// passes the check is not used: the sheet falls back to the labelled rule of thumb, never to
+/// a number that might be wrong.
+pub(crate) fn critical_values(v: &Vault) -> Result<Vec<dv_domain::CriticalValue>, CoreError> {
+    let Some(raw) = v.setting(CRITICAL_KEY)? else {
+        return Ok(Vec::new());
+    };
+    let values: Vec<dv_domain::CriticalValue> = serde_json::from_str(&raw).unwrap_or_default();
+    Ok(if dv_domain::check_critical_values(&values).is_ok() {
+        values
+    } else {
+        Vec::new()
+    })
+}
+
 /// Her answer for one instrument's tables.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
@@ -261,5 +287,29 @@ impl Core {
         // A request prepared before the answer may hold its scores: prepared again.
         self.drop_pending();
         self.instrument_approvals()
+    }
+
+    /// The comparison sets for relative strengths and weaknesses and the manual's critical
+    /// values she entered for them (D-190).
+    pub fn critical_values(&mut self) -> Result<CriticalValuesView, CoreError> {
+        Ok(CriticalValuesView {
+            sets: dv_domain::relative_sets(),
+            values: critical_values(self.vault_ref()?)?,
+        })
+    }
+
+    /// Her critical values, all at once (an empty list clears them). Checked before anything is
+    /// stored; logged as a change of settings.
+    pub fn set_critical_values(
+        &mut self,
+        values: Vec<dv_domain::CriticalValue>,
+    ) -> Result<CriticalValuesView, CoreError> {
+        dv_domain::check_critical_values(&values).map_err(CoreError::Refused)?;
+        let json =
+            serde_json::to_string(&values).map_err(|e| CoreError::Internal(e.to_string()))?;
+        self.vault_mut()?.set_setting(CRITICAL_KEY, &json)?;
+        // A request prepared before may hold the old relative places: prepared again.
+        self.drop_pending();
+        self.critical_values()
     }
 }

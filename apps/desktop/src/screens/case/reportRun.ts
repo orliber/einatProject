@@ -1,7 +1,9 @@
 // Round 41: "write the whole report" as one piece of work in the background (master plan
 // 7.2). One click sorts what is not sorted yet, writes every section that has materials and no
 // text, three at a time, each showing up in the report as soon as it is in, and checks each
-// new draft against its sources as soon as it is in (D-146), beside the writing that is left.
+// new draft against its sources as soon as it is in (D-146), three at a time too, beside the
+// writing that is left. What an answer or a check said is kept by the core for the session
+// (D-161), so the page only has to read the case again to show it.
 // The screen shows one line: "the program is working,
 // 3 of 9", with "stop". Nothing enters the report without her approval.
 //
@@ -18,10 +20,17 @@ import { setKept } from "../../kept";
 import { sortInParts } from "./sortParts";
 import type { CaseApi } from "../CaseScreen";
 
-/** How many sections are written at the same time. */
-const PARALLEL = 3;
+/** How many sections are written at the same time, and how many are checked. */
+export const PARALLEL = 3;
 /** The request each section is sent with (the same as the core's full draft). */
 const DRAFT_INSTRUCTION = "כתוב/י טיוטה לסעיף מתוך המקורות, עם מקור לכל פסקה.";
+
+/** The run's request for a section, with the wish she kept for it "in future reports"
+ *  (D-163): the same words the core's full draft sends. */
+export function runInstruction(wish: string | undefined): string {
+  const w = wish?.trim();
+  return w ? `${DRAFT_INSTRUCTION} מה שחשוב לי שייכתב בסעיף: ${w}` : DRAFT_INSTRUCTION;
+}
 
 export type RunPhase = "sort" | "write" | "check" | "done" | "stopped";
 
@@ -129,11 +138,14 @@ export async function runWholeReport(api: CaseApi, opts: { verify: boolean; ai: 
     if (stopping()) return;
 
     // 2. Every section with materials and no text yet, three at a time. Each new draft is
-    //    checked against its sources (when the check is on) as soon as it is in (D-146), one
-    //    check at a time beside the writing, so the checks do not wait for the last section.
+    //    checked against its sources (when the check is on) as soon as it is in (D-146), up
+    //    to three checks at a time beside the writing, so they do not wait for the last section.
     //    A section the check is not for (one written from the approved sections) is skipped. A
     //    check that did not come back is counted as such, never as checked.
     const list: [string, Prepared][] = await ipc.prepareFullDraft(caseId);
+    // Her kept wishes, for a request that has to be built again (the first one has them).
+    // Keeping them is a convenience: when they cannot be read, the section is still written.
+    const wishes: Record<string, string | undefined> = await ipc.draftBriefs().then((b) => b?.sections ?? {}).catch(() => ({}));
     const busy = new Set(api.jobs.map((j) => j.section));
     const queue = list.filter(([k]) => !busy.has(k));
     set({ phase: "write", total: queue.length });
@@ -153,7 +165,8 @@ export async function runWholeReport(api: CaseApi, opts: { verify: boolean; ai: 
           reprepare: () => ipc.prepareVerify(caseId, key),
           onSend: async (id) => {
             await api.track({ label: `${opts.ai} בודק את "${title(key)}" מול המקורות`, task: "draft", approval: id }, () => ipc.sendVerify(id), (result) => {
-              // The same notes the section shows after its own check.
+              // The core keeps the verdicts with the paragraphs (D-161); the section's own
+              // page still reads them from here.
               setKept<Map<string, ParagraphCheck>>(`case:${caseId}:section:${key}:checks`, new Map())(
                 new Map(result.draft_ids.map((d, i) => [d, result.checks[i]] as [string, ParagraphCheck])),
               );
@@ -170,8 +183,21 @@ export async function runWholeReport(api: CaseApi, opts: { verify: boolean; ai: 
       else unchecked += 1;
       set({ checked, uncheckedFailed: unchecked });
     };
-    // The checks in the order the sections came in, each after the one before.
-    let checks: Promise<void> = Promise.resolve();
+    // The checks in the order the sections came in, at most three on their way at once.
+    const waitingChecks: string[] = [];
+    const sentChecks: Promise<void>[] = [];
+    let checking = 0;
+    const pump = () => {
+      while (checking < PARALLEL) {
+        const key = waitingChecks.shift();
+        if (key === undefined) return;
+        checking += 1;
+        sentChecks.push(checkOne(key).finally(() => {
+          checking -= 1;
+          pump();
+        }));
+      }
+    };
     const writeOne = async ([key, first]: [string, Prepared]) => {
       // Written or being written meanwhile (by hand, or one draft at a time): not sent again.
       const now = screens.get(caseId) ?? api;
@@ -184,7 +210,7 @@ export async function runWholeReport(api: CaseApi, opts: { verify: boolean; ai: 
         const sent = await api.review({
           title: `טיוטה לסעיף ${title(key)}`,
           prepared: first,
-          reprepare: () => ipc.prepareSection(caseId, key, DRAFT_INSTRUCTION),
+          reprepare: () => ipc.prepareSection(caseId, key, runInstruction(wishes[key])),
           onSend: async (id) => {
             await api.track({ label: `${opts.ai} כותב את "${title(key)}"`, task: "draft", section: key, approval: id }, () => ipc.sendSection(id));
           },
@@ -194,7 +220,8 @@ export async function runWholeReport(api: CaseApi, opts: { verify: boolean; ai: 
           if (opts.verify && !stopping()) {
             toCheck += 1;
             set({ toCheck });
-            checks = checks.then(() => checkOne(key));
+            waitingChecks.push(key);
+            pump();
           }
         } else failedOne();
       } catch (e) {
@@ -211,7 +238,8 @@ export async function runWholeReport(api: CaseApi, opts: { verify: boolean; ai: 
     // 3. What is left of the checks once the writing is done. A check already sent finishes
     //    even after "לעצור", as a section being written does.
     if (!stopping() && !locked && checked + unchecked < toCheck) set({ phase: "check" });
-    await checks;
+    // A check that ends starts the next one waiting, so the list grows while it is read.
+    for (let i = 0; i < sentChecks.length; i += 1) await sentChecks[i];
   } catch (e) {
     if (lockedMeanwhile(e)) locked = true;
     else set({ error: (e as UiError | undefined)?.message || "משהו השתבש." });

@@ -130,9 +130,13 @@ pub(crate) async fn score_instruments(
 #[tauri::command]
 pub(crate) async fn preview_scores(
     state: tauri::State<'_, AppState>,
+    case_id: Option<String>,
     sheet: dv_domain::ScoreSheet,
 ) -> Res<String> {
-    with_core(&state, move |c| c.preview_scores(&sheet)).await
+    with_core(&state, move |c| {
+        c.preview_scores_in(case_id.as_deref(), &sheet)
+    })
+    .await
 }
 
 #[tauri::command]

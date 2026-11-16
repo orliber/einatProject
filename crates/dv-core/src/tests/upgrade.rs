@@ -75,6 +75,7 @@ fn fill(core: &mut Core) {
             note: String::new(),
         }],
         notes: String::new(),
+        basis: None,
     };
     core.save_scores(&case, None, &sheet).unwrap();
     core.add_own_paragraph(&case, "kindergarten", OWN).unwrap();
@@ -198,7 +199,7 @@ fn work(dir: &Path, version: &str) {
     other
         .restore_staged_backup(Some(PASSWORD), None)
         .unwrap_or_else(|e| panic!("{version}: restore: {e:?}"));
-    let now = core.case_detail(&case).unwrap();
+    let now = from_the_vault(core.case_detail(&case).unwrap());
     assert_eq!(
         other.case_detail(&case).unwrap(),
         now,

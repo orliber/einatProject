@@ -2,7 +2,7 @@ import { mockIPC } from "@tauri-apps/api/mocks";
 import { getKept } from "../../kept";
 import type { CaseApi } from "../CaseScreen";
 import { prepared } from "../../test/fixtures";
-import { resetRuns, runLine, runOf, runWholeReport, showingCase, stopRun } from "./reportRun";
+import { PARALLEL, resetRuns, runInstruction, runLine, runOf, runWholeReport, showingCase, stopRun } from "./reportRun";
 
 /** A case screen whose review sends at once (the default: no window before sending). */
 function caseApi(over: { unsorted?: boolean } = {}) {
@@ -71,7 +71,7 @@ describe("writing the whole report in the background", () => {
     expect(runLine(r)).toBe("הדוח נכתב ונבדק מול המקורות. 4 סעיפים מחכים לאישורך");
   });
 
-  it("checks each section as soon as it is in, beside the writing that is left, one check at a time (D-146)", async () => {
+  it("checks each section as soon as it is in, beside the writing that is left, three checks at a time (D-146, D-161)", async () => {
     const events: string[] = [];
     let writing = 0;
     let most = 0;
@@ -94,7 +94,8 @@ describe("writing the whole report in the background", () => {
         checking += 1;
         mostChecks = Math.max(mostChecks, checking);
         events.push(`check:${a.approvalId}`);
-        await new Promise((r) => setTimeout(r, 5));
+        // Longer than the writing: the first three are out together, never more.
+        await new Promise((r) => setTimeout(r, 30));
         checking -= 1;
         return { draft_ids: [], checks: [], demo: false };
       }
@@ -105,9 +106,61 @@ describe("writing the whole report in the background", () => {
     expect(events.indexOf("check:v-a")).toBeLessThan(events.indexOf("written:ap-d"));
     expect(events.filter((e) => e.startsWith("check:"))).toHaveLength(4);
     expect(events.at(-1)).toBe("check:v-d");
-    expect([most, mostChecks]).toEqual([3, 1]);
+    expect([most, mostChecks]).toEqual([3, 3]);
     const r = runOf("c1") ?? ({} as never);
     expect([r.checked, r.toCheck, r.phase]).toEqual([4, 4, "done"]);
+  });
+
+  it("never has more checks out than sections being written, however many wait", async () => {
+    const six = ["a", "b", "c", "d", "e", "f"].map((k) => [k, prepared({ approval_id: `ap-${k}` })]);
+    let checking = 0;
+    let mostChecks = 0;
+    mockIPC(async (cmd, args) => {
+      const a = args as Record<string, string>;
+      if (cmd === "prepare_full_draft") return six;
+      if (cmd === "send_section") return {};
+      if (cmd === "prepare_verify") return prepared({ approval_id: `v-${a.sectionKey}` });
+      if (cmd === "send_verify") {
+        checking += 1;
+        mostChecks = Math.max(mostChecks, checking);
+        await new Promise((r) => setTimeout(r, 20));
+        checking -= 1;
+        return { draft_ids: [], checks: [], demo: false };
+      }
+      return null;
+    });
+    await runWholeReport(caseApi().api, { verify: true, ai: "Claude" });
+    expect(mostChecks).toBe(PARALLEL);
+    const r = runOf("c1") ?? ({} as never);
+    expect([r.checked, r.toCheck, r.phase]).toEqual([6, 6, "done"]);
+  });
+
+  it("a request built again goes with the wish she kept for the section (D-163)", async () => {
+    const asked: string[] = [];
+    mockIPC(async (cmd, args) => {
+      const a = args as Record<string, string>;
+      if (cmd === "draft_briefs") return { recent: [], sections: { a: "להתחיל מהגן" } };
+      if (cmd === "prepare_full_draft") return four.slice(0, 2);
+      if (cmd === "prepare_section") {
+        asked.push(`${a.sectionKey}: ${a.instruction}`);
+        return prepared({ approval_id: `again-${a.sectionKey}` });
+      }
+      return {};
+    });
+    const { api } = caseApi();
+    // A review that builds every request again before sending it.
+    api.review = async (r) => {
+      const again = await r.reprepare();
+      if (again.approval_id) await r.onSend(again.approval_id);
+      return true;
+    };
+    await runWholeReport(api, { verify: false, ai: "Claude" });
+    expect(asked.sort()).toEqual([
+      `a: ${runInstruction("להתחיל מהגן")}`,
+      `b: ${runInstruction(undefined)}`,
+    ]);
+    expect(runInstruction("להתחיל מהגן")).toMatch(/עם מקור לכל פסקה\. מה שחשוב לי שייכתב בסעיף: להתחיל מהגן$/);
+    expect(runInstruction("  ")).toBe(runInstruction(undefined));
   });
 
   it("“לעצור” while a check is out: that check finishes, and no other section is checked", async () => {

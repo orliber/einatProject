@@ -43,13 +43,26 @@ pub(crate) fn guide_for(
     meta: &CaseMeta,
     section: &dv_domain::ReportSection,
 ) -> Result<SectionGuide, CoreError> {
+    guide_with(v, meta, section, None)
+}
+
+/// [`guide_for`], with her learned style already read (the case view reads it once).
+pub(crate) fn guide_with(
+    v: &Vault,
+    meta: &CaseMeta,
+    section: &dv_domain::ReportSection,
+    style: Option<&crate::style::LoadedStyle>,
+) -> Result<SectionGuide, CoreError> {
     let stored = v
         .setting(&format!("{GUIDE_PREFIX}{}", section.key))?
         .filter(|t| !t.trim().is_empty());
     // Until she writes her own, the order she writes the section in, when it was learned
     // from her reports (K3, by the child's age band, K13); else the institute's text.
     let learned = if stored.is_none() {
-        crate::style::style_skeleton(v, &section.key, meta.age)?
+        match style {
+            Some(st) => st.skeleton(&section.key, meta.age),
+            None => crate::style::style_skeleton(v, &section.key, meta.age)?,
+        }
     } else {
         None
     };

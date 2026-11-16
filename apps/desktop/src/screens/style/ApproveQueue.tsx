@@ -16,6 +16,8 @@ function itemWhy(item: StyleItem, reports: number, o: StyleOverview): string {
   const where = item.section ? `בסעיף ${title ?? item.section}` : "בכל הדוח";
   if (item.origin === "edits") return `נלמד מהתיקונים שלך, ${where}.`;
   if (item.origin === "manual") return `כתבת את זה בעצמך, ${where}.`;
+  if (item.origin === "edited") return `ניסחת את זה מחדש בעצמך, ${where}.`;
+  if (item.origin === "accepted") return `אישרת את זה מתוך הדוחות שלך, ${where}.`;
   if (item.support === 1) return `מופיע באחד הדוחות שלך, ${where}.`;
   if (item.support > 1) return `מופיע ב-${item.support} ${reports >= item.support ? `מתוך ${reports} ` : "מ"}הדוחות שלך, ${where}.`;
   return `מהניתוח של הדוחות שלך, ${where}.`;
