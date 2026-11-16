@@ -1,16 +1,16 @@
 // The money tab over the demo core: the income diary of a month (days, lines, voided and
 // changed lines, totals, payments with no receipt number, the notice about the tax
-// authority), the open balances with the payment message, and the year at a glance.
-// Every name is invented; the clock is held at a Sunday morning.
+// authority), the open balances with the payment message, the year at a glance, and the
+// file for the accountant (D-194). Every name is invented; the clock is held at a Sunday morning.
 import { configure, screen, waitFor, within } from "@testing-library/react";
 import type { Alert } from "../../ipc/generated/Alert";
 import type { DiaryLine } from "../../ipc/generated/DiaryLine";
 import type { PatientRow } from "../../ipc/generated/PatientRow";
 import { a11yViolations } from "../../test/a11y";
-import type { Override, Served } from "../../test/host";
+import { serve, type Override, type Served } from "../../test/host";
 import { forgetDiscreet } from "./ClinicScreen";
 import { formatMoney } from "./format";
-import { barPercent, daysLackingReceipts, forgetMoneyView, lacksReceipt, missingReceipts, openBalances, shiftMonth } from "./MoneyTab";
+import { barPercent, daysLackingReceipts, exportPeriod, forgetMoneyView, lacksReceipt, missingReceipts, openBalances, shiftMonth } from "./MoneyTab";
 import { ask, holding, idOf, NOW, openOn, refusing } from "./officeTestKit";
 
 configure({ asyncUtilTimeout: 5000 });
@@ -73,6 +73,11 @@ describe("the pure pieces", () => {
     expect(out.map((b) => [b.row.patient.id, b.since])).toEqual([["a", "2026-08-01"], ["d", "2026-09-01"], ["b", null], ["f", null]]);
   });
 
+  it("the file for the accountant is asked for by its month, or by the year of that month", () => {
+    expect(exportPeriod("month", "2026-11")).toBe("2026-11");
+    expect(exportPeriod("year", "2026-11")).toBe("2026");
+  });
+
   it("a bar is a share of the largest month, never a sliver that cannot be seen", () => {
     expect(barPercent(0, 1000)).toBe(0);
     expect(barPercent(1000, 1000)).toBe(100);
@@ -115,8 +120,8 @@ describe("the income diary", () => {
     await user.click(screen.getByRole("button", { name: "החודש הבא" }));
     expect(await screen.findByRole("heading", { name: "ינואר 2027" })).toBeInTheDocument();
     expect(screen.getAllByRole("note").some((n) => n.textContent === NOTICE)).toBe(true);
-    // And nothing here offers to take the diary out of the vault.
-    expect(screen.queryByRole("button", { name: /ייצוא|קובץ|הדפסה/ })).toBeNull();
+    // The one way out of the vault is the file for the accountant, with no names (D-194).
+    expect(screen.getAllByRole("button", { name: /ייצוא|קובץ|הדפסה/ }).map((b) => b.textContent)).toEqual(["ייצוא לרואה החשבון"]);
   });
 
   it("the month's figures: charged, received, by method, as the vault counts them", async () => {
@@ -367,9 +372,9 @@ describe("the year at a glance", () => {
     expect(requests().some((r) => r.op === "income" && r.year === 2025)).toBe(true);
     await user.click(screen.getByRole("button", { name: "לשנה הנוכחית" }));
     expect(await screen.findByRole("table", { name: "סיכום 2026 לפי חודשים" })).toBeInTheDocument();
-    // The notice is above both views; the year has no export either.
+    // The notice is above both views; the year has the same one export, and no other.
     expect(screen.getAllByRole("note").some((n) => n.textContent === NOTICE)).toBe(true);
-    expect(screen.queryByRole("button", { name: /ייצוא|קובץ|הדפסה/ })).toBeNull();
+    expect(screen.getAllByRole("button", { name: /ייצוא|קובץ|הדפסה/ }).map((b) => b.textContent)).toEqual(["ייצוא לרואה החשבון"]);
     view.unmount();
     await openOn(MONEY);
     expect(screen.getByRole("radio", { name: "סיכום שנתי" })).toHaveAttribute("aria-checked", "true");
@@ -426,5 +431,107 @@ describe("discreet mode", () => {
     expect(await within(dialog).findByText("נוצר")).toBeInTheDocument();
     expect(dialog).toHaveTextContent("פרטי השינויים מוסתרים במצב דיסקרטי.");
     for (const text of ["מאיה", "נרשם בכרטיס הלא נכון", "שילמו בשתי העברות", "סיבת הביטול"]) expect(dialog, text).not.toHaveTextContent(text);
+  });
+});
+
+describe("the file for the accountant (D-194)", () => {
+  const SAVED = "C:\\Users\\demo\\Downloads\\";
+  const exports = (served: Served) => served.calls.filter((c) => c.cmd === "export_income").map((c) => c.args);
+  const openExport = async (served: Awaited<ReturnType<typeof openOn>>) => {
+    await served.user.click(await screen.findByRole("button", { name: "ייצוא לרואה החשבון" }));
+    return screen.findByRole("dialog", { name: "ייצוא לרואה החשבון" });
+  };
+
+  it("from the diary: the month she is looking at, what the file holds, and where it was saved", async () => {
+    const served = await openOn(MONEY);
+    await day("יום חמישי, 05.11.2026");
+    const dialog = await openExport(served);
+    expect(within(dialog).getByRole("radio", { name: "חודש" })).toHaveAttribute("aria-checked", "true");
+    expect(within(dialog).getByRole("group", { name: "החודש לייצוא" })).toHaveTextContent("נובמבר 2026");
+    // What is in it, and what is not, before anything is made.
+    expect(dialog).toHaveTextContent("אין בו שמות, טלפונים, הערות או סיבות ביטול.");
+    expect(dialog).toHaveTextContent("רשומות של כרטיסים שנמחקו");
+    // The payment of November with no receipt number, so she can complete it first.
+    expect(await within(dialog).findByRole("status")).toHaveTextContent("בחודש הזה יש תקבול אחד בלי מספר קבלה");
+    expect(await a11yViolations(served.view.baseElement)).toEqual([]);
+    expect(exports(served)).toEqual([]);
+
+    await served.user.click(within(dialog).getByRole("button", { name: "שמירת הקובץ" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(exports(served)).toEqual([{ period: "2026-11" }]);
+    expect(served.notes).toEqual([`הקובץ לרואה החשבון נשמר: \u2066${SAVED}הכנסות 2026-11.csv\u2069`]);
+    // The name of the file is the period's; nothing of a family is in what the window was told.
+    expect(served.notes[0]).not.toMatch(/תמר|יובל|נועם|מאיה/);
+    // The log says it, with the period only.
+    const log = (await served.core.handle("activity", { before: null })) as { entries: { event: string; text: string }[] };
+    expect(log.entries.filter((e) => e.event === "clinic_income_exported").map((e) => e.text)).toEqual(["יומן ההכנסות של נובמבר 2026 יוצא לקובץ לרואה החשבון, בלי שמות"]);
+  });
+
+  it("another month, or a whole year, chosen in the dialog", async () => {
+    const served = await openOn(MONEY);
+    await day("יום חמישי, 05.11.2026");
+    let dialog = await openExport(served);
+    await served.user.click(within(dialog).getByRole("button", { name: "החודש הקודם" }));
+    expect(within(dialog).getByRole("group", { name: "החודש לייצוא" })).toHaveTextContent("אוקטובר 2026");
+    await served.user.click(within(dialog).getByRole("button", { name: "שמירת הקובץ" }));
+    await waitFor(() => expect(exports(served)).toEqual([{ period: "2026-10" }]));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+
+    dialog = await openExport(served);
+    await served.user.click(within(dialog).getByRole("radio", { name: "שנה שלמה" }));
+    const year = within(dialog).getByRole("group", { name: "השנה לייצוא" });
+    expect(year).toHaveTextContent("שנת 2026");
+    // A year has no one month to count receipts in.
+    expect(within(dialog).queryByRole("status")).toBeNull();
+    await served.user.click(within(year).getByRole("button", { name: "השנה הקודמת" }));
+    expect(year).toHaveTextContent("שנת 2025");
+    await served.user.click(within(dialog).getByRole("button", { name: "שמירת הקובץ" }));
+    await waitFor(() => expect(exports(served)).toEqual([{ period: "2026-10" }, { period: "2025" }]));
+    await waitFor(() => expect(served.notes.at(-1)).toBe(`הקובץ לרואה החשבון נשמר: \u2066${SAVED}הכנסות 2025.csv\u2069`));
+  });
+
+  it("from the year at a glance, the year she is looking at", async () => {
+    const served = await openOn(MONEY);
+    await served.user.click(screen.getByRole("radio", { name: "סיכום שנתי" }));
+    await screen.findByRole("table", { name: "סיכום 2026 לפי חודשים" });
+    await served.user.click(screen.getByRole("button", { name: "השנה הקודמת" }));
+    expect(await screen.findByRole("heading", { name: "אין רישומים בשנת 2025" })).toBeInTheDocument();
+    const dialog = await openExport(served);
+    expect(within(dialog).getByRole("radio", { name: "שנה שלמה" })).toHaveAttribute("aria-checked", "true");
+    expect(within(dialog).getByRole("group", { name: "השנה לייצוא" })).toHaveTextContent("שנת 2025");
+    // Switched to a month: this month's, in the year shown.
+    await served.user.click(within(dialog).getByRole("radio", { name: "חודש" }));
+    expect(within(dialog).getByRole("group", { name: "החודש לייצוא" })).toHaveTextContent("נובמבר 2025");
+    await served.user.click(within(dialog).getByRole("button", { name: "ביטול" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(exports(served)).toEqual([]);
+    expect(served.notes).toEqual([]);
+  });
+
+  it("a file that was not saved says why in the dialog, which stays open, and claims nothing", async () => {
+    const refused: Override = (cmd) => {
+      if (cmd === "copy_secret") return 60;
+      if (cmd === "export_income") throw { code: "refused", message: "לא נבחרה תיקייה, ולכן הקובץ לא נשמר. אפשר להפיק שוב ולבחור תיקייה.", details: [], action: { kind: "dismiss" } };
+      return undefined;
+    };
+    const served = await openOn(MONEY, refused);
+    await day("יום חמישי, 05.11.2026");
+    const dialog = await openExport(served);
+    await served.user.click(within(dialog).getByRole("button", { name: "שמירת הקובץ" }));
+    expect(await within(dialog).findByText(/לא נבחרה תיקייה, ולכן הקובץ לא נשמר/)).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "ייצוא לרואה החשבון" })).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "שמירת הקובץ" })).toBeEnabled();
+    expect(served.notes).toEqual([]);
+  });
+
+  it("the demo core checks the period as the core does, and names the file by it only", async () => {
+    const served = await serve();
+    await expect(served.core.handle("export_income", { period: "2026-11" })).resolves.toBe(`${SAVED}הכנסות 2026-11.csv`);
+    await expect(served.core.handle("export_income", { period: "2026" })).resolves.toBe(`${SAVED}הכנסות 2026.csv`);
+    for (const wrong of ["2026-13", "1999", "", "תמר", "2026-1"]) {
+      await expect(served.core.handle("export_income", { period: wrong })).rejects.toMatchObject({ code: "refused", message: "צריך לבחור חודש או שנה לייצוא." });
+    }
+    await served.core.handle("lock", {});
+    await expect(served.core.handle("export_income", { period: "2026-11" })).rejects.toMatchObject({ code: "locked" });
   });
 });

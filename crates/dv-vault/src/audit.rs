@@ -70,6 +70,9 @@ pub enum AuditEvent {
     /// Rows of the clinic could not be read and were left out of the screens (D-178).
     /// Meta: how many (a number only), never which or what they hold.
     ClinicUnreadable,
+    /// The income diary of a month or a year was written to a file for the accountant, with
+    /// no name in it (D-194). Meta: the period only (`2026-11`, `2026`).
+    ClinicIncomeExported,
 }
 
 impl AuditEvent {
@@ -117,6 +120,7 @@ impl AuditEvent {
             AuditEvent::ClinicPatientErased => "clinic_patient_erased",
             AuditEvent::ClinicNoteToCase => "clinic_note_to_case",
             AuditEvent::ClinicUnreadable => "clinic_unreadable",
+            AuditEvent::ClinicIncomeExported => "clinic_income_exported",
         }
     }
 }

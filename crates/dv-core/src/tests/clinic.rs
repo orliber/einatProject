@@ -3922,3 +3922,283 @@ fn the_retention_period_counts_from_the_last_change_to_the_card_too() {
         Some("2020-01-01")
     );
 }
+
+// ------------------------------------------------------------------ the income export (D-194)
+
+fn income_file(core: &mut Core, period: &str) -> String {
+    let export = core.clinic_income_export(period).unwrap();
+    assert_eq!(export.file_name, format!("הכנסות {period}.csv"));
+    let text = String::from_utf8(export.bytes).unwrap();
+    text.strip_prefix('\u{feff}').unwrap().to_owned()
+}
+
+/// Every string a value holds, at any depth.
+fn strings_of(value: &serde_json::Value, out: &mut Vec<String>) {
+    match value {
+        serde_json::Value::String(s) => out.push(s.clone()),
+        serde_json::Value::Array(items) => items.iter().for_each(|v| strings_of(v, out)),
+        serde_json::Value::Object(map) => map.values().for_each(|v| strings_of(v, out)),
+        _ => {}
+    }
+}
+
+/// D-194: nothing of the card reaches the accountant's file: not the child's name, a
+/// parent's name, phone or e-mail, the card's or a record's id, what she wrote about the
+/// family or a session, who paid, a note, or why a payment was voided.
+#[test]
+fn the_income_export_holds_nothing_from_the_patient_card() {
+    let (_dir, mut core) = open_clinic();
+    let patient = save_patient(
+        &mut core,
+        Patient {
+            contacts: vec![
+                Contact {
+                    role: ContactRole::Mother,
+                    name: "שלומית ברקוביץ".to_owned(),
+                    phone: "000-4321".to_owned(),
+                    email: "family@example.com".to_owned(),
+                },
+                contact(ContactRole::Father, "אביתר ברקוביץ"),
+            ],
+            framework: "גן החרציות".to_owned(),
+            referred_by: "ד\"ר אלמוגי".to_owned(),
+            reason: "קשיי קשב בגן החרציות".to_owned(),
+            notes: "אבא עובד במשמרות לילה".to_owned(),
+            ..child("יהונתן ברקוביץ")
+        },
+    );
+    let visit = save_visit(
+        &mut core,
+        Visit {
+            title: "פגישה עם הסבתא חנה".to_owned(),
+            place: "חדר הירדן".to_owned(),
+            note: "להביא את שאלוני הקשב".to_owned(),
+            fee: 45_000,
+            ..a_visit(&patient, VisitKind::Intake, "2026-11-03", 540)
+        },
+    );
+    save_visit(
+        &mut core,
+        Visit {
+            status: VisitStatus::Held,
+            status_note: "הגיעו באיחור של רבע שעה".to_owned(),
+            ..visit.clone()
+        },
+    );
+    save_note(
+        &mut core,
+        SessionNote {
+            personal: "התרשמות אישית מהאם".to_owned(),
+            ..a_note(&patient, Some(&visit), "יהונתן שיתף פעולה לאורך המפגש")
+        },
+    );
+    save_charge(
+        &mut core,
+        Charge {
+            what: "כתיבת הדוח המורחב".to_owned(),
+            ..a_charge(&patient, "2026-11-03", 150_000)
+        },
+    );
+    let named = |receipt: &str, payer: &str, note: &str, date: &str, amount: i32| Payment {
+        receipt: receipt.to_owned(),
+        payer: payer.to_owned(),
+        note: note.to_owned(),
+        ..a_payment(&patient, date, amount)
+    };
+    save_payment(
+        &mut core,
+        named(
+            "קבלה 1043 ברקוביץ",
+            "קרן הסיוע העירונית",
+            "שולם בכניסה",
+            "2026-11-03",
+            45_000,
+        ),
+    );
+    let wrong = save_payment(
+        &mut core,
+        named("", "סבתא חנה", "בהעברה מהסבתא", "2026-11-04", 99_000),
+    );
+    ask(
+        &mut core,
+        ClinicRequest::VoidPayment {
+            id: wrong.id.clone(),
+            reason: "נרשם בטעות על שם שלומית".to_owned(),
+        },
+    );
+    save_payment(
+        &mut core,
+        Payment {
+            method: PayMethod::Cash,
+            ..named("", "", "מזומן מאביתר", "2026-11-05", 20_000)
+        },
+    );
+    save_task(
+        &mut core,
+        ClinicTask {
+            patient_id: Some(patient.id.clone()),
+            kind: TaskKind::Call,
+            title: "להתקשר לשלומית בעניין הגן".to_owned(),
+            note: "אחרי השעה ארבע".to_owned(),
+            ..ClinicTask::default()
+        },
+    );
+
+    // Every string she typed or the vault made for the card, its records and its tasks.
+    let card = card(&mut core, &patient.id);
+    let mut words = Vec::new();
+    strings_of(&serde_json::to_value(&card.patient).unwrap(), &mut words);
+    for view in &card.visits {
+        strings_of(&serde_json::to_value(&view.visit).unwrap(), &mut words);
+    }
+    for value in [
+        serde_json::to_value(&card.notes).unwrap(),
+        serde_json::to_value(&card.payments).unwrap(),
+        serde_json::to_value(&card.charges).unwrap(),
+        serde_json::to_value(&card.tasks).unwrap(),
+    ] {
+        strings_of(&value, &mut words);
+    }
+    // Dates and the names of values ("bit", "held") are not hers; an empty one says nothing.
+    words.retain(|w| !w.is_empty() && rules::parse_date(w).is_none());
+    words.retain(|w| !w.chars().all(|c| c.is_ascii_lowercase() || c == '_'));
+    assert!(words.len() > 25, "{words:?}");
+    assert!(words.contains(&patient.id) && words.contains(&wrong.id));
+
+    for period in ["2026-11", "2026"] {
+        let text = income_file(&mut core, period);
+        for word in &words {
+            assert!(
+                !text.contains(word.as_str()),
+                "{word} in the file of {period}"
+            );
+        }
+        for part in [
+            "יהונתן",
+            "ברקוביץ",
+            "שלומית",
+            "אביתר",
+            "חנה",
+            "4321",
+            "example",
+        ] {
+            assert!(!text.contains(part), "{part} in the file of {period}");
+        }
+        // What is there: the three payments, the voided one marked and counted nowhere.
+        assert!(
+            text.contains("2026-11-03,1043,450.00,ביט,תקין\r\n"),
+            "{text}"
+        );
+        assert!(text.contains("2026-11-04,,990.00,ביט,בוטל\r\n"), "{text}");
+        assert!(text.contains("2026-11-05,,200.00,מזומן,תקין\r\n"), "{text}");
+        assert!(
+            text.contains("נובמבר 2026,סך החודש,650.00,0.00,650.00\r\n"),
+            "{text}"
+        );
+        assert!(text.contains("תקבולים בלי מספר קבלה ברשימה,1,,,\r\n"));
+        assert!(text.contains("תקבולים שבוטלו,1,,,\r\n"));
+    }
+
+    // The log: that it was made, and for which period. Nothing else.
+    let v = core.vault_ref().unwrap();
+    for period in ["2026-11", "2026"] {
+        let entry = v
+            .audit_find(
+                "clinic_income_exported",
+                &format!("\"period\":\"{period}\""),
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(entry.meta, format!("{{\"period\":\"{period}\"}}"));
+        assert!(entry.case_ref.is_none());
+    }
+    let log = core.activity(None).unwrap();
+    let said: Vec<&str> = log
+        .entries
+        .iter()
+        .filter(|e| e.event == "clinic_income_exported")
+        .map(|e| e.text.as_str())
+        .collect();
+    assert_eq!(
+        said,
+        [
+            "יומן ההכנסות של שנת 2026 יוצא לקובץ לרואה החשבון, בלי שמות",
+            "יומן ההכנסות של נובמבר 2026 יוצא לקובץ לרואה החשבון, בלי שמות",
+        ]
+    );
+}
+
+/// D-194: what the erased cards counted for is in the file as totals; a period that is not
+/// one is refused; a payment that does not read stops the file; locked is locked.
+#[test]
+fn the_income_export_adds_the_erased_cards_and_is_never_made_with_a_row_missing() {
+    let (_dir, mut core) = open_clinic();
+    let stays = new_patient(&mut core, "תמר");
+    save_payment(&mut core, a_payment(&stays, "2026-03-04", 35_000));
+    let gone = an_old_family(&mut core, "אלמוג דוידי");
+    erase_on(&mut core, &gone, "2100-01-01");
+    let text = income_file(&mut core, "2026-03");
+    assert!(!text.contains("אלמוג") && !text.contains("דוידי"));
+    // Tamar's payment is a line; the erased card's transfer is in the month's totals only.
+    assert!(
+        text.contains("2026-03-04,101,350.00,ביט,תקין\r\n"),
+        "{text}"
+    );
+    assert!(!text.contains("2026-03-05"), "{text}");
+    assert!(
+        text.contains("מרץ 2026,העברה בנקאית,0.00,1500.00,1500.00\r\n"),
+        "{text}"
+    );
+    assert!(
+        text.contains("מרץ 2026,סך החודש,350.00,1500.00,1850.00\r\n"),
+        "{text}"
+    );
+    assert!(text.contains("תקבולים בלי מספר קבלה ברשומות של כרטיסים שנמחקו,1,,,\r\n"));
+    // The year file adds up to what the yearly summary says was received.
+    let year = income_file(&mut core, "2026");
+    let received = i64::from(income(&mut core, 2026).received);
+    assert!(
+        year.contains(&format!(
+            ",סך השנה,350.00,{},{}\r\n",
+            rules::shekels(received - 35_000),
+            rules::shekels(received)
+        )),
+        "{year}"
+    );
+
+    for wrong in ["2026-13", "1999", "", "נובמבר"] {
+        match core.clinic_income_export(wrong) {
+            Err(CoreError::Refused(text)) => {
+                assert_eq!(text, "צריך לבחור חודש או שנה לייצוא.");
+            }
+            other => panic!("{wrong:?}: {other:?}"),
+        }
+    }
+
+    // A payment of the period that does not read: no file, and nothing in the log.
+    let before = audit_count(&mut core, "clinic_income_exported");
+    raw_put(
+        &mut core,
+        "payment",
+        &stays,
+        "2026-03-09",
+        r#"{"amount":"שבור"}"#,
+    );
+    match core.clinic_income_export("2026-03") {
+        Err(CoreError::Refused(text)) => {
+            hebrew(&text);
+            assert!(text.contains("לא נוצר"), "{text}");
+        }
+        other => panic!("{other:?}"),
+    }
+    assert!(core.clinic_income_export("2026").is_err());
+    assert_eq!(audit_count(&mut core, "clinic_income_exported"), before);
+    // Another month is whole, and is made.
+    income_file(&mut core, "2026-04");
+
+    core.lock();
+    assert!(matches!(
+        core.clinic_income_export("2026-03"),
+        Err(CoreError::Locked)
+    ));
+}

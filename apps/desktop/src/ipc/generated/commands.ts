@@ -132,6 +132,7 @@ export type Commands = {
   drive_backup_turn_off: { args: undefined; returns: DriveCleanupResult };
   drive_backup_turn_on: { args: undefined; returns: DriveBackupStatus };
   edit_paragraph: { args: { caseId: string; draftId: string; text: string; openedWith: string | null }; returns: boolean };
+  export_income: { args: { period: string }; returns: string };
   export_letter: { args: { caseId: string; audience: string; password: string | null }; returns: string };
   export_pdf: { args: { caseId: string; password: string | null; parents: ParentsOptions | null }; returns: string };
   export_report: { args: { caseId: string; password: string | null; parents: ParentsOptions | null }; returns: string };

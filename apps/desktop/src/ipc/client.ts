@@ -412,6 +412,9 @@ export const ipc = {
 
   /** The clinic's one command (D-170); `ipc/clinic.ts` is its typed client. */
   clinic: (request: ClinicRequest) => call("clinic", { request }),
+  /** D-194: the payments of a month ("2026-11") or a year ("2026") as a file for the
+   *  accountant, with no names in it, saved beside the reports. Answers where it was saved. */
+  exportIncome: (period: string) => call("export_income", { period }),
 
   /** The system's print window (the macOS webview ignores `window.print()`). */
   printPage: () => run("print_page"),

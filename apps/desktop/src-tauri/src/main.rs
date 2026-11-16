@@ -414,6 +414,7 @@ fn main() {
             set_critical_values,
             security_status,
             export_security_pdf,
+            export_income,
             set_send_stopped,
             usage_summary,
             set_monthly_cap,
