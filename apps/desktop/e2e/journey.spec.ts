@@ -189,7 +189,9 @@ test("a style report is read and learned by itself after one upload", async ({ p
 
 test("settings, consultation and writing style pages are accessible", async ({ page }) => {
   await unlock(page);
-  for (const name of ["הגדרות", "התייעצות", "הסגנון שלי"]) {
+  // The reports' pages are in the row under the bar (D-191); the settings, a button of the whole
+  // program, come last.
+  for (const name of ["התייעצות", "הסגנון שלי", "הגדרות"]) {
     await page.getByRole("button", { name, exact: true }).first().click();
     await expect(page.getByRole("button", { name, exact: true }).first()).toHaveAttribute("aria-current", "page");
     await expect(page.getByRole("heading", { level: 1 }).first()).toBeVisible();
