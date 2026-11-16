@@ -66,7 +66,11 @@ impl Core {
             .collect();
         let sheets = score_sheets(v, case_id, &inputs)?;
         let style_model = style.model();
-        let interpretations = style::InterpretationCheck::with(style.interpretations(), &sheets);
+        let interpretations = style::InterpretationCheck::with(
+            style.interpretations(),
+            &sheets,
+            &crate::instruments::critical_values(v)?,
+        );
         // This case's own dates: not the whole case list and recycle bin for two numbers.
         let (created_at, updated_at) = v.case_times(case_id)?;
         let retention_default = retention::default_until(created_at, updated_at, meta.age.as_ref());

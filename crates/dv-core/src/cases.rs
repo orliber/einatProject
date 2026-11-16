@@ -257,7 +257,17 @@ impl Core {
         if let Ok(v) = self.vault_ref() {
             crate::instruments::check_given(v, &sheet.instrument)?;
         }
-        dv_domain::format_sheet_with(sheet, self.sheet_habits()?).map_err(CoreError::Refused)
+        let critical = self.sheet_critical()?;
+        dv_domain::format_sheet_with(sheet, self.sheet_habits()?, &critical)
+            .map_err(CoreError::Refused)
+    }
+
+    /// The manual's critical values she entered (D-190); none while locked.
+    fn sheet_critical(&mut self) -> Result<Vec<dv_domain::CriticalValue>, CoreError> {
+        match self.vault_ref() {
+            Ok(v) => crate::instruments::critical_values(v),
+            Err(_) => Ok(Vec::new()),
+        }
     }
 
     /// What she leaves out beside scores in her reports (K12); nothing while locked.
@@ -281,7 +291,8 @@ impl Core {
         }
         // An instrument she does not give is not entered (D-098).
         crate::instruments::check_given(self.vault_ref()?, &sheet.instrument)?;
-        let text = dv_domain::format_sheet_with(sheet, self.sheet_habits()?)
+        let critical = self.sheet_critical()?;
+        let text = dv_domain::format_sheet_with(sheet, self.sheet_habits()?, &critical)
             .map_err(CoreError::Refused)?;
         let title = dv_domain::instruments()
             .into_iter()

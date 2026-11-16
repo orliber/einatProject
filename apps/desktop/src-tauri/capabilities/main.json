@@ -20,6 +20,8 @@
     "allow-safety-net",
     "allow-instrument-approvals",
     "allow-set-instrument-status",
+    "allow-critical-values",
+    "allow-set-critical-values",
     "allow-security-status",
     "allow-export-security-pdf",
     "allow-set-send-stopped",

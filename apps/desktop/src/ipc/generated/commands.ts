@@ -13,6 +13,8 @@ import type { ConsultResult } from "./ConsultResult";
 import type { ConsultationSummary } from "./ConsultationSummary";
 import type { ConsultationView } from "./ConsultationView";
 import type { CreatedVault } from "./CreatedVault";
+import type { CriticalValue } from "./CriticalValue";
+import type { CriticalValuesView } from "./CriticalValuesView";
 import type { DraftBriefs } from "./DraftBriefs";
 import type { DriveBackupStatus } from "./DriveBackupStatus";
 import type { DriveCleanupResult } from "./DriveCleanupResult";
@@ -110,6 +112,7 @@ export type Commands = {
   create_follow_up: { args: { caseId: string }; returns: string };
   create_sample_case: { args: undefined; returns: string };
   create_vault: { args: { password: string }; returns: null };
+  critical_values: { args: undefined; returns: CriticalValuesView };
   decide_suspect: { args: { caseId: string; token: string; decision: SuspectDecision }; returns: null };
   delete_case: { args: { caseId: string }; returns: null };
   delete_consultation: { args: { id: string }; returns: null };
@@ -223,6 +226,7 @@ export type Commands = {
   set_api_key: { args: { provider: string; key: string; retentionAck: boolean }; returns: null };
   set_auto_backup: { args: { on: boolean }; returns: BackupStatus };
   set_case_guide: { args: { caseId: string; sectionKey: string; text: string }; returns: null };
+  set_critical_values: { args: { values: Array<CriticalValue> }; returns: CriticalValuesView };
   set_dsm_severity: { args: { caseId: string; social: number | null; restricted: number | null }; returns: null };
   set_identities: { args: { caseId: string; identities: Array<IdentityInput> }; returns: Array<Identity> };
   set_input_sections: { args: { caseId: string; inputId: string; sections: Array<string> }; returns: null };

@@ -305,3 +305,69 @@ fn a_saved_comparison_follows_her_answer() {
         .unwrap();
     assert!(comparison(&mut core).is_none());
 }
+
+/// D-190: the manual's critical values she enters turn the relative places of a sheet to the
+/// publisher's method; a missing one keeps the labelled rule of thumb. The values here are
+/// invented for the test, not a manual's.
+#[test]
+fn critical_values_she_enters_switch_the_sheet_to_the_manuals_method() {
+    let (_dir, mut core, _case) = setup(None);
+    let view = core.critical_values().unwrap();
+    assert!(view.values.is_empty());
+    assert!(view.sets.iter().any(|s| s.key == "wisc_v"));
+    let entries = [
+        ("similarities", 10.0),
+        ("vocabulary", 10.0),
+        ("block_design", 7.0),
+        ("visual_puzzles", 10.0),
+        ("matrix", 13.0),
+        ("figure_weights", 10.0),
+        ("digit_span", 10.0),
+        ("picture_span", 10.0),
+        ("coding", 10.0),
+        ("symbol_search", 10.0),
+    ];
+    let wisc = sheet("wisc_v", &entries, "");
+    let before = core.preview_scores(&wisc).unwrap();
+    assert!(before.contains("לפי כלל אצבע"), "{before}");
+
+    // A value out of range is refused, and nothing is stored.
+    let bad = vec![dv_domain::CriticalValue {
+        set: "wisc_v".into(),
+        measure: "coding".into(),
+        value: 30.0,
+    }];
+    assert!(matches!(
+        core.set_critical_values(bad),
+        Err(CoreError::Refused(_))
+    ));
+    assert!(core.critical_values().unwrap().values.is_empty());
+
+    let all: Vec<dv_domain::CriticalValue> = entries
+        .iter()
+        .map(|(m, _)| dv_domain::CriticalValue {
+            set: "wisc_v".into(),
+            measure: (*m).into(),
+            value: 2.75,
+        })
+        .collect();
+    // All but one: still the rule of thumb.
+    core.set_critical_values(all[1..].to_vec()).unwrap();
+    assert!(core.preview_scores(&wisc).unwrap().contains("לפי כלל אצבע"));
+    // Every one: the manual's method.
+    let view = core.set_critical_values(all).unwrap();
+    assert_eq!(view.values.len(), 10);
+    let after = core.preview_scores(&wisc).unwrap();
+    assert!(after.contains("לפי שיטת המדריך"), "{after}");
+    assert!(
+        after.contains("חוזקה יחסית: מטריצות (MR) – ציון 13"),
+        "{after}"
+    );
+    assert!(
+        after.contains("חולשה יחסית: קוביות (BD) – ציון 7"),
+        "{after}"
+    );
+    // Cleared: back to the rule of thumb.
+    core.set_critical_values(Vec::new()).unwrap();
+    assert!(core.preview_scores(&wisc).unwrap().contains("לפי כלל אצבע"));
+}

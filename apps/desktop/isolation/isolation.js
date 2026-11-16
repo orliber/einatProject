@@ -35,6 +35,8 @@ const ALLOWED = new Set([
   "safety_net",
   "instrument_approvals",
   "set_instrument_status",
+  "critical_values",
+  "set_critical_values",
   "prepare_verify",
   "security_status",
   "export_security_pdf",

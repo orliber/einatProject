@@ -33,6 +33,8 @@ import type { TemplateView } from "../ipc/generated/TemplateView";
 import type { ReviewPart } from "../ipc/generated/ReviewPart";
 import type { Role } from "../ipc/generated/Role";
 import type { ScoreSheet } from "../ipc/generated/ScoreSheet";
+import type { CriticalValue } from "../ipc/generated/CriticalValue";
+import type { RelativeSet } from "../ipc/generated/RelativeSet";
 import type { SectionResult } from "../ipc/generated/SectionResult";
 import type { SectionMode } from "../ipc/generated/SectionMode";
 import type { AutoHidden } from "../ipc/generated/AutoHidden";
@@ -269,6 +271,7 @@ export class FakeCore {
   private ready: Record<string, number | null> = {};
   /** Her answer for each instrument's tables (D-098); none is "awaiting". */
   private instrumentAnswers: Record<string, "approved" | "not_used"> = {};
+  private criticalValues: CriticalValue[] = [];
   private sendStopped = false;
   /** The material deleted last, for "ביטול" (forgotten on lock, as in the core). */
   private removedInput: { caseId: string; input: CaseInput; at: number } | null = null;
@@ -1349,6 +1352,23 @@ export class FakeCore {
         this.instrumentAnswers[key] = a.status;
         return this.instrumentApprovals();
       }
+      case "critical_values":
+        return { sets: RELATIVE_SETS, values: this.criticalValues };
+      case "set_critical_values": {
+        // The same checks as the core (dv_domain::check_critical_values).
+        const values = a.values as CriticalValue[];
+        for (const [i, v] of values.entries()) {
+          const set = RELATIVE_SETS.find((s) => s.key === v.set);
+          if (!set) return fail("refused", "קבוצת השוואה לא מוכרת");
+          if (!set.measures.includes(v.measure)) return fail("refused", `${set.title_he}: תת-מבחן לא מוכר`);
+          if (values.slice(0, i).some((w) => w.set === v.set && w.measure === v.measure)) return fail("refused", `${set.title_he}: תת-מבחן שהוזן פעמיים`);
+          if (!(v.value > 0 && v.value <= 9) || Math.abs(Math.round(v.value * 100) - v.value * 100) > 1e-6) {
+            return fail("refused", `${set.title_he}: ערך קריטי צריך להיות מספר בין 0 ל-9 עם עד שתי ספרות אחרי הנקודה`);
+          }
+        }
+        this.criticalValues = values;
+        return { sets: RELATIVE_SETS, values };
+      }
       case "preview_scores":
         if (this.instrumentAnswers[(a.sheet as ScoreSheet).instrument] === "not_used") return fail("refused", "סימנת בהגדרות שאת לא מעבירה את המבחן הזה.");
         try {
@@ -1777,3 +1797,12 @@ function fakeStyleHint(d: { byAi: boolean; status: string; text: string }) {
     marks: d.text.includes("מפגין") ? [{ from: "מפגין", to: "מראה" }] : [],
   };
 }
+
+/** The comparison sets of relative strengths and weaknesses, as in dv_domain::relative_sets (D-190). */
+const RELATIVE_SETS: RelativeSet[] = [
+  { key: "wisc_v", instrument: "wisc_v", title_he: "WISC-V", measures: ["similarities", "vocabulary", "block_design", "visual_puzzles", "matrix", "figure_weights", "digit_span", "picture_span", "coding", "symbol_search"] },
+  { key: "wppsi_iv_4_7", instrument: "wppsi_iv", title_he: "WPPSI-IV, גילאי 4:0–7:7", measures: ["information", "similarities", "block_design", "object_assembly", "matrix", "picture_concepts", "picture_memory", "zoo_locations", "bug_search", "cancellation"] },
+  { key: "wppsi_iv_2_3", instrument: "wppsi_iv", title_he: "WPPSI-IV, גילאי 2:6–3:11", measures: ["receptive_vocabulary", "information", "block_design", "object_assembly", "picture_memory", "zoo_locations"] },
+  { key: "wppsi_iii_4_7", instrument: "wppsi_iii", title_he: "WPPSI-III, גילאי 4:0–7:3", measures: ["information", "vocabulary", "word_reasoning", "block_design", "matrix", "picture_concepts", "coding"] },
+  { key: "wppsi_iii_2_3", instrument: "wppsi_iii", title_he: "WPPSI-III, גילאי 2:6–3:11", measures: ["receptive_vocabulary", "information", "block_design", "object_assembly"] },
+];

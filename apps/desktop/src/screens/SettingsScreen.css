@@ -386,3 +386,28 @@
 .setting.advanced[open] > summary {
   margin-bottom: 8px;
 }
+
+/* Settings → המבחנים → חוזקות וחולשות יחסיות (D-190): one folded line per set. */
+.critical-set {
+  border-top: 1px solid var(--line);
+  padding: 8px 0;
+}
+.critical-set > summary {
+  cursor: pointer;
+}
+.critical-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 6px 16px;
+  margin: 10px 0;
+}
+.critical-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: var(--text-sm);
+}
+.critical-row .input {
+  width: 5.5em;
+}

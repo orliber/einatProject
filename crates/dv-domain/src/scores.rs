@@ -7,6 +7,8 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use crate::relative::CriticalValue;
+
 /// How a measure's numbers are read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
@@ -1013,14 +1015,19 @@ pub fn key_scores(sheets: &[ScoreSheet], habits: SheetHabits) -> Option<String> 
 /// The text stored as a "test scores" material: every score with its range from the table,
 /// the scale sentence, and a note on large gaps between indexes (to check in the manual).
 pub fn format_sheet(sheet: &ScoreSheet) -> Result<String, String> {
-    format_sheet_with(sheet, SheetHabits::default())
+    format_sheet_with(sheet, SheetHabits::default(), &[])
 }
 
 /// A group of the sheet on one scale, and its (label, score) rows, for the order line.
 type OrderGroup<'a> = (&'a str, ScoreScale, Vec<(String, f64)>);
 
-/// [`format_sheet`], leaving out what she does not write beside scores (K12).
-pub fn format_sheet_with(sheet: &ScoreSheet, habits: SheetHabits) -> Result<String, String> {
+/// [`format_sheet`], leaving out what she does not write beside scores (K12), with the relative
+/// places by the manual's critical values she entered (D-190).
+pub fn format_sheet_with(
+    sheet: &ScoreSheet,
+    habits: SheetHabits,
+    critical: &[CriticalValue],
+) -> Result<String, String> {
     let (inst, entries) = checked(sheet)?;
     let mut out = format!("{} – {}\n", inst.name, inst.description_he);
     if !sheet.module.trim().is_empty() {
@@ -1080,7 +1087,7 @@ pub fn format_sheet_with(sheet: &ScoreSheet, habits: SheetHabits) -> Result<Stri
             .collect();
         out.push_str(&format!("{group} מהגבוה לנמוך: {}\n", order.join("; ")));
     }
-    if let Some(line) = relative_line(sheet, &entries) {
+    if let Some(line) = relative_line(&inst.key, &entries, critical) {
         out.push_str(&line);
     }
     if let Some(line) = elevated_line(&entries) {
@@ -1105,28 +1112,29 @@ fn is_total(measure: &Measure) -> bool {
     TOTALS.contains(&measure.key.as_str()) || measure.key == "gec"
 }
 
-/// The sheet's relative strengths and weaknesses (D-165): exactly the computation of
-/// [`sheet_cases`] (three subtests or more, [`RELATIVE_POINTS`] from their own mean). `None`
-/// when there is none.
-fn relative_line(sheet: &ScoreSheet, entries: &[(&Measure, &ScoreEntry)]) -> Option<String> {
-    let cases = sheet_cases(sheet);
+/// The sheet's relative strengths and weaknesses: by the publisher's method when the manual's
+/// critical values for the sheet are entered (D-190), otherwise the labelled 3-point rule of
+/// thumb (D-165). Exactly the places of [`sheet_cases_with`]. `None` when there is none to say.
+fn relative_line(
+    instrument: &str,
+    entries: &[(&Measure, &ScoreEntry)],
+    critical: &[CriticalValue],
+) -> Option<String> {
+    let (method, places) = crate::relative::relative_places(instrument, entries, critical);
     let (mut strong, mut weak) = (Vec::new(), Vec::new());
     let mut groups: Vec<&str> = Vec::new();
-    for ((m, e), c) in entries.iter().zip(&cases) {
+    for ((m, e), place) in entries.iter().zip(&places) {
         if matches!(m.scale, ScoreScale::Scaled | ScoreScale::VScale)
             && !groups.contains(&m.group.as_str())
         {
             groups.push(&m.group);
         }
         let item = format!("{} – ציון {}", measure_label(m), fmt_value(e.value));
-        if c.cases.iter().any(|x| x == Relative::Strength.label_he()) {
-            strong.push(item);
-        } else if c.cases.iter().any(|x| x == Relative::Weakness.label_he()) {
-            weak.push(item);
+        match place {
+            Some(Relative::Strength) => strong.push(item),
+            Some(Relative::Weakness) => weak.push(item),
+            None => {}
         }
-    }
-    if strong.is_empty() && weak.is_empty() {
-        return None;
     }
     let mut parts = Vec::new();
     if !strong.is_empty() {
@@ -1143,12 +1151,32 @@ fn relative_line(sheet: &ScoreSheet, entries: &[(&Measure, &ScoreEntry)]) -> Opt
             weak.join("; ")
         ));
     }
-    Some(format!(
-        "חוזקות וחולשות יחסיות לפי כלל אצבע, שחושב בתוכנה: הפרש של {1} נקודות ומעלה מהממוצע של הציונים ב{0} שהוזנו בטבלה. מובהקות ההפרש נבדקת לפי טבלאות מדריך המבחן. {2}\n",
-        groups.join(" וב"),
-        fmt_value(RELATIVE_POINTS),
-        parts.join(". ")
-    ))
+    match method {
+        crate::relative::Method::Publisher { title_he, mean } => {
+            let found = if parts.is_empty() {
+                "לא נמצאו חוזקות או חולשות יחסיות מובהקות".to_owned()
+            } else {
+                parts.join(". ")
+            };
+            Some(format!(
+                "חוזקות וחולשות יחסיות לפי שיטת המדריך, שחושבו בתוכנה: כל תת-מבחן ראשי מול הממוצע של תתי-המבחנים הראשיים ({}), לפי הערך הקריטי של המדריך ברמת מובהקות .05 שהמאבחנת הזינה ({title_he}). {found}\n",
+                fmt_mean(mean)
+            ))
+        }
+        crate::relative::Method::RuleOfThumb if !parts.is_empty() => Some(format!(
+            "חוזקות וחולשות יחסיות לפי כלל אצבע, שחושב בתוכנה: הפרש של {1} נקודות ומעלה מהממוצע של הציונים ב{0} שהוזנו בטבלה. מובהקות ההפרש נבדקת לפי טבלאות מדריך המבחן. {2}\n",
+            groups.join(" וב"),
+            fmt_value(RELATIVE_POINTS),
+            parts.join(". ")
+        )),
+        _ => None,
+    }
+}
+
+/// A mean of subtests to two decimals at most, as the manuals print MSS-P ("10.3", "9.25").
+fn fmt_mean(v: f64) -> String {
+    let s = format!("{v:.2}");
+    s.trim_end_matches('0').trim_end_matches('.').to_owned()
 }
 
 /// The questionnaire scales (higher = more concern) whose score falls in a band of its own
@@ -2436,35 +2464,31 @@ pub struct ScoreCases {
     pub cases: Vec<String>,
 }
 
-/// The interpretation cases each score of `sheet` fits. A sheet of an unknown instrument is
-/// none; an entry of an unknown measure is left out (one value off the grid in a sheet an
-/// older version saved does not take the cases away from the others).
+/// The interpretation cases each score of `sheet` fits, with the 3-point rule of thumb for the
+/// relative places ([`sheet_cases_with`] and no critical values).
 #[must_use]
 pub fn sheet_cases(sheet: &ScoreSheet) -> Vec<ScoreCases> {
+    sheet_cases_with(sheet, &[])
+}
+
+/// The interpretation cases each score of `sheet` fits, the relative places by the manual's
+/// critical values when they are all entered for the sheet (D-190). A sheet of an unknown
+/// instrument is none; an entry of an unknown measure is left out (one value off the grid in a
+/// sheet an older version saved does not take the cases away from the others).
+#[must_use]
+pub fn sheet_cases_with(sheet: &ScoreSheet, critical: &[CriticalValue]) -> Vec<ScoreCases> {
     let Some((inst, entries)) = entries_of(sheet) else {
         return Vec::new();
     };
-    let scaled: Vec<f64> = entries
-        .iter()
-        .filter(|(m, _)| matches!(m.scale, ScoreScale::Scaled | ScoreScale::VScale))
-        .map(|(_, e)| e.value)
-        .collect();
-    #[allow(clippy::cast_precision_loss)]
-    let mean = (scaled.len() >= 3).then(|| scaled.iter().sum::<f64>() / scaled.len() as f64);
+    let (_, places) = crate::relative::relative_places(&inst.key, &entries, critical);
     entries
         .iter()
-        .map(|(m, e)| {
+        .zip(places)
+        .map(|((m, e), place)| {
             let band = classify(m, e.value).map(|b| b.label.clone());
             let mut cases = vec![GENERAL_CASE.to_owned()];
             cases.extend(band.clone());
-            // A sheet is one instrument, so its subtests share one scale (as in a report).
-            if let (ScoreScale::Scaled | ScoreScale::VScale, Some(mean)) = (m.scale, mean) {
-                if e.value - mean >= RELATIVE_POINTS {
-                    cases.push(Relative::Strength.label_he().to_owned());
-                } else if mean - e.value >= RELATIVE_POINTS {
-                    cases.push(Relative::Weakness.label_he().to_owned());
-                }
-            }
+            cases.extend(place.map(|r| r.label_he().to_owned()));
             ScoreCases {
                 instrument: inst.key.clone(),
                 measure: m.key.clone(),
@@ -2766,7 +2790,7 @@ mod tests {
             notes: String::new(),
         };
         let full = format_sheet(&sheet).unwrap_or_default();
-        let hers = format_sheet_with(&sheet, h).unwrap_or_default();
+        let hers = format_sheet_with(&sheet, h, &[]).unwrap_or_default();
         assert!(full.contains("ציון 7, אחוזון"), "{full}");
         assert!(
             hers.contains("ציון 7 –") && !hers.contains("ציון 7, אחוזון"),

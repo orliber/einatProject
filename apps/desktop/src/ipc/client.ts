@@ -34,6 +34,7 @@ import type { InputKind } from "./generated/InputKind";
 import type { Instrument } from "./generated/Instrument";
 import type { InstrumentApproval } from "./generated/InstrumentApproval";
 import type { InstrumentStatus } from "./generated/InstrumentStatus";
+import type { CriticalValue } from "./generated/CriticalValue";
 import type { ParagraphVersionView } from "./generated/ParagraphVersionView";
 import type { PingResponse } from "./generated/PingResponse";
 import type { Prepared } from "./generated/Prepared";
@@ -195,6 +196,10 @@ export const ipc = {
   /** Settings → המבחנים: every instrument with her answer (D-098). */
   instrumentApprovals: () => call("instrument_approvals"),
   setInstrumentStatus: (key: string, status: InstrumentStatus) => call("set_instrument_status", { key, status }),
+  /** The manual's critical values for relative strengths and weaknesses (D-190). */
+  criticalValues: () => call("critical_values"),
+  /** All of them at once; an empty list clears them. */
+  setCriticalValues: (values: CriticalValue[]) => call("set_critical_values", { values }),
   usageSummary: () => call("usage_summary"),
   /** Dollars; `null` removes the ceiling. */
   setMonthlyCap: (capUsd: number | null) => run("set_monthly_cap", { capUsd }),
