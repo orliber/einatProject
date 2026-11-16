@@ -4341,6 +4341,98 @@ fn a_mark_is_taken_back_only_when_nothing_leans_on_it() {
     validate_unmark(&planned, &planned, true, &visits, &[], &paid).unwrap();
 }
 
+/// A series of reserved times one of which was given a patient (by an earlier version):
+/// "this and the following" on a reserved time never reaches the patient's visit, and on
+/// the patient's visit never reaches the reserved times.
+#[test]
+fn following_never_reaches_another_patients_visit() {
+    let block = |id: &str, date: &str| Visit {
+        series_id: Some("s1".to_owned()),
+        ..visit(id, VisitKind::Block, date, 600, VisitStatus::Planned)
+    };
+    let given = Visit {
+        series_id: Some("s1".to_owned()),
+        ..visit(
+            "given",
+            VisitKind::Therapy,
+            "2026-11-08",
+            600,
+            VisitStatus::Planned,
+        )
+    };
+    let series = vec![
+        block("b1", "2026-11-01"),
+        given.clone(),
+        block("b3", "2026-11-15"),
+        block("b4", "2026-11-22"),
+    ];
+    let previous = series[0].clone();
+    let edited = Visit {
+        start: 660,
+        ..previous.clone()
+    };
+    let later = apply_following(&edited, &previous, &series, &HashSet::new()).unwrap();
+    let ids: Vec<&str> = later.visits.iter().map(|v| v.id.as_str()).collect();
+    assert_eq!(ids, ["b3", "b4"]);
+    assert_eq!(later.left_alone, 0);
+    // From the patient's visit: no reserved time follows it.
+    let moved = Visit {
+        start: 660,
+        ..given.clone()
+    };
+    assert_eq!(
+        apply_following(&moved, &given, &series, &HashSet::new()).unwrap(),
+        Following::default()
+    );
+}
+
+/// D-178: a later planned visit whose kind is of a later version is never rewritten by
+/// "this and the following"; it is left alone and counted.
+#[test]
+fn following_leaves_a_visit_of_a_later_version_alone() {
+    let mut series = weekly_series();
+    series[3].kind = VisitKind::Unknown; // v4, planned
+    let previous = series[1].clone();
+    let edited = Visit {
+        kind: VisitKind::Guidance,
+        ..previous.clone()
+    };
+    let later = apply_following(&edited, &previous, &series, &HashSet::new()).unwrap();
+    let ids: Vec<&str> = later.visits.iter().map(|v| v.id.as_str()).collect();
+    assert_eq!(ids, ["v6"]);
+    // v3 (held), v4 (a later version's kind), v5 (cancelled).
+    assert_eq!(later.left_alone, 3);
+}
+
+/// D-179: a held visit whose kind is of a later version counts among the month's held
+/// visits and in no kind, before the erase and after it alike.
+#[test]
+fn an_erased_visit_of_a_later_kind_counts_as_it_did() {
+    let visits = vec![
+        Visit {
+            kind: VisitKind::Unknown,
+            ..paid_visit("a", "2026-03-03", VisitStatus::Held, 40_000)
+        },
+        paid_visit("b", "2026-03-10", VisitStatus::Held, 40_000),
+    ];
+    let cards = [patient("p1", "נועם")];
+    let whole = income_year(2026, &visits, &[], &[], &cards).unwrap();
+    assert_eq!(whole.months[2].held, 2);
+    assert_eq!(
+        whole.by_kind,
+        [KindCount {
+            kind: VisitKind::Assessment,
+            count: 1
+        }]
+    );
+    let mut tally = ErasedTally::default();
+    fold_erased(&mut tally, &visits, &[], &[]);
+    let mut erased = ErasedCards::default();
+    fold_erased_card(&mut erased, &cards[0]);
+    let left = income_year(2026, &[], &[], &[], &[]).unwrap();
+    assert_eq!(income_with_erased(left, &tally, &erased).unwrap(), whole);
+}
+
 /// D-176: a later visit of the series that has a note, or is not planned, is never moved.
 #[test]
 fn this_and_the_following_leaves_a_noted_visit_alone_and_counts_it() {

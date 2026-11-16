@@ -152,6 +152,10 @@ export function VisitDialog(props: VisitDialogProps) {
   const block = form.kind === "block";
   const missed = form.status === "cancelled" || form.status === "no_show";
   const inSeries = existing !== undefined && existing.series_id !== null;
+  // A visit of a patient stays on that patient's card (D-177): the core moves it to no other
+  // card, and does not turn it into time of her own.
+  const onCard = existing !== undefined && existing.patient_id !== null;
+  const kinds = onCard ? VISIT_KINDS.filter((k) => k !== "block") : VISIT_KINDS;
   const dirty = JSON.stringify(form) !== JSON.stringify(first);
   const every = Number(form.every);
   const count = Number(form.count);
@@ -239,12 +243,12 @@ export function VisitDialog(props: VisitDialogProps) {
 
   return (
     <Dialog title={title} dirty={dirty} onClose={onClose}
-      footer={<>
+      footer={(close) => <>
         {existing?.status === "planned" && (
           <button type="button" className="btn btn-danger-quiet" disabled={busy} onClick={() => setConfirmDelete(true)}>מחיקת הפגישה</button>
         )}
         <span className="grow" />
-        <button type="button" className="btn" onClick={onClose}>ביטול</button>
+        <button type="button" className="btn" onClick={close}>ביטול</button>
         <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void submit()}>{existing ? "שמירה" : "קביעת הפגישה"}</button>
       </>}>
       <div className="stack clinic-form">
@@ -253,14 +257,14 @@ export function VisitDialog(props: VisitDialogProps) {
         )}
 
         <SelectField id="visit-kind" label="סוג הפגישה" value={form.kind}
-          options={optionsWith(VISIT_KINDS, VISIT_KIND_LABEL, form.kind)}
+          options={optionsWith(kinds, VISIT_KIND_LABEL, form.kind)}
           hint={block ? "זמן שמור הוא שלך בלבד: כתיבת דוחות, השתלמות, יום חופש. בלי מטופל ובלי מחיר."
             : form.kind === "unknown" ? "הסוג שנשמר לפגישה הזו לא מוכר לגרסה הזו של התוכנה. כדי לשמור שינוי צריך לבחור סוג מהרשימה, או לעדכן את התוכנה."
             : undefined}
           onChange={(kind) => set({ kind, ...(kind === "block" ? { patientId: null } : {}), ...withDefaults(kind, kind === "block" ? null : form.patientId) })} />
 
         {!block && (
-          <PatientPicker id="visit-patient" value={form.patientId} autoFocus={!existing && form.patientId === null}
+          <PatientPicker id="visit-patient" value={form.patientId} autoFocus={!existing && form.patientId === null} locked={onCard}
             onChange={(patientId) => set({ patientId, ...withDefaults(form.kind, patientId) })} />
         )}
 
@@ -325,7 +329,7 @@ export function VisitDialog(props: VisitDialogProps) {
               <p className="hint">המצב שנשמר לפגישה הזו לא מוכר לגרסה הזו של התוכנה. כדי לשמור שינוי צריך לבחור מצב מהרשימה, או לעדכן את התוכנה.</p>
             )}
             {existing.status !== "planned" && form.status === "planned" && (
-              <p className="hint">חזרה ל"מתוכננת" היא תיקון של סימון שנעשה בטעות. היא אפשרית כל עוד לפגישה אין סיכום ולא נרשם עליה תשלום.</p>
+              <p className="hint">חזרה ל"מתוכננת" היא תיקון של סימון שנעשה בטעות. היא אפשרית רק כשלפגישה אין סיכום, וכשמה שהמשפחה כבר שילמה לא עולה על מה שנשאר לחייב בלי הפגישה הזו.</p>
             )}
             {missed && (
               <>

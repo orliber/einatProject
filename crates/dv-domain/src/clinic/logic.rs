@@ -824,9 +824,11 @@ pub struct Following {
 /// edited visit's kind, title, start, minutes, place, fee and note, and moves by the number
 /// of days the edited one moved. Status, patient and everything else stay as they were.
 ///
-/// A later visit that has a note (`noted`: the ids of visits with one) or is not planned is
-/// never moved or altered: the note would stay on the old date, and a visit that happened
-/// is a line of the diary. They are counted in `left_alone` (D-176).
+/// A later visit that has a note (`noted`: the ids of visits with one), is not planned, or
+/// holds a value of a later version (D-178) is never moved or altered: the note would stay on
+/// the old date, a visit that happened is a line of the diary, and a newer value is never
+/// rewritten. They are counted in `left_alone` (D-176). Only visits of the same patient as
+/// the edited one (or reserved times, for a reserved time) follow it.
 ///
 /// `previous` is the edited visit as it is stored; `series` may hold any visits (those of
 /// another series and the edited one itself are skipped). The edited visit itself is not in
@@ -847,13 +849,20 @@ pub fn apply_following(
     let mut later = Vec::new();
     let mut left_alone = 0_u32;
     for visit in series {
+        // Only the same patient's visits (or reserved times, for a reserved time): a series
+        // never reaches another card, whatever its rows say.
         let follows = visit.series_id.as_deref() == Some(series_id)
+            && visit.patient_id == previous.patient_id
             && visit.id != previous.id
             && (visit.date.as_str(), visit.start) > was;
         if !follows {
             continue;
         }
-        if visit.status != VisitStatus::Planned || noted.contains(&visit.id) {
+        // A value of a later version is never rewritten (D-178): such a visit stays as it is.
+        if visit.status != VisitStatus::Planned
+            || noted.contains(&visit.id)
+            || visit_known(visit).is_err()
+        {
             left_alone = left_alone.saturating_add(1);
             continue;
         }
@@ -2306,7 +2315,9 @@ pub fn income_with_erased(
             month.received = to_agorot(
                 i64::from(month.received).saturating_add(method_total(&erased.received)),
             )?;
-            for entry in &erased.held {
+            // A kind of a later version is counted among the held visits of the month but
+            // in no kind, as `income_year` counts such a visit.
+            for entry in erased.held.iter().filter(|e| VISIT_KINDS.contains(&e.kind)) {
                 add_kind(&mut income.by_kind, entry.kind, entry.count);
             }
         }

@@ -114,9 +114,9 @@ export function PatientDialog({ patient, waiting = false, onClose, onSaved }: Pa
   return (
     <Dialog title={patient ? "פרטי המטופל" : "מטופל חדש"} dirty={dirty} onClose={onClose}
       subtitle="הפרטים נשמרים מוצפנים בכספת שבמחשב, ולא נשלחים לשום מקום."
-      footer={<>
+      footer={(close) => <>
         <span className="grow" />
-        <button type="button" className="btn" onClick={onClose}>ביטול</button>
+        <button type="button" className="btn" onClick={close}>ביטול</button>
         <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void submit()}>{patient ? "שמירה" : "הוספה"}</button>
       </>}>
       <div className="stack clinic-form">

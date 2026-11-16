@@ -560,6 +560,20 @@ impl Vault {
             .transpose()
     }
 
+    /// What the vault knows of a card beside its sealed JSON: when it was last written
+    /// (`updated_at`, seconds) and whether an erase already counted it among the erased cards
+    /// (D-179). `None`: no such card.
+    pub fn clinic_patient_state(&self, id: &str) -> Result<Option<(i64, bool)>, VaultError> {
+        Ok(self
+            .identity
+            .query_row(
+                "SELECT updated_at, erase_counted FROM clinic_patients WHERE id = ?1",
+                [id],
+                |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)? != 0)),
+            )
+            .optional()?)
+    }
+
     /// Create (`id` = None) or replace a patient card. Returns its id.
     pub fn save_clinic_patient(
         &mut self,
@@ -604,7 +618,10 @@ impl Vault {
     /// as the rows it stands for: the tally with the records (main database), the count
     /// with the card (identity database). The two databases cannot share one transaction;
     /// if the second fails, the card is left with no records, counts for itself as before,
-    /// and asking again finishes the erase without counting anything twice.
+    /// and asking again finishes the erase without counting anything twice. So that asking
+    /// again still counts the card once, a `cards` given marks the card (`erase_counted`, see
+    /// [`Vault::clinic_patient_state`]) before its records go: the caller passes `cards` again
+    /// for a card so marked, even when nothing is left in it.
     ///
     /// Only history that belongs to the records being erased goes: the history of this
     /// patient's records, and the rows left by this patient's records that were removed
@@ -625,6 +642,12 @@ impl Vault {
             return Err(VaultError::NotFound);
         }
         let key = &self.keys.settings;
+        if cards.is_some() {
+            self.identity.execute(
+                "UPDATE clinic_patients SET erase_counted = 1 WHERE id = ?1",
+                [id],
+            )?;
+        }
         // The records first: if the card's removal fails, the erase can be asked again.
         let tx = self.main.unchecked_transaction()?;
         tx.execute(

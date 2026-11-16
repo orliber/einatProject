@@ -90,9 +90,11 @@ export function TodayTab() {
     const v = view.visit;
     if (v.kind === "block" || v.patient_id === null) return null;
     const patientId = v.patient_id;
+    // A visit still ahead (the next days' list) has not happened yet: as on the card.
+    const due = v.date <= now.date;
     return (
       <>
-        {v.status === "planned" && <button type="button" className="btn btn-small" onClick={() => void hold(v)}>התקיימה</button>}
+        {v.status === "planned" && due && <button type="button" className="btn btn-small" onClick={() => void hold(v)}>התקיימה</button>}
         {v.status !== "cancelled" && (
           <button type="button" className="btn btn-small" onClick={() => setOpen({ kind: "note", patientId, visit: v })}>סיכום</button>
         )}

@@ -88,7 +88,8 @@ CREATE TABLE clinic_patients (
    id TEXT PRIMARY KEY,
    created_at INTEGER NOT NULL,
    updated_at INTEGER NOT NULL,
-   data_enc BLOB NOT NULL
+   data_enc BLOB NOT NULL,
+   erase_counted INTEGER NOT NULL DEFAULT 0  -- 1: an erase already counted it (D-179, retry)
 );
 CREATE TABLE clinic_erased (     -- one row: erased cards by the month they were opened in (D-179)
    id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -142,8 +143,9 @@ pure function in `logic.rs`, `can_erase(records, marked, today, last_saved, keep
 keep_until_age)` (`marked`: ids of visits that ever left `Planned`),
 and is enforced in the core. The last activity is the latest date anything in the card carries
 (the day it was opened, every visit, note, charge and payment, a task's due and done dates) and
-`last_saved`: the day one of the card's records was last written (the newest `updated_at` of its
-rows, by the core's clock), so a record corrected years later counts as activity then. `today`
+`last_saved`: the day the card or one of its records was last written (the newest `updated_at`
+of the card and of its rows, by the core's clock), so a card or a record corrected years later
+counts as activity then. `today`
 here is the core's own clock, not the window's. The refusal says the card can be closed instead,
 and from which day it can be erased. An erase then removes the card, every record of theirs and
 the history of those records (payments and charges included), checkpoints the write-ahead logs
@@ -159,7 +161,9 @@ of `identity.db`. Neither type has a field for an id, a name, a day or a text. E
 the same transaction as the rows it stands for: the tally with the removal of the records, the
 card count with the removal of the card. (The two databases cannot share one transaction. If the
 second fails, the card is left with no records and still counts for itself; asking again finishes
-the erase and counts nothing twice.) `Income` and `Diary` add them back (`income_with_erased`,
+the erase and counts nothing twice. A card is marked `erase_counted` before its records go, when
+the erase counts it; asking again for a card so marked counts it then, though nothing is left in
+it, so it is counted exactly once.) `Income` and `Diary` add them back (`income_with_erased`,
 `diary_with_erased`), so a year reads the same before and after; `DiaryMonth.erased` is the one
 anonymous line of a month (its sums are in the month's totals and in no day), and
 `Overview.month_received` includes it. Voided amounts are in no summary, so they are not kept. A
@@ -188,8 +192,10 @@ visit is `Planned`. A repeat creates `count` visits `7 × every_weeks` days apar
 `series_id`. `Scope::Following` on a series applies kind, title, start, minutes, place, fee and
 note to this visit and every later `Planned` one of the series that has no session note, and
 moves each by the same number of days this one moved; status changes apply to this one only. A
-later visit that has a note or is not `Planned` is never moved or altered, and
-`SavedVisits.left_alone` says how many there were (D-176). Only a visit that is `Planned` and
+later visit that has a note, is not `Planned` or holds a value of a later version (D-178) is never
+moved or altered, and `SavedVisits.left_alone` says how many there were (D-176). "This and the
+following" (a change or a removal) reaches only visits of the same patient (or reserved times,
+from a reserved time), and a reserved time that is given a patient leaves its series. Only a visit that is `Planned` and
 never left `Planned` by its saved history can be deleted (`validate_delete(visit, marked)`;
 "this and the following" skips the marked ones). A status goes back to `Planned` only when the
 visit has no note and the patient's payments (not voided) are not more than the charges left

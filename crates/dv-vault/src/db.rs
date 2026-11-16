@@ -296,11 +296,14 @@ pub const IDENTITY_MIGRATIONS: &[&str] = &[
     // `clinic_erased` is one sealed row: how many of the cards that were erased had been
     // opened in each month, so the yearly summary's "new patients" never changes after an
     // erase (D-179). Counts only, written in the transaction that removes a card.
+    // `erase_counted` is 1 once an erase of the card has folded it into that count: set before
+    // its records go, so an erase that is asked again counts the card exactly once.
     "CREATE TABLE clinic_patients (
         id TEXT PRIMARY KEY,
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL,
-        data_enc BLOB NOT NULL
+        data_enc BLOB NOT NULL,
+        erase_counted INTEGER NOT NULL DEFAULT 0
      );
      CREATE TABLE clinic_erased (
         id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -373,7 +376,7 @@ mod tests {
         ),
         (
             "identity",
-            &["98e79c9e2d976424", "59aa5787b56ebc78", "438410fbc529ad69"],
+            &["98e79c9e2d976424", "59aa5787b56ebc78", "d24703bc8c602cd6"],
         ),
         ("audit", &["922ed57e6a2659e3"]),
     ];

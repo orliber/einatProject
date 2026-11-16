@@ -11,7 +11,7 @@ import type { SessionNote } from "../../ipc/generated/SessionNote";
 import type { Visit } from "../../ipc/generated/Visit";
 import { useClinicSettings, useNoteToCase, usePatientCard, useReloadClinic, useSaveNote, useToday } from "./clinicData";
 import { formatDate, formatTime, VISIT_KIND_LABEL } from "./format";
-import { Field, ReadError, RecordHistory, useShownName } from "./parts";
+import { Field, ReadError, RecordHistory, useDiscreet, useShownName } from "./parts";
 
 export interface NoteDialogProps {
   patientId: string;
@@ -55,6 +55,7 @@ function NoteForm(props: Omit<NoteDialogProps, "visit"> & {
   const { card, visit, onClose } = props;
   const { notify } = useApp();
   const shown = useShownName();
+  const discreet = useDiscreet();
   const save = useSaveNote();
   const toCase = useNoteToCase();
   /** The note as the vault holds it now: what was opened, then what each save gave back. */
@@ -65,6 +66,9 @@ function NoteForm(props: Omit<NoteDialogProps, "visit"> & {
   const [template, setTemplate] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  /** In discreet mode the personal note waits for her to ask for it, as on the card. */
+  const [personalShown, setPersonalShown] = useState(false);
+  const personalOpen = !discreet || personalShown;
 
   const dirty = record !== (stored?.record ?? "") || personal !== (stored?.personal ?? "") || (visit === null && date !== (stored?.date ?? props.today));
   const empty = record.trim() === "" && personal.trim() === "";
@@ -138,9 +142,9 @@ function NoteForm(props: Omit<NoteDialogProps, "visit"> & {
 
   return (
     <Dialog title={title} subtitle={subtitle} dirty={dirty} onClose={onClose}
-      footer={<>
+      footer={(close) => <>
         <span className="grow" />
-        <button type="button" className="btn" onClick={onClose}>ביטול</button>
+        <button type="button" className="btn" onClick={close}>ביטול</button>
         <button type="button" className="btn btn-primary" disabled={busy || !dirty} onClick={() => void submit()}>שמירה</button>
       </>}>
       <div className="stack clinic-form">
@@ -175,8 +179,15 @@ function NoteForm(props: Omit<NoteDialogProps, "visit"> & {
             <h3><label htmlFor="note-personal">תרשומת אישית</label></h3>
             <p className="hint" id="note-personal-hint">שלך בלבד: מחשבות והשערות לעצמך. היא לא מודפסת, לא מיוצאת ולא עוברת לתיק האבחון.</p>
           </header>
-          <textarea id="note-personal" className="textarea clinic-note-text" rows={5} value={personal} maxLength={NOTE_MAX}
-            aria-describedby="note-personal-hint" onChange={(e) => setPersonal(e.target.value)} />
+          {personalOpen ? (
+            <textarea id="note-personal" className="textarea clinic-note-text" rows={5} value={personal} maxLength={NOTE_MAX}
+              aria-describedby="note-personal-hint" onChange={(e) => setPersonal(e.target.value)} />
+          ) : (
+            <p className="row clinic-note-hidden">
+              <span className="muted">התרשומת האישית מוסתרת במצב דיסקרטי.</span>
+              <button type="button" className="btn btn-small" onClick={() => setPersonalShown(true)}>להציג</button>
+            </p>
+          )}
         </div>
 
         {linked ? (

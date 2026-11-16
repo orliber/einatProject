@@ -205,7 +205,7 @@ describe("a change the core refuses says why, in the core's words", () => {
     const dialog = await screen.findByRole("dialog", { name: "פרטי הפגישה" });
     const marks = await within(dialog).findByRole("radiogroup", { name: "מה קרה בפגישה" });
     await user.click(within(marks).getByRole("radio", { name: "מתוכננת" }));
-    expect(dialog).toHaveTextContent("חזרה ל\"מתוכננת\" היא תיקון של סימון שנעשה בטעות. היא אפשרית כל עוד לפגישה אין סיכום ולא נרשם עליה תשלום.");
+    expect(dialog).toHaveTextContent("חזרה ל\"מתוכננת\" היא תיקון של סימון שנעשה בטעות. היא אפשרית רק כשלפגישה אין סיכום, וכשמה שהמשפחה כבר שילמה לא עולה על מה שנשאר לחייב בלי הפגישה הזו.");
     await user.click(within(dialog).getByRole("button", { name: "שמירה" }));
     expect(await within(dialog).findByText("לפגישה הזו יש סיכום, ולכן היא לא יכולה לחזור להיות \"מתוכננת\". אם היא לא התקיימה, אפשר לסמן אותה כמבוטלת ולכתוב מה קרה.")).toBeInTheDocument();
     // The dialog stays with what she chose, and the visit is as it was.

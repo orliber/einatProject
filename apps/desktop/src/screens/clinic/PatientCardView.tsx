@@ -622,6 +622,8 @@ function MoneyBox({ card, today }: { card: PatientCard; today: string }) {
 }
 
 function MoneyLine({ line, onVoid }: { line: Line; onVoid: (() => void) | undefined }) {
+  const discreet = useDiscreet();
+  const shown = useShownName();
   const when = formatDate(line.date);
   const voided = line.type === "charge" ? line.charge.voided : line.type === "payment" ? line.payment.voided : false;
   const reason = line.type === "charge" ? line.charge.void_reason : line.type === "payment" ? line.payment.void_reason : "";
@@ -632,8 +634,9 @@ function MoneyLine({ line, onVoid }: { line: Line; onVoid: (() => void) | undefi
     : [
       PAY_METHOD_LABEL[line.payment.method],
       line.payment.receipt ? `קבלה ${line.payment.receipt}` : "בלי מספר קבלה",
-      line.payment.payer ? `שילם: ${line.payment.payer}` : "",
-      line.payment.note,
+      // Whoever paid may be a person: in discreet mode, initials, and her own note is left out.
+      line.payment.payer ? `שילם: ${shown(line.payment.payer)}` : "",
+      discreet ? "" : line.payment.note,
     ].filter(Boolean).join(" · ");
   return (
     <li className={voided ? "pcard-line pcard-line-voided" : "pcard-line"}>
@@ -682,9 +685,9 @@ function ChargeDialog({ patientId, today, onClose }: { patientId: string; today:
   }
   return (
     <Dialog narrow title="חיוב חדש" subtitle="לחיוב שאינו פגישה, כמו כתיבת הדוח. פגישה שהתקיימה מחויבת מעצמה." dirty={what !== "" || amount !== ""} onClose={onClose}
-      footer={<>
+      footer={(close) => <>
         <span className="grow" />
-        <button type="button" className="btn" onClick={onClose}>ביטול</button>
+        <button type="button" className="btn" onClick={close}>ביטול</button>
         <button type="button" className="btn btn-primary" disabled={save.isPending} onClick={() => void submit()}>רישום החיוב</button>
       </>}>
       <div className="stack clinic-form">
@@ -726,9 +729,9 @@ function PaymentDialog({ patientId, today, due, onClose }: { patientId: string; 
   }
   return (
     <Dialog narrow title="תקבול חדש" dirty={JSON.stringify(form) !== JSON.stringify(first)} onClose={onClose}
-      footer={<>
+      footer={(close) => <>
         <span className="grow" />
-        <button type="button" className="btn" onClick={onClose}>ביטול</button>
+        <button type="button" className="btn" onClick={close}>ביטול</button>
         <button type="button" className="btn btn-primary" disabled={save.isPending} onClick={() => void submit()}>רישום התקבול</button>
       </>}>
       <div className="stack clinic-form">
@@ -780,6 +783,7 @@ function VoidDialog({ line, onClose }: { line: Extract<Line, { type: "charge" | 
 // ------------------------------------------------------------------ follow-ups
 
 function TasksBox({ card, today, onTick }: { card: PatientCard; today: string; onTick: (task: ClinicTask, done: boolean) => void }) {
+  const discreet = useDiscreet();
   const [editing, setEditing] = useState<ClinicTask | "new" | null>(null);
   // The open ones by their date (the undated last), then what was done, the latest first.
   const ordered = useMemo(() => [...card.tasks].sort((a, b) => {
@@ -809,7 +813,7 @@ function TasksBox({ card, today, onTick }: { card: PatientCard; today: string; o
                       {done && t.done_on !== null ? <span>בוצע ביום {formatDate(t.done_on)}</span>
                         : t.due !== null ? <span className={overdue ? "clinic-overdue" : undefined}>{overdue ? `עד ${formatDate(t.due)}, עבר` : `עד ${formatDate(t.due)}`}</span>
                         : null}
-                      {t.note && <span>{t.note}</span>}
+                      {t.note && !discreet && <span>{t.note}</span>}
                     </span>
                   </div>
                   <button type="button" className="btn btn-small" aria-label={`עריכת המעקב: ${t.title}`} onClick={() => setEditing(t)}>עריכה</button>
@@ -851,9 +855,9 @@ function TaskDialog({ patientId, task, onClose }: { patientId: string; task?: Cl
   }
   return (
     <Dialog narrow title={task ? "עריכת מעקב" : "מעקב חדש"} dirty={JSON.stringify(form) !== JSON.stringify(first)} onClose={onClose}
-      footer={<>
+      footer={(close) => <>
         <span className="grow" />
-        <button type="button" className="btn" onClick={onClose}>ביטול</button>
+        <button type="button" className="btn" onClick={close}>ביטול</button>
         <button type="button" className="btn btn-primary" disabled={save.isPending} onClick={() => void submit()}>{task ? "שמירה" : "הוספה"}</button>
       </>}>
       <div className="stack clinic-form">

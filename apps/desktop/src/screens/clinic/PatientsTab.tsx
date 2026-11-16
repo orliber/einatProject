@@ -9,7 +9,7 @@ import { PlusIcon, Skeleton } from "../../components/ui";
 import type { PatientRow } from "../../ipc/generated/PatientRow";
 import { useDebounced, usePatients, useReloadClinic, useToday } from "./clinicData";
 import { CONTACT_ROLE_LABEL, formatDate, formatDateShort, formatTime, PATIENT_STATUS_LABEL, VISIT_KIND_LABEL } from "./format";
-import { EmptyState, Money, Pager, PatientName, ReadError, useClinicNav, usePaged, useShownName } from "./parts";
+import { EmptyState, Money, Pager, PatientName, ReadError, useClinicNav, useDiscreet, usePaged, useShownName } from "./parts";
 import { PatientDialog } from "./PatientDialog";
 import "./PatientsTab.css";
 
@@ -93,6 +93,7 @@ export function PatientsTab() {
   const nav = useClinicNav();
   const reload = useReloadClinic();
   const shown = useShownName();
+  const discreet = useDiscreet();
   const [text, setText] = useState("");
   const query = useDebounced(text.trim(), 200);
   const [filter, setFilter] = useState<Filter>("active");
@@ -192,6 +193,8 @@ export function PatientsTab() {
                   {paged.shown.map((row) => {
                     const p = row.patient;
                     const parents = p.contacts.filter((c) => c.name !== "").slice(0, 2).map((c) => `${CONTACT_ROLE_LABEL[c.role]}: ${shown(c.name)}`);
+                    // Where the child is (a kindergarten, a school) says who they are: not in discreet mode.
+                    const framework = discreet ? "" : p.framework;
                     return (
                       // The whole row opens the card for the mouse; the name is the button for the keyboard.
                       <tr key={p.id} className="patients-row" onClick={(e) => { if (!(e.target as HTMLElement).closest("button")) nav.openPatient(p.id); }}>
@@ -202,8 +205,8 @@ export function PatientsTab() {
                               {p.status !== "active" && <span className="chip chip-sand">{PATIENT_STATUS_LABEL[p.status]}</span>}
                               {p.status === "waiting" && p.urgent && <span className="chip chip-warn">דחוף</span>}
                             </span>
-                            {(parents.length > 0 || p.framework) && (
-                              <span className="muted small patients-more">{[...parents, p.framework].filter(Boolean).join(" · ")}</span>
+                            {(parents.length > 0 || framework) && (
+                              <span className="muted small patients-more">{[...parents, framework].filter(Boolean).join(" · ")}</span>
                             )}
                           </div>
                         </th>

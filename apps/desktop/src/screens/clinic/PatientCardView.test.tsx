@@ -5,7 +5,7 @@
 import { configure, screen, waitFor, within } from "@testing-library/react";
 import { a11yViolations } from "../../test/a11y";
 import { forgetDiscreet } from "./ClinicScreen";
-import { cardOf, openCard, openOn, refusing, rowsOf } from "./patientsTestKit";
+import { ask, cardOf, openCard, openOn, refusing, rowsOf } from "./patientsTestKit";
 
 configure({ asyncUtilTimeout: 5000 });
 vi.setConfig({ testTimeout: 30_000 });
@@ -350,6 +350,18 @@ describe("money on the card", () => {
     expect(money).toHaveTextContent("מזומן · בלי מספר קבלה");
   });
 
+  it("“ביטול” of a money dialog with typed text asks first", async () => {
+    const { user } = await openCard("נועם");
+    const money = await region("כספים");
+    await user.click(within(money).getByRole("button", { name: "חיוב חדש" }));
+    const dialog = await screen.findByRole("dialog", { name: "חיוב חדש" });
+    await user.type(within(dialog).getByLabelText("על מה החיוב"), "צילום");
+    await user.click(within(dialog).getByRole("button", { name: "ביטול" }));
+    expect(within(dialog).getByRole("alertdialog", { name: "לסגור בלי לשמור" })).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "להמשיך לערוך" }));
+    expect(within(dialog).getByLabelText("על מה החיוב")).toHaveValue("צילום");
+  });
+
   it("“חיוב חדש” records what, how much and when", async () => {
     const { user, requests, notes, id } = await openCard("תמר");
     const money = await region("כספים");
@@ -595,6 +607,23 @@ describe("discreet mode on the card", () => {
     const confirm = await screen.findByRole("dialog", { name: "סגירת הכרטיס" });
     expect(confirm).toHaveTextContent("הכרטיס של נ. יעבור");
     expect(confirm).not.toHaveTextContent("נועם");
+  });
+
+  it("leaves who paid in initials, and her notes on payments and follow-ups off the card's lists", async () => {
+    const { user } = await openCard("נועם", undefined, async (served, id) => {
+      await ask(served, { op: "save_payment", payment: { id: "", patient_id: id, date: "2026-11-10", amount: 10_000, method: "cash", receipt: "77", payer: "דודה שירה", note: "הביאה במעטפה", voided: false, void_reason: "" } }, "payment");
+      await ask(served, { op: "save_task", task: { id: "", patient_id: id, kind: "follow_up", title: "לשלוח שאלון", due: null, done_on: null, note: "רק אחרי השיחה עם הגננת" } }, "task");
+    });
+    const money = await region("כספים");
+    const tasks = await region("מעקבים");
+    expect(money).toHaveTextContent("שילם: דודה שירה");
+    expect(money).toHaveTextContent("הביאה במעטפה");
+    expect(tasks).toHaveTextContent("רק אחרי השיחה עם הגננת");
+    await user.click(screen.getByRole("switch", { name: "מצב דיסקרטי" }));
+    expect(money).toHaveTextContent("שילם: ד. ש.");
+    for (const text of ["שירה", "הביאה במעטפה"]) expect(money, text).not.toHaveTextContent(text);
+    expect(tasks).toHaveTextContent("לשלוח שאלון");
+    expect(tasks).not.toHaveTextContent("רק אחרי השיחה עם הגננת");
   });
 
   it("the picker of cases shows the child's name in initials", async () => {

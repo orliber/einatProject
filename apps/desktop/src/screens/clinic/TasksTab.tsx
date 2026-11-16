@@ -18,7 +18,7 @@ import { clinicKeys, useDeleteTask, useOptimistic, useOverview, useReloadClinic,
 import { ALERT_KIND_LABEL, formatDate, optionsWith, TASK_KIND_LABEL, TASK_KINDS, weekRange } from "./format";
 import { NoteDialog } from "./NoteDialog";
 import {
-  AlertList, ConfirmDialog, EmptyState, Field, Pager, PatientName, PatientPicker, ReadError, Section, SelectField, TextAreaField, TextField, useClinicNav, usePaged,
+  AlertList, ConfirmDialog, EmptyState, Field, Pager, PatientName, PatientPicker, ReadError, Section, SelectField, TextAreaField, TextField, useClinicNav, useDiscreet, usePaged,
 } from "./parts";
 import { VisitDialog } from "./VisitDialog";
 import "./TasksTab.css";
@@ -374,6 +374,7 @@ function TaskLine({ view, onTick, onEdit, onDelete }: { view: TaskView; onTick: 
   const t = view.task;
   const done = t.done_on !== null;
   const id = `task-${t.id}`;
+  const discreet = useDiscreet();
   return (
     <li className={done ? "clinic-task clinic-task-done" : "clinic-task"}>
       <input id={id} type="checkbox" checked={done} onChange={onTick} />
@@ -385,7 +386,8 @@ function TaskLine({ view, onTick, onEdit, onDelete }: { view: TaskView; onTick: 
           {done && t.done_on !== null ? <span>בוצע ביום {formatDate(t.done_on)}</span>
             : t.due !== null && <span className={view.overdue ? "clinic-overdue" : undefined}>{view.overdue ? `עד ${formatDate(t.due)}, עבר` : `עד ${formatDate(t.due)}`}</span>}
         </span>
-        {t.note !== "" && <span className="small clinic-task-note">{t.note}</span>}
+        {/* Her own words stay in the follow-up's dialog while a family may look on. */}
+        {t.note !== "" && !discreet && <span className="small clinic-task-note">{t.note}</span>}
       </div>
       <div className="row clinic-task-actions">
         {onEdit && <button type="button" className="btn btn-small icon-btn" aria-label={`עריכת המעקב: ${t.title}`} onClick={onEdit}><EditIcon /></button>}
@@ -428,9 +430,9 @@ function TaskDialog({ task, onClose }: { task: ClinicTask; onClose: () => void }
 
   return (
     <Dialog title="עריכת מעקב" dirty={dirty} onClose={onClose}
-      footer={<>
+      footer={(close) => <>
         <span className="grow" />
-        <button type="button" className="btn" onClick={onClose}>ביטול</button>
+        <button type="button" className="btn" onClick={close}>ביטול</button>
         <button type="button" className="btn btn-primary" disabled={busy || !dirty} onClick={() => void submit()}>שמירה</button>
       </>}>
       <div className="stack clinic-form">

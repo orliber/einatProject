@@ -336,10 +336,14 @@ export function AlertList({ alerts, onVisit, onTask, empty, onCard }: {
 export function VisitRow({ view, actions, onOpen, showDate = false }: { view: VisitView; actions?: ReactNode; onOpen?: () => void; showDate?: boolean }) {
   const v = view.visit;
   const shown = useShownName();
+  const discreet = useDiscreet();
   const span = formatSpan(v.start, v.minutes);
   const who = v.kind === "block" ? (v.title || VISIT_KIND_LABEL.block) : shown(view.patient_name);
   const time = <span className="num clinic-visit-time" dir="ltr">{span}</span>;
   const openName = `${showDate ? `${formatDate(v.date)} ` : ""}${span}, פתיחת הפגישה של ${who}`;
+  // What happened, in her words, may say more than a list should while a family looks on: in
+  // discreet mode it stays in the visit's dialog.
+  const more = [v.kind !== "block" ? v.title : "", v.place, discreet ? "" : v.status_note, v.note].filter(Boolean).join(" · ");
   return (
     <li className={v.status === "cancelled" ? "clinic-visit clinic-visit-off" : "clinic-visit"} data-status={v.status}>
       {onOpen
@@ -355,11 +359,7 @@ export function VisitRow({ view, actions, onOpen, showDate = false }: { view: Vi
           {view.has_note && <span className="chip chip-ok">יש סיכום</span>}
           {view.overlaps && <span className="chip chip-warn">חופפת לפגישה אחרת</span>}
         </span>
-        {(v.title && v.kind !== "block") || v.place || v.note || v.status_note ? (
-          <span className="muted small clinic-visit-more">
-            {[v.kind !== "block" ? v.title : "", v.place, v.status_note, v.note].filter(Boolean).join(" · ")}
-          </span>
-        ) : null}
+        {more !== "" && <span className="muted small clinic-visit-more">{more}</span>}
       </div>
       {actions && <div className="row clinic-visit-actions">{actions}</div>}
     </li>
@@ -403,18 +403,24 @@ function historyWhen(at: number): string {
   return `${two(d.getDate())}.${two(d.getMonth() + 1)}.${d.getFullYear()}, ${two(d.getHours())}:${two(d.getMinutes())}`;
 }
 
-/** Every saved state of a record, newest first, each as the lines the clinic wrote for it. */
+/** Every saved state of a record, newest first, each as the lines the clinic wrote for it.
+ *  The lines carry names, the whole record and who paid: in discreet mode only what was done
+ *  and when is shown. */
 export function HistoryEntries({ entries }: { entries: HistoryEntry[] }) {
+  const discreet = useDiscreet();
   if (entries.length === 0) return <p className="muted clinic-quiet">עוד לא נשמרו שינויים.</p>;
   return (
-    <ol className="clinic-list clinic-history">
-      {[...entries].reverse().map((e, i) => (
-        <li key={`${e.at}-${i}`} className="clinic-history-entry">
-          <span className="row"><span className="chip chip-sand">{HISTORY_ACTION[e.action] ?? e.action}</span><span className="muted small num" dir="ltr">{historyWhen(e.at)}</span></span>
-          <span className="clinic-history-lines">{e.lines.join("\n")}</span>
-        </li>
-      ))}
-    </ol>
+    <>
+      {discreet && <p className="hint clinic-history-hidden">פרטי השינויים מוסתרים במצב דיסקרטי.</p>}
+      <ol className="clinic-list clinic-history">
+        {[...entries].reverse().map((e, i) => (
+          <li key={`${e.at}-${i}`} className="clinic-history-entry">
+            <span className="row"><span className="chip chip-sand">{HISTORY_ACTION[e.action] ?? e.action}</span><span className="muted small num" dir="ltr">{historyWhen(e.at)}</span></span>
+            {!discreet && <span className="clinic-history-lines">{e.lines.join("\n")}</span>}
+          </li>
+        ))}
+      </ol>
+    </>
   );
 }
 
@@ -445,9 +451,11 @@ const PICKER_ROWS = 8;
 /**
  * Chooses a patient by name. The search waits a moment after she types; families whose work
  * ended are offered only when she searches for them. Once one is chosen the field shows the
- * name, with "החלפה" beside it.
+ * name, with "החלפה" beside it; `locked`: the name only, for a record that stays on its card.
  */
-export function PatientPicker({ id, value, onChange, autoFocus = false }: { id: string; value: string | null; onChange: (patientId: string | null) => void; autoFocus?: boolean }) {
+export function PatientPicker({ id, value, onChange, autoFocus = false, locked = false }: {
+  id: string; value: string | null; onChange: (patientId: string | null) => void; autoFocus?: boolean; locked?: boolean;
+}) {
   const now = useToday();
   const rows = usePatients(now.date);
   const [text, setText] = useState("");
@@ -460,7 +468,7 @@ export function PatientPicker({ id, value, onChange, autoFocus = false }: { id: 
         <span className="label" id={`${id}-label`}>מטופל</span>
         <span className="row clinic-picked" role="group" aria-labelledby={`${id}-label`}>
           {rows.isPending ? <span className="muted">טוען…</span> : <PatientName name={chosen?.patient.name} strong />}
-          <button type="button" className="link-btn" onClick={() => onChange(null)}>החלפה</button>
+          {!locked && <button type="button" className="link-btn" onClick={() => onChange(null)}>החלפה</button>}
         </span>
       </div>
     );

@@ -18,7 +18,7 @@ import type { PatientRow } from "../../ipc/generated/PatientRow";
 import type { DiaryErased } from "../../ipc/generated/DiaryErased";
 import { useClinicSettings, useDiary, useHistory, useIncome, useOverview, usePatients, useReloadClinic, useToday, useYearErased } from "./clinicData";
 import { formatDate, formatDateLong, formatMoney, formatMonth, formatTime, monthOf, PAY_METHOD_LABEL, VISIT_KIND_LABEL } from "./format";
-import { EmptyState, HistoryEntries, Money, Pager, PatientName, ReadError, Section, StatusBadge, useClinicNav, usePaged, useShownName } from "./parts";
+import { EmptyState, HistoryEntries, Money, Pager, PatientName, ReadError, Section, StatusBadge, useClinicNav, useDiscreet, usePaged, useShownName } from "./parts";
 import "./MoneyTab.css";
 
 // ------------------------------------------------------------------ pure pieces
@@ -42,6 +42,11 @@ export const lacksReceipt = (line: DiaryLine) => line.received > 0 && !line.void
 /** The days of a month with only the payments that have no receipt number. */
 export function daysLackingReceipts(days: DiaryDay[]): DiaryDay[] {
   return days.map((d) => ({ ...d, lines: d.lines.filter(lacksReceipt) })).filter((d) => d.lines.length > 0);
+}
+
+/** How many payments of the days shown have no receipt number. */
+export function missingReceipts(days: DiaryDay[]): number {
+  return days.reduce((n, d) => n + d.lines.filter(lacksReceipt).length, 0);
 }
 
 export interface OpenBalance {
@@ -96,6 +101,10 @@ export function MoneyTab() {
   const [view, setView] = useState<View>(viewNow);
   return (
     <div className="stack clinic-money-tab">
+      {/* Above both views: the yearly summary is no more a registered program than the diary (D-172). */}
+      <p className="note-sand clinic-tax-note" role="note">
+        היומן שומר כל שינוי שנעשה בפגישות, בחיובים ובתקבולים. התוכנה אינה רשומה ברשות המסים כתוכנה לניהול 'יומן רופא', ואת הקבלות מפיקים בתוכנת החשבוניות. כאן רושמים את מספר הקבלה.
+      </p>
       <div className="row clinic-money-switch">
         <Segmented<View> label="תצוגת הכספים" value={view} onChange={(v) => { viewNow = v; setView(v); }}
           options={[{ value: "diary", label: "יומן הכנסות" }, { value: "year", label: "סיכום שנתי" }]} />
@@ -146,10 +155,6 @@ function DiaryView({ today }: { today: string }) {
         {month !== thisMonth && <button type="button" className="link-btn" onClick={() => go(thisMonth)}>לחודש הנוכחי</button>}
       </nav>
 
-      <p className="note-sand clinic-tax-note" role="note">
-        היומן שומר כל שינוי שנעשה בפגישות, בחיובים ובתקבולים. התוכנה אינה רשומה ברשות המסים כתוכנה לניהול יומן, ואת הקבלות מפיקים בתוכנת החשבוניות. כאן רושמים את מספר הקבלה.
-      </p>
-
       {diary.error && !d ? <ReadError error={diary.error.message} retry={reload} />
         : !d ? (
           <div className="stack" aria-busy="true">
@@ -195,6 +200,9 @@ function DiaryView({ today }: { today: string }) {
 function MonthTotals({ diary, onlyMissing, onOnlyMissing, onBalances }: {
   diary: DiaryMonth; onlyMissing: boolean; onOnlyMissing: (on: boolean) => void; onBalances: () => void;
 }) {
+  // Counted from the lines the days show: the core's figure also counts the payments of cards
+  // that were erased (D-179), which have no line here to show or to complete.
+  const missing = useMemo(() => missingReceipts(diary.days), [diary.days]);
   return (
     <section className="card clinic-month-totals" aria-label={`סיכום ${formatMonth(diary.month)}`}>
       <dl className="clinic-totals">
@@ -218,11 +226,11 @@ function MonthTotals({ diary, onlyMissing, onOnlyMissing, onBalances }: {
           )}
       </div>
       <div className="stack clinic-receipts">
-        {diary.missing_receipts === 0
+        {missing === 0
           ? <span className="muted">לכל התקבולים של החודש יש מספר קבלה.</span>
           : (
             <>
-              <span className="clinic-overdue">{diary.missing_receipts === 1 ? "תקבול אחד בלי מספר קבלה" : `${diary.missing_receipts} תקבולים בלי מספר קבלה`}</span>
+              <span className="clinic-overdue">{missing === 1 ? "תקבול אחד בלי מספר קבלה" : `${missing} תקבולים בלי מספר קבלה`}</span>
               <button type="button" className="btn btn-small" aria-pressed={onlyMissing} onClick={() => onOnlyMissing(!onlyMissing)}>להציג רק אותם</button>
             </>
           )}
@@ -267,6 +275,7 @@ function ErasedLine({ line, children }: { line: DiaryErased; children: ReactNode
 /** One day of the diary as a table: its lines, and under them what the day came to. */
 function DayTable({ day, totals, idOf, onHistory }: { day: DiaryDay; totals: boolean; idOf: (name: string) => string | null; onHistory: (line: DiaryLine) => void }) {
   const shown = useShownName();
+  const discreet = useDiscreet();
   return (
     <div className="card clinic-day">
       <table className="clinic-table clinic-diary-table">
@@ -303,7 +312,8 @@ function DayTable({ day, totals, idOf, onHistory }: { day: DiaryDay; totals: boo
               {/* Whoever paid may be a person: in discreet mode, initials. */}
               <td className="clinic-struck">{line.payer === "" ? "" : shown(line.payer)}</td>
               <td className="clinic-diary-note">
-                <span>{line.note}</span>
+                {/* Her own words stay in the card while a family may look on. */}
+                {!discreet && <span>{line.note}</span>}
                 {line.changed && (
                   <button type="button" className="chip chip-sand clinic-changed" aria-label={`שונה. היסטוריית השינויים של ${line.what}, ${shown(line.patient_name)}`}
                     onClick={() => onHistory(line)}>שונה</button>

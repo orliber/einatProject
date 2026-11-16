@@ -843,6 +843,53 @@ fn an_erase_writes_the_tallies_it_is_given_and_they_are_sealed() {
     assert!(v.audit_intact().unwrap());
 }
 
+/// D-179: an erase whose second transaction (the card's removal) fails leaves the card
+/// marked as counted; the caller sees the mark and counts the card when asked again, so the
+/// count is written once, and a card where nothing happened is never marked.
+#[test]
+fn an_erase_asked_again_after_the_card_stayed_counts_it_once() {
+    let (_d, mut v) = new_vault();
+    let p = v.save_clinic_patient(None, r#"{"n":"אורי"}"#).unwrap();
+    let mistake = v.save_clinic_patient(None, r#"{"n":"גיל"}"#).unwrap();
+    let (saved, counted) = v.clinic_patient_state(&p).unwrap().unwrap();
+    assert!(saved > 0 && !counted);
+    assert!(v.clinic_patient_state("אין-כזה").unwrap().is_none());
+    put(&mut v, "payment", Some(&p), 4, "{}");
+    // The card's removal fails, once.
+    v.identity
+        .execute_batch(
+            "CREATE TEMP TRIGGER no_erase BEFORE DELETE ON clinic_patients
+             BEGIN SELECT RAISE(ABORT, 'בדיקה'); END;",
+        )
+        .unwrap();
+    assert!(v
+        .erase_clinic_patient(&p, Some(r#"{"months":{}}"#), Some(r#"{"m":1}"#))
+        .is_err());
+    v.identity.execute_batch("DROP TRIGGER no_erase;").unwrap();
+    // The records went with the tally; the card stayed, marked, and nothing counts it yet.
+    assert!(v.clinic_of_patient(&p).unwrap().is_empty());
+    assert!(v.clinic_get("tally").unwrap().is_some());
+    assert!(v.clinic_erased_cards().unwrap().is_none());
+    assert!(v.clinic_patient(&p).unwrap().is_some());
+    let (_, counted) = v.clinic_patient_state(&p).unwrap().unwrap();
+    assert!(counted);
+    // Asked again: nothing left to fold, but the card is counted, once.
+    v.erase_clinic_patient(&p, None, Some(r#"{"m":1}"#))
+        .unwrap();
+    assert!(v.clinic_patient(&p).unwrap().is_none());
+    assert_eq!(
+        v.clinic_erased_cards().unwrap().as_deref(),
+        Some(r#"{"m":1}"#)
+    );
+    // A card where nothing happened is erased with no count and never marked.
+    assert!(!v.clinic_patient_state(&mistake).unwrap().unwrap().1);
+    v.erase_clinic_patient(&mistake, None, None).unwrap();
+    assert_eq!(
+        v.clinic_erased_cards().unwrap().as_deref(),
+        Some(r#"{"m":1}"#)
+    );
+}
+
 #[test]
 fn the_tally_is_written_only_by_an_erase_and_never_removed() {
     let (_d, mut v) = new_vault();

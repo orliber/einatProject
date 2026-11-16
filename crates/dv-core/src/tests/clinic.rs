@@ -3819,3 +3819,106 @@ fn a_birth_date_that_has_not_come_is_refused_when_a_card_is_saved() {
         },
     );
 }
+
+/// A reserved time of a series that is given a patient leaves the series: "this and the
+/// following" on the other reserved times, a change or a removal, never reaches the
+/// patient's visit.
+#[test]
+fn a_reserved_time_given_a_patient_leaves_its_series() {
+    let (_dir, mut core) = open_clinic();
+    let noam = new_patient(&mut core, "נועם");
+    let blocks = save_visits(
+        &mut core,
+        Visit {
+            patient_id: None,
+            ..a_visit(&noam, VisitKind::Block, "2027-03-01", 540)
+        },
+        Some(Repeat {
+            every_weeks: 1,
+            count: 4,
+        }),
+        Scope::One,
+    )
+    .visits;
+    let series = blocks[0].visit.series_id.clone();
+    assert!(series.is_some());
+    // The third reserved time becomes Noam's visit, with "this and the following" chosen.
+    let given = save_visits(
+        &mut core,
+        Visit {
+            patient_id: Some(noam.id.clone()),
+            kind: VisitKind::Therapy,
+            ..blocks[2].visit.clone()
+        },
+        None,
+        Scope::Following,
+    )
+    .visits;
+    assert_eq!(given.len(), 1);
+    let given = given[0].visit.clone();
+    assert_eq!(given.series_id, None);
+    // The last reserved time is still one.
+    let last = calendar(&mut core, "2027-03-22", "2027-03-22");
+    assert_eq!(last.len(), 1);
+    assert_eq!(last[0].visit.kind, VisitKind::Block);
+    assert_eq!(last[0].visit.series_id, series);
+
+    // The first reserved time moves an hour, and the following with it: not Noam's visit.
+    let moved = save_visits(
+        &mut core,
+        Visit {
+            start: 600,
+            ..blocks[0].visit.clone()
+        },
+        None,
+        Scope::Following,
+    );
+    let ids: Vec<&str> = moved.visits.iter().map(|v| v.visit.id.as_str()).collect();
+    assert_eq!(
+        ids,
+        [
+            blocks[0].visit.id.as_str(),
+            blocks[1].visit.id.as_str(),
+            blocks[3].visit.id.as_str()
+        ]
+    );
+    assert_eq!(card(&mut core, &noam.id).visits[0].visit, given);
+    assert_eq!(actions(&mut core, &given.id), ["created", "changed"]);
+
+    // Removing the second and the following removes the reserved times only.
+    ask(&mut core, delete_visit(&blocks[1].visit, Scope::Following));
+    let left: Vec<String> = calendar(&mut core, "2027-03-01", "2027-03-31")
+        .into_iter()
+        .map(|v| v.visit.id)
+        .collect();
+    assert_eq!(left, [blocks[0].visit.id.clone(), given.id.clone()]);
+}
+
+/// The retention period counts from the last time the card itself was written too, not only
+/// its records: a card corrected after its last record was active then.
+#[test]
+fn the_retention_period_counts_from_the_last_change_to_the_card_too() {
+    let record = |updated_at: i64| dv_vault::StoredClinicRecord {
+        id: "r1".to_owned(),
+        kind: "visit".to_owned(),
+        patient_id: Some("p1".to_owned()),
+        day: 0,
+        updated_at,
+        json: String::new(),
+    };
+    // 2020-01-01 and 2027-06-15, midday UTC.
+    let (old, later) = (1_577_880_000, 1_813_060_800);
+    let rows = [record(old)];
+    assert_eq!(
+        crate::clinic::last_saved_day(&rows, later).as_deref(),
+        Some("2027-06-15")
+    );
+    assert_eq!(
+        crate::clinic::last_saved_day(&[record(later)], old).as_deref(),
+        Some("2027-06-15")
+    );
+    assert_eq!(
+        crate::clinic::last_saved_day(&[], old).as_deref(),
+        Some("2020-01-01")
+    );
+}

@@ -10,7 +10,7 @@ import { a11yViolations } from "../../test/a11y";
 import type { Override, Served } from "../../test/host";
 import { forgetDiscreet } from "./ClinicScreen";
 import { formatMoney } from "./format";
-import { barPercent, daysLackingReceipts, forgetMoneyView, lacksReceipt, openBalances, shiftMonth } from "./MoneyTab";
+import { barPercent, daysLackingReceipts, forgetMoneyView, lacksReceipt, missingReceipts, openBalances, shiftMonth } from "./MoneyTab";
 import { ask, holding, idOf, NOW, openOn, refusing } from "./officeTestKit";
 
 configure({ asyncUtilTimeout: 5000 });
@@ -29,7 +29,7 @@ afterEach(() => {
 });
 
 const MONEY = { name: "clinic", tab: "money" } as const;
-const NOTICE = "היומן שומר כל שינוי שנעשה בפגישות, בחיובים ובתקבולים. התוכנה אינה רשומה ברשות המסים כתוכנה לניהול יומן, ואת הקבלות מפיקים בתוכנת החשבוניות. כאן רושמים את מספר הקבלה.";
+const NOTICE = "היומן שומר כל שינוי שנעשה בפגישות, בחיובים ובתקבולים. התוכנה אינה רשומה ברשות המסים כתוכנה לניהול 'יומן רופא', ואת הקבלות מפיקים בתוכנת החשבוניות. כאן רושמים את מספר הקבלה.";
 const day = (caption: string) => screen.findByRole("table", { name: caption });
 const totals = () => screen.getByRole("region", { name: "סיכום נובמבר 2026" });
 const balances = () => screen.getByRole("region", { name: "יתרות פתוחות" });
@@ -61,6 +61,9 @@ describe("the pure pieces", () => {
       { date: "2026-11-02", charged: 50, received: 100, lines: [line({ record_id: "b", charged: 50 }), line({ record_id: "c", received: 100 })] },
     ];
     expect(daysLackingReceipts(days).map((d) => [d.date, d.lines.map((l) => l.record_id)])).toEqual([["2026-11-02", ["c"]]]);
+    // The count is of the lines the days show (an erased card's payments have none).
+    expect(missingReceipts(days)).toBe(1);
+    expect(missingReceipts([])).toBe(0);
   });
 
   it("the debts the clinic points out come first, the oldest first; then the rest by size", () => {
@@ -364,7 +367,8 @@ describe("the year at a glance", () => {
     expect(requests().some((r) => r.op === "income" && r.year === 2025)).toBe(true);
     await user.click(screen.getByRole("button", { name: "לשנה הנוכחית" }));
     expect(await screen.findByRole("table", { name: "סיכום 2026 לפי חודשים" })).toBeInTheDocument();
-    // The notice belongs to the diary; the year has no export either.
+    // The notice is above both views; the year has no export either.
+    expect(screen.getAllByRole("note").some((n) => n.textContent === NOTICE)).toBe(true);
     expect(screen.queryByRole("button", { name: /ייצוא|קובץ|הדפסה/ })).toBeNull();
     view.unmount();
     await openOn(MONEY);
@@ -402,5 +406,25 @@ describe("discreet mode", () => {
     expect(within(eighth).getAllByRole("rowheader", { name: "מ." }).length).toBeGreaterThan(0);
     expect(eighth).toHaveTextContent("ס. ר.");
     expect(within(balances()).getByRole("group", { name: "פעולות עבור י." })).toBeInTheDocument();
+  });
+
+  it("leaves her notes off the diary's lines, and a line's history shows only what was done and when", async () => {
+    const prepare = async (served: Served) => {
+      const maya = await idOf(served, "מאיה");
+      await ask(served, { op: "save_payment", payment: { id: "", patient_id: maya, date: "2026-11-08", amount: 35_000, method: "transfer", receipt: "1060", payer: "", note: "שילמו בשתי העברות", voided: false, void_reason: "" } }, "payment");
+      const card = await ask(served, { op: "patient_card", id: maya, today: NOW }, "card");
+      await ask(served, { op: "void_payment", id: card.payments.find((p) => p.date === "2026-11-08")?.id ?? "", reason: "נרשם בכרטיס הלא נכון" }, "payment");
+    };
+    const { user } = await openOn(MONEY, undefined, prepare);
+    const eighth = await day("יום ראשון, 08.11.2026");
+    expect(rowOf(eighth, "מאיה", "תשלום")).toHaveTextContent("שילמו בשתי העברות");
+    await user.click(screen.getByRole("switch", { name: "מצב דיסקרטי" }));
+    const paid = rowOf(eighth, "מ.", "תשלום");
+    expect(paid).not.toHaveTextContent("שילמו בשתי העברות");
+    await user.click(within(paid).getByRole("button", { name: "שונה. היסטוריית השינויים של תשלום, מ." }));
+    const dialog = await screen.findByRole("dialog", { name: "היסטוריית שינויים" });
+    expect(await within(dialog).findByText("נוצר")).toBeInTheDocument();
+    expect(dialog).toHaveTextContent("פרטי השינויים מוסתרים במצב דיסקרטי.");
+    for (const text of ["מאיה", "נרשם בכרטיס הלא נכון", "שילמו בשתי העברות", "סיבת הביטול"]) expect(dialog, text).not.toHaveTextContent(text);
   });
 });

@@ -171,6 +171,10 @@ describe("the front page", () => {
     expect(within(next).getByRole("button", { name: "תמר" })).toBeInTheDocument();
     expect(within(next).getByText("תצפית")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "ערב טוב" })).toBeInTheDocument();
+    // A visit still ahead has not happened: there is nothing to mark yet, as on the card.
+    const ahead = within(next).getByRole("button", { name: "תמר" }).closest("li") as HTMLElement;
+    expect(within(ahead).queryByRole("button", { name: "התקיימה" })).toBeNull();
+    expect(within(ahead).getByRole("button", { name: "תזכורת" })).toBeInTheDocument();
   });
 
   it("marking a visit “התקיימה” updates its row at once, and the vault has it", async () => {
@@ -294,6 +298,75 @@ describe("discreet mode", () => {
   });
 });
 
+describe("discreet mode in the dialogs", () => {
+  it("the personal note waits for “להציג”, and the history shows only what was done and when", async () => {
+    const { user } = await openClinic();
+    await within(todays()).findByRole("button", { name: "תמר" });
+    await user.click(within(rowOf("תמר")).getByRole("button", { name: "סיכום" }));
+    const first = await screen.findByRole("dialog", { name: "סיכום מפגש אבחון" });
+    await user.type(await within(first).findByLabelText("רשומה"), "שיתפה פעולה לאורך המפגש.");
+    await user.type(within(first).getByLabelText("תרשומת אישית"), "לבדוק שוב קשב בפעם הבאה.");
+    await user.click(within(first).getByRole("button", { name: "שמירה" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await within(rowOf("תמר")).findByText("יש סיכום");
+
+    await user.click(screen.getByRole("switch", { name: "מצב דיסקרטי" }));
+    await user.click(within(rowOf("ת.")).getByRole("button", { name: "סיכום" }));
+    const dialog = await screen.findByRole("dialog", { name: "סיכום מפגש אבחון" });
+    await within(dialog).findByLabelText("רשומה");
+    expect(within(dialog).queryByLabelText("תרשומת אישית")).toBeNull();
+    expect(dialog).toHaveTextContent("התרשומת האישית מוסתרת במצב דיסקרטי.");
+    expect(within(dialog).queryByDisplayValue("לבדוק שוב קשב בפעם הבאה.")).toBeNull();
+    expect(dialog).not.toHaveTextContent("לבדוק שוב קשב");
+
+    // The history of the note: what was done and when, and none of its lines.
+    await user.click(within(dialog).getByRole("button", { name: "היסטוריית שינויים" }));
+    expect(await within(dialog).findByText("נוצר")).toBeInTheDocument();
+    expect(dialog).toHaveTextContent("פרטי השינויים מוסתרים במצב דיסקרטי.");
+    const entries = within(dialog).getAllByRole("listitem");
+    expect(entries.every((e) => /^נוצר\d\d\.\d\d\.\d{4}, \d\d:\d\d$/.test(e.textContent ?? ""))).toBe(true);
+    expect(within(dialog).queryByDisplayValue("לבדוק שוב קשב בפעם הבאה.")).toBeNull();
+    expect(dialog).not.toHaveTextContent("לבדוק שוב קשב");
+    expect(dialog).not.toHaveTextContent("תמר");
+
+    // She asks for the personal note: there it is, to read and to edit.
+    await user.click(within(dialog).getByRole("button", { name: "להציג" }));
+    expect(within(dialog).getByLabelText("תרשומת אישית")).toHaveValue("לבדוק שוב קשב בפעם הבאה.");
+  });
+
+  it("the history of a visit shows no lines while discreet mode is on", async () => {
+    const { user } = await openClinic();
+    await within(todays()).findByRole("button", { name: "מאיה" });
+    await user.click(screen.getByRole("switch", { name: "מצב דיסקרטי" }));
+    await user.click(within(rowOf("מ.")).getByRole("button", { name: /פתיחת הפגישה/ }));
+    const dialog = await screen.findByRole("dialog", { name: "פרטי הפגישה" });
+    await user.click(await within(dialog).findByRole("button", { name: "היסטוריית שינויים" }));
+    expect(await within(dialog).findByText("נוצר")).toBeInTheDocument();
+    expect(dialog).toHaveTextContent("פרטי השינויים מוסתרים במצב דיסקרטי.");
+    expect(dialog).not.toHaveTextContent("סוג: פגישת טיפול");
+  });
+});
+
+describe("a visit of a patient stays on the patient's card", () => {
+  it("offers no other patient and no “זמן שמור” for it; a new visit offers both", async () => {
+    const { user } = await openClinic();
+    await within(todays()).findByRole("button", { name: "איתי" });
+    await user.click(within(rowOf("איתי")).getByRole("button", { name: /פתיחת הפגישה/ }));
+    const dialog = await screen.findByRole("dialog", { name: "פרטי הפגישה" });
+    const kinds = await within(dialog).findByLabelText("סוג הפגישה");
+    expect(within(kinds).queryByRole("option", { name: "זמן שמור" })).toBeNull();
+    expect(within(kinds).getByRole("option", { name: "פגישת היכרות" })).toBeInTheDocument();
+    expect(within(dialog).getByRole("group", { name: "מטופל" })).toHaveTextContent("איתי");
+    expect(within(dialog).queryByRole("button", { name: "החלפה" })).toBeNull();
+    await user.click(within(dialog).getByRole("button", { name: "ביטול" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+
+    await user.click(screen.getByRole("button", { name: "פגישה חדשה" }));
+    const fresh = await screen.findByRole("dialog", { name: "פגישה חדשה" });
+    expect(within(await within(fresh).findByLabelText("סוג הפגישה")).getByRole("option", { name: "זמן שמור" })).toBeInTheDocument();
+  });
+});
+
 describe("adding a patient", () => {
   it("the dialog saves the card, and the new family can be scheduled at once", async () => {
     const { user, requests, notes } = await openClinic();
@@ -349,6 +422,37 @@ describe("adding a patient", () => {
     expect(within(dialog).getByRole("alertdialog", { name: "לסגור בלי לשמור" })).toBeInTheDocument();
     await user.click(within(dialog).getByRole("button", { name: "להמשיך לערוך" }));
     expect(within(dialog).getByLabelText("שם הילד או הילדה")).toHaveValue("אלה");
+    // "ביטול" at the bottom asks too, like Escape and ×.
+    await user.click(within(dialog).getByRole("button", { name: "ביטול" }));
+    expect(within(dialog).getByRole("alertdialog", { name: "לסגור בלי לשמור" })).toBeInTheDocument();
+    expect(within(dialog).getByLabelText("שם הילד או הילדה")).toHaveValue("אלה");
+    await user.click(within(dialog).getByRole("button", { name: "לסגור בלי לשמור" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
+  it("“ביטול” closes at once when nothing was typed, and asks first in a note and a visit with typed text", async () => {
+    const { user } = await openClinic();
+    await within(todays()).findByRole("button", { name: "תמר" });
+    await user.click(screen.getByRole("button", { name: "מטופל חדש" }));
+    await user.click(within(await screen.findByRole("dialog", { name: "מטופל חדש" })).getByRole("button", { name: "ביטול" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+
+    await user.click(within(rowOf("תמר")).getByRole("button", { name: "סיכום" }));
+    const note = await screen.findByRole("dialog", { name: "סיכום מפגש אבחון" });
+    await user.type(await within(note).findByLabelText("רשומה"), "טיוטה");
+    await user.click(within(note).getByRole("button", { name: "ביטול" }));
+    expect(within(note).getByRole("alertdialog", { name: "לסגור בלי לשמור" })).toBeInTheDocument();
+    await user.click(within(note).getByRole("button", { name: "להמשיך לערוך" }));
+    expect(within(note).getByLabelText("רשומה")).toHaveValue("טיוטה");
+    await user.click(within(note).getByRole("button", { name: "ביטול" }));
+    await user.click(within(note).getByRole("button", { name: "לסגור בלי לשמור" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+
+    await user.click(within(rowOf("איתי")).getByRole("button", { name: /פתיחת הפגישה/ }));
+    const visit = await screen.findByRole("dialog", { name: "פרטי הפגישה" });
+    await user.type(await within(visit).findByLabelText("מקום"), " ב");
+    await user.click(within(visit).getByRole("button", { name: "ביטול" }));
+    expect(within(visit).getByRole("alertdialog", { name: "לסגור בלי לשמור" })).toBeInTheDocument();
   });
 });
 

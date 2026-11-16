@@ -179,11 +179,14 @@ describe("the patient list", () => {
   it("discreet mode shows initials only, for the child and for the parents", async () => {
     const { user } = await openOn(PATIENTS);
     await table();
+    expect(screen.getByRole("tabpanel")).toHaveTextContent("גן חצב");
     await user.click(screen.getByRole("switch", { name: "מצב דיסקרטי" }));
     expect(names()).toEqual(["א.", "י.", "מ.", "נ.", "ת."]);
     const panel = screen.getByRole("tabpanel");
     for (const name of ["תמר", "איתי", "מאיה", "נועם", "יובל", "יעל", "מיכל", "דורון"]) expect(within(panel).queryByText(name, { exact: false }), name).toBeNull();
     expect(panel).toHaveTextContent("אמא: י.");
+    // Where the child is (נועם's kindergarten) says who they are: not on the list.
+    expect(panel).not.toHaveTextContent("גן חצב");
   });
 
   it("a new clinic gets a friendly start", async () => {

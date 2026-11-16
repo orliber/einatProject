@@ -423,6 +423,14 @@ describe("the day", () => {
     expect(within(own).queryByRole("button", { name: "התקיימה" })).toBeNull();
   });
 
+  it("a visit of a day still ahead has nothing to mark yet", async () => {
+    const { user, row } = await openDay();
+    await user.click(screen.getByRole("button", { name: "היום הבא" }));
+    await waitFor(() => expect(within(screen.getByRole("region", { name: "סדר היום" })).getByRole("button", { name: "תמר" })).toBeInTheDocument());
+    expect(within(row("תמר")).queryByRole("button", { name: "התקיימה" })).toBeNull();
+    expect(within(row("תמר")).getByRole("button", { name: "תזכורת" })).toBeInTheDocument();
+  });
+
   it("a mark the vault refuses rolls back, and says why", async () => {
     const refuse: Override = (cmd, args) => {
       if (isOp(cmd, args, "save_visit")) throw refused("הפגישה לא נשמרה.");

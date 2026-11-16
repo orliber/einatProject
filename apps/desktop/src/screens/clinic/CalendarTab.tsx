@@ -279,7 +279,7 @@ export function CalendarTab() {
         {view === "week" ? timeGrid : (
           <div className="cal-day-view">
             {timeGrid}
-            <Agenda key={anchor} date={anchor} visits={days.get(anchor) ?? NO_VISITS} onOpen={grid.open} onNew={() => newOn(anchor)}
+            <Agenda key={anchor} date={anchor} today={now.date} visits={days.get(anchor) ?? NO_VISITS} onOpen={grid.open} onNew={() => newOn(anchor)}
               onHold={(v) => void hold(v)} onNote={(patientId, visit) => setOpen({ kind: "note", patientId, visit })} onRemind={(v) => void remind(v)} />
           </div>
         )}
@@ -537,8 +537,8 @@ function GridVisit({ view, chosen, short, style, actions }: {
 // ------------------------------------------------------------------ the day's list
 
 /** The day as a list beside its grid, with the quick actions of the front page. */
-function Agenda({ date, visits, onOpen, onNew, onHold, onNote, onRemind }: {
-  date: string; visits: VisitView[]; onOpen: (view: VisitView) => void; onNew: () => void;
+function Agenda({ date, today, visits, onOpen, onNew, onHold, onNote, onRemind }: {
+  date: string; today: string; visits: VisitView[]; onOpen: (view: VisitView) => void; onNew: () => void;
   onHold: (visit: Visit) => void; onNote: (patientId: string, visit: Visit) => void; onRemind: (visit: Visit) => void;
 }) {
   const { shown, page, pages, setPage } = usePaged(visits, 12);
@@ -546,9 +546,11 @@ function Agenda({ date, visits, onOpen, onNew, onHold, onNote, onRemind }: {
     const v = view.visit;
     if (v.kind === "block" || v.patient_id === null) return null;
     const patientId = v.patient_id;
+    // A visit still ahead has not happened yet: as on the card.
+    const due = v.date <= today;
     return (
       <>
-        {v.status === "planned" && <button type="button" className="btn btn-small" onClick={() => onHold(v)}>התקיימה</button>}
+        {v.status === "planned" && due && <button type="button" className="btn btn-small" onClick={() => onHold(v)}>התקיימה</button>}
         {v.status !== "cancelled" && <button type="button" className="btn btn-small" onClick={() => onNote(patientId, v)}>סיכום</button>}
         {v.status === "planned" && <button type="button" className="btn btn-small" onClick={() => onRemind(v)}>תזכורת</button>}
       </>

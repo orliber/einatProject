@@ -317,6 +317,16 @@ fn settings(v: &Vault) -> ClinicSettings {
 
 /// The tally of erased cards as it must be read before it is written again: an error when
 /// it is there and does not read, so an erase never replaces it with less.
+/// The day the card (`card_saved`) or one of its records was last written, by the core's own
+/// clock: a card corrected years after its last record was active then too.
+pub(crate) fn last_saved_day(rows: &[StoredClinicRecord], card_saved: i64) -> Option<String> {
+    rows.iter()
+        .map(|row| row.updated_at)
+        .chain(std::iter::once(card_saved))
+        .max()
+        .map(|at| iso(date_of(at)))
+}
+
 fn tally_strict(v: &Vault) -> Result<ErasedTally, CoreError> {
     match v.clinic_get(TALLY_ID)? {
         Some(row) if row.kind == TALLY => from_json(&row.json),
@@ -1057,8 +1067,13 @@ impl Core {
                 return refuse("אפשר לקבוע סדרה חוזרת רק כשקובעים פגישה חדשה.");
             }
             let stored: Visit = find(v, &visit.id)?;
-            // Which series a visit belongs to is set when the series is made.
+            // Which series a visit belongs to is set when the series is made. A reserved time
+            // that is given a patient leaves its series: "this and the following" of the other
+            // reserved times never reaches a patient's visit.
             visit.series_id.clone_from(&stored.series_id);
+            if stored.patient_id.is_none() && visit.patient_id.is_some() {
+                visit.series_id = None;
+            }
             rules::validate_visit(&visit).map_err(refusal)?;
             if let Some(patient_id) = &visit.patient_id {
                 patient_exists(v, patient_id)?;
@@ -1113,7 +1128,7 @@ impl Core {
             if visit != stored {
                 changed.push(visit.clone());
             }
-            if scope == Scope::Following && stored.series_id.is_some() {
+            if scope == Scope::Following && visit.series_id.is_some() {
                 let everything: Vec<Visit> = all(v)?;
                 // A later visit that has a note, or is no longer planned, is left alone.
                 let later = rules::apply_following(&visit, &stored, &everything, &noted)
@@ -1186,11 +1201,13 @@ impl Core {
         let mut ids = vec![visit.id.clone()];
         if let (Scope::Following, Some(series)) = (scope, visit.series_id.as_deref()) {
             // The later ones of the series that are still planned; one that already has a
-            // record written for it, or that was ever marked, stays.
+            // record written for it, or that was ever marked, stays. Only the same patient's
+            // (or reserved times, for a reserved time): a series never reaches another card.
             let later: Vec<Visit> = all::<Visit>(v)?
                 .into_iter()
                 .filter(|other| {
                     other.series_id.as_deref() == Some(series)
+                        && other.patient_id == visit.patient_id
                         && other.id != visit.id
                         && other.status == VisitStatus::Planned
                         && (other.date.as_str(), other.start) > (visit.date.as_str(), visit.start)
@@ -1278,12 +1295,10 @@ impl Core {
             );
         }
         let rows = v.clinic_of_patient(id)?;
-        // The day one of the card's records was last written, by the core's own clock.
-        let last_saved = rows
-            .iter()
-            .map(|row| row.updated_at)
-            .max()
-            .map(|at| iso(date_of(at)));
+        let Some((card_saved, counted)) = v.clinic_patient_state(id)? else {
+            return Err(CoreError::NotFound(NO_PATIENT.to_owned()));
+        };
+        let last_saved = last_saved_day(&rows, card_saved);
         let of_kind = |kind: &str| -> Vec<StoredClinicRecord> {
             rows.iter()
                 .filter(|row| row.kind == kind)
@@ -1316,15 +1331,24 @@ impl Core {
         )
         .map_err(refusal)?;
         // What the card counted for in the summaries stays, with nothing that says whose it
-        // was (D-179). A card where nothing happened was a mistake and leaves nothing.
-        let (tally, cards) = if rules::card_happened(&records, &marked) {
+        // was (D-179). A card where nothing happened was a mistake and leaves nothing. A card
+        // an earlier erase already counted (its records went, the card's removal failed) is
+        // counted again now, once, since that count was never written: its records are gone,
+        // so it no longer looks like a card where something happened.
+        let happened = rules::card_happened(&records, &marked);
+        let tally = if happened {
             let mut tally = tally_strict(v)?;
             rules::fold_erased(&mut tally, &visits, &charges, &payments);
+            Some(to_json(&tally)?)
+        } else {
+            None
+        };
+        let cards = if happened || counted {
             let mut cards = cards_strict(v)?;
             rules::fold_erased_card(&mut cards, &patient);
-            (Some(to_json(&tally)?), Some(to_json(&cards)?))
+            Some(to_json(&cards)?)
         } else {
-            (None, None)
+            None
         };
         self.vault_mut()?
             .erase_clinic_patient(id, tally.as_deref(), cards.as_deref())?;

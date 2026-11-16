@@ -153,7 +153,9 @@ export function Dialog(props: {
   onClose?: () => void;
   /** Typed text that closing would lose: Escape and × ask first (F6). */
   dirty?: boolean;
-  footer?: ReactNode;
+  /** The buttons at the bottom. As a function it gets the dialog's own close, which asks
+   *  first like Escape and × do, for a "ביטול" button of its own. */
+  footer?: ReactNode | ((close: () => void) => ReactNode);
   children: ReactNode;
 }) {
   const ref = useRef<HTMLElement>(null);
@@ -167,6 +169,7 @@ export function Dialog(props: {
     confirmingRef.current = confirming;
   });
   const closable = onClose !== undefined;
+  const footer = typeof props.footer === "function" ? props.footer(close ?? (() => undefined)) : props.footer;
   useEffect(() => {
     // A field marked autoFocus inside has already taken focus (React applies it before effects):
     // keep it there, so she can type at once. Otherwise the frame takes focus.
@@ -222,7 +225,7 @@ export function Dialog(props: {
             <button type="button" className="btn" onClick={onClose}>לסגור בלי לשמור</button>
           </footer>
         ) : (
-          props.footer && <footer className="dialog-foot">{props.footer}</footer>
+          footer && <footer className="dialog-foot">{footer}</footer>
         )}
       </section>
     </div>
