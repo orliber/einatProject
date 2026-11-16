@@ -17,7 +17,7 @@ function wrap(children: ReactNode) {
   );
 }
 
-const sets = [{ key: "wppsi_iii_2_3", instrument: "wppsi_iii", title_he: "WPPSI-III, גילאי 2:6–3:11", measures: ["receptive_vocabulary", "information", "block_design", "object_assembly"] }];
+const sets = [{ key: "wppsi_iii_2_3", instrument: "wppsi_iii", title_he: "WPPSI-III, גילאי 2:6–3:11", measures: ["receptive_vocabulary", "information", "block_design", "object_assembly"], min_age_months: 30, max_age_months: 47 }];
 
 describe("critical values from the manual (D-190)", () => {
   it("reads a typed value, and refuses what is not one", () => {

@@ -144,6 +144,7 @@ fn export_needs_approved_paragraphs_and_restores_names() {
             note: String::new(),
         }],
         notes: String::new(),
+        basis: None,
     };
     core.save_scores(&case, None, &sheet).unwrap();
     assert_eq!(core.check_export(&case).unwrap().score_tables, 1);

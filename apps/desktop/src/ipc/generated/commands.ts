@@ -182,7 +182,7 @@ export type Commands = {
   prepare_update: { args: undefined; returns: boolean };
   prepare_verify: { args: { caseId: string; sectionKey: string }; returns: Prepared };
   preview_filter: { args: { caseId: string; text: string }; returns: FilterOutcome };
-  preview_scores: { args: { sheet: ScoreSheet }; returns: string };
+  preview_scores: { args: { caseId: string | null; sheet: ScoreSheet }; returns: string };
   print_page: { args: undefined; returns: null };
   purge_case: { args: { caseId: string; password: string }; returns: null };
   readiness: { args: undefined; returns: Readiness };

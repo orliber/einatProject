@@ -15,4 +15,8 @@ title_he: string,
 /**
  * The primary (or core) subtests, by measure key.
  */
-measures: Array<string>, };
+measures: Array<string>, 
+/**
+ * The ages of the band, in months (both ends included).
+ */
+min_age_months: number, max_age_months: number, };

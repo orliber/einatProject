@@ -254,20 +254,49 @@ impl Core {
     /// The exact text [`Core::save_scores`] would store, for the live preview while typing.
     /// Not for an instrument she does not give (D-098).
     pub fn preview_scores(&mut self, sheet: &dv_domain::ScoreSheet) -> Result<String, CoreError> {
+        self.preview_scores_in(None, sheet)
+    }
+
+    /// [`Core::preview_scores`] for the sheet of a case: with the child's age, as it will be
+    /// saved (D-190).
+    pub fn preview_scores_in(
+        &mut self,
+        case_id: Option<&str>,
+        sheet: &dv_domain::ScoreSheet,
+    ) -> Result<String, CoreError> {
         if let Ok(v) = self.vault_ref() {
             crate::instruments::check_given(v, &sheet.instrument)?;
         }
-        let critical = self.sheet_critical()?;
-        dv_domain::format_sheet_with(sheet, self.sheet_habits()?, &critical)
-            .map_err(CoreError::Refused)
+        let sheet = self.with_basis(case_id, sheet)?;
+        dv_domain::format_sheet_with(&sheet, self.sheet_habits()?).map_err(CoreError::Refused)
     }
 
-    /// The manual's critical values she entered (D-190); none while locked.
-    fn sheet_critical(&mut self) -> Result<Vec<dv_domain::CriticalValue>, CoreError> {
-        match self.vault_ref() {
-            Ok(v) => crate::instruments::critical_values(v),
-            Err(_) => Ok(Vec::new()),
-        }
+    /// The sheet with what its relative places are computed with recorded on it (D-190): her
+    /// critical values now and the case's age. Whatever basis came with the sheet is replaced;
+    /// none while locked.
+    fn with_basis(
+        &mut self,
+        case_id: Option<&str>,
+        sheet: &dv_domain::ScoreSheet,
+    ) -> Result<dv_domain::ScoreSheet, CoreError> {
+        let mut sheet = sheet.clone();
+        sheet.basis = match self.vault_ref() {
+            Ok(v) => {
+                let age_months = match case_id {
+                    Some(id) => v
+                        .case_meta(id)?
+                        .age
+                        .map(|a| u32::from(a.years) * 12 + u32::from(a.months)),
+                    None => None,
+                };
+                Some(dv_domain::RelativeBasis {
+                    critical: crate::instruments::critical_values(v)?,
+                    age_months,
+                })
+            }
+            Err(_) => None,
+        };
+        Ok(sheet)
     }
 
     /// What she leaves out beside scores in her reports (K12); nothing while locked.
@@ -291,8 +320,9 @@ impl Core {
         }
         // An instrument she does not give is not entered (D-098).
         crate::instruments::check_given(self.vault_ref()?, &sheet.instrument)?;
-        let critical = self.sheet_critical()?;
-        let text = dv_domain::format_sheet_with(sheet, self.sheet_habits()?, &critical)
+        // The basis is stored with the sheet, so its text and every later use of it agree.
+        let sheet = &self.with_basis(Some(case_id), sheet)?;
+        let text = dv_domain::format_sheet_with(sheet, self.sheet_habits()?)
             .map_err(CoreError::Refused)?;
         let title = dv_domain::instruments()
             .into_iter()

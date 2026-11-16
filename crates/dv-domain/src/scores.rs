@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::relative::CriticalValue;
+use crate::relative::RelativeBasis;
 
 /// How a measure's numbers are read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -676,6 +676,11 @@ pub struct ScoreSheet {
     pub cutoff: Option<f64>,
     pub entries: Vec<ScoreEntry>,
     pub notes: String,
+    /// What the relative places are computed with (D-190), recorded by the core when it
+    /// formats or saves the sheet. `None` (a sheet saved before): the labelled rule of thumb.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub basis: Option<RelativeBasis>,
 }
 
 fn fmt_value(v: f64) -> String {
@@ -1015,19 +1020,15 @@ pub fn key_scores(sheets: &[ScoreSheet], habits: SheetHabits) -> Option<String> 
 /// The text stored as a "test scores" material: every score with its range from the table,
 /// the scale sentence, and a note on large gaps between indexes (to check in the manual).
 pub fn format_sheet(sheet: &ScoreSheet) -> Result<String, String> {
-    format_sheet_with(sheet, SheetHabits::default(), &[])
+    format_sheet_with(sheet, SheetHabits::default())
 }
 
 /// A group of the sheet on one scale, and its (label, score) rows, for the order line.
 type OrderGroup<'a> = (&'a str, ScoreScale, Vec<(String, f64)>);
 
-/// [`format_sheet`], leaving out what she does not write beside scores (K12), with the relative
-/// places by the manual's critical values she entered (D-190).
-pub fn format_sheet_with(
-    sheet: &ScoreSheet,
-    habits: SheetHabits,
-    critical: &[CriticalValue],
-) -> Result<String, String> {
+/// [`format_sheet`], leaving out what she does not write beside scores (K12). The relative
+/// places follow the sheet's recorded basis (D-190).
+pub fn format_sheet_with(sheet: &ScoreSheet, habits: SheetHabits) -> Result<String, String> {
     let (inst, entries) = checked(sheet)?;
     let mut out = format!("{} – {}\n", inst.name, inst.description_he);
     if !sheet.module.trim().is_empty() {
@@ -1087,7 +1088,7 @@ pub fn format_sheet_with(
             .collect();
         out.push_str(&format!("{group} מהגבוה לנמוך: {}\n", order.join("; ")));
     }
-    if let Some(line) = relative_line(&inst.key, &entries, critical) {
+    if let Some(line) = relative_line(&inst.key, &entries, sheet.basis.as_ref()) {
         out.push_str(&line);
     }
     if let Some(line) = elevated_line(&entries) {
@@ -1118,9 +1119,9 @@ fn is_total(measure: &Measure) -> bool {
 fn relative_line(
     instrument: &str,
     entries: &[(&Measure, &ScoreEntry)],
-    critical: &[CriticalValue],
+    basis: Option<&RelativeBasis>,
 ) -> Option<String> {
-    let (method, places) = crate::relative::relative_places(instrument, entries, critical);
+    let (method, places) = crate::relative::relative_places(instrument, entries, basis);
     let (mut strong, mut weak) = (Vec::new(), Vec::new());
     let mut groups: Vec<&str> = Vec::new();
     for ((m, e), place) in entries.iter().zip(&places) {
@@ -1152,14 +1153,19 @@ fn relative_line(
         ));
     }
     match method {
-        crate::relative::Method::Publisher { title_he, mean } => {
+        crate::relative::Method::Publisher {
+            title_he,
+            mean,
+            core,
+        } => {
+            let kind = if core { "העיקריים" } else { "הראשיים" };
             let found = if parts.is_empty() {
                 "לא נמצאו חוזקות או חולשות יחסיות מובהקות".to_owned()
             } else {
                 parts.join(". ")
             };
             Some(format!(
-                "חוזקות וחולשות יחסיות לפי שיטת המדריך, שחושבו בתוכנה: כל תת-מבחן ראשי מול הממוצע של תתי-המבחנים הראשיים ({}), לפי הערך הקריטי של המדריך ברמת מובהקות .05 שהמאבחנת הזינה ({title_he}). {found}\n",
+                "חוזקות וחולשות יחסיות לפי שיטת המדריך, שחושבו בתוכנה: כל אחד מתתי-המבחנים {kind} מול הממוצע שלהם ({}), לפי הערך הקריטי של המדריך ברמת מובהקות .05 שהמאבחנת הזינה ({title_he}). {found}\n",
                 fmt_mean(mean)
             ))
         }
@@ -2464,23 +2470,16 @@ pub struct ScoreCases {
     pub cases: Vec<String>,
 }
 
-/// The interpretation cases each score of `sheet` fits, with the 3-point rule of thumb for the
-/// relative places ([`sheet_cases_with`] and no critical values).
-#[must_use]
-pub fn sheet_cases(sheet: &ScoreSheet) -> Vec<ScoreCases> {
-    sheet_cases_with(sheet, &[])
-}
-
-/// The interpretation cases each score of `sheet` fits, the relative places by the manual's
-/// critical values when they are all entered for the sheet (D-190). A sheet of an unknown
+/// The interpretation cases each score of `sheet` fits, the relative places by the sheet's
+/// recorded basis (D-190), exactly as its text says them. A sheet of an unknown
 /// instrument is none; an entry of an unknown measure is left out (one value off the grid in a
 /// sheet an older version saved does not take the cases away from the others).
 #[must_use]
-pub fn sheet_cases_with(sheet: &ScoreSheet, critical: &[CriticalValue]) -> Vec<ScoreCases> {
+pub fn sheet_cases(sheet: &ScoreSheet) -> Vec<ScoreCases> {
     let Some((inst, entries)) = entries_of(sheet) else {
         return Vec::new();
     };
-    let (_, places) = crate::relative::relative_places(&inst.key, &entries, critical);
+    let (_, places) = crate::relative::relative_places(&inst.key, &entries, sheet.basis.as_ref());
     entries
         .iter()
         .zip(places)
@@ -2612,6 +2611,7 @@ mod tests {
                 entry("block_design", 7.0),
             ],
             notes: String::new(),
+            basis: None,
         };
         let groups: Vec<ParentGroup> = sheet_bands(&sheet)
             .unwrap()
@@ -2642,6 +2642,7 @@ mod tests {
             cutoff: None,
             entries: vec![entry("total", 32.0)],
             notes: String::new(),
+            basis: None,
         };
         assert!(sheet_bands(&asrs).unwrap().is_empty());
     }
@@ -2788,9 +2789,10 @@ mod tests {
                 },
             ],
             notes: String::new(),
+            basis: None,
         };
         let full = format_sheet(&sheet).unwrap_or_default();
-        let hers = format_sheet_with(&sheet, h, &[]).unwrap_or_default();
+        let hers = format_sheet_with(&sheet, h).unwrap_or_default();
         assert!(full.contains("ציון 7, אחוזון"), "{full}");
         assert!(
             hers.contains("ציון 7 –") && !hers.contains("ציון 7, אחוזון"),
@@ -2817,6 +2819,7 @@ mod tests {
                 entry("fsiq", 98.0),
             ],
             notes: String::new(),
+            basis: None,
         };
         let cases = sheet_cases(&sheet);
         let of = |m: &str| cases.iter().find(|c| c.measure == m).unwrap().cases.clone();
@@ -2853,6 +2856,7 @@ mod tests {
                 entry("coping", 19.0),
             ],
             notes: String::new(),
+            basis: None,
         };
         let cases = sheet_cases(&sheet);
         let of = |m: &str| cases.iter().find(|c| c.measure == m).unwrap().cases.clone();
@@ -2923,6 +2927,7 @@ mod tests {
                 })
                 .collect(),
             notes: String::new(),
+            basis: None,
         }
     }
 
@@ -3129,6 +3134,7 @@ mod tests {
                 note: String::new(),
             }],
             notes: String::new(),
+            basis: None,
         };
         assert_eq!(
             kinds(
@@ -3152,6 +3158,7 @@ mod tests {
                 note: String::new(),
             }],
             notes: String::new(),
+            basis: None,
         };
         let sheets = std::slice::from_ref(&ados);
         // The right cut-off is not "a number unlike the table" either.
@@ -3300,6 +3307,7 @@ mod tests {
                 note: String::new(),
             }],
             notes: String::new(),
+            basis: None,
         };
         let ados = sheet("ados_2", Some(11.0), 14.0);
         let cars = sheet("cars_2", None, 32.0);
@@ -3396,6 +3404,7 @@ mod tests {
             })
             .collect(),
             notes: String::new(),
+            basis: None,
         };
         let text = format_sheet(&brief).unwrap();
         assert!(
@@ -3447,6 +3456,7 @@ mod tests {
             })
             .collect(),
             notes: String::new(),
+            basis: None,
         };
         let text = format_sheet(&vineland).unwrap();
         let line = text.lines().find(|l| l.contains("מהגבוה לנמוך")).unwrap();
@@ -3470,6 +3480,7 @@ mod tests {
             })
             .collect(),
             notes: String::new(),
+            basis: None,
         };
         let text = format_sheet(&ados).unwrap();
         assert!(!text.contains("מהגבוה לנמוך"), "{text}");
@@ -3560,6 +3571,7 @@ mod tests {
                 },
             ],
             notes: "שיתף פעולה לאורך כל ההעברה".into(),
+            basis: None,
         };
         let text = format_sheet(&sheet).unwrap_or_else(|e| panic!("{e}"));
         assert!(
@@ -3597,6 +3609,7 @@ mod tests {
                 note: String::new(),
             }],
             notes: String::new(),
+            basis: None,
         };
         let text = format_sheet(&ados).unwrap_or_else(|e| panic!("{e}"));
         assert!(
@@ -3624,6 +3637,7 @@ mod tests {
                 entry("matrix", 13.0),
             ],
             notes: String::new(),
+            basis: None,
         };
         let text = format_sheet(&sheet).unwrap_or_else(|e| panic!("{e}"));
         let line = text
@@ -3650,6 +3664,7 @@ mod tests {
                 entry("socialization", 90.0),
             ],
             notes: String::new(),
+            basis: None,
         };
         let text = format_sheet(&vineland).unwrap_or_else(|e| panic!("{e}"));
         let line = text
@@ -3675,6 +3690,7 @@ mod tests {
                 note: String::new(),
             }],
             notes: String::new(),
+            basis: None,
         };
         assert!(format_sheet(&sheet).is_err_and(|e| e.contains("מחוץ לטווח")));
     }
@@ -3784,6 +3800,7 @@ mod tests {
                 },
             ],
             notes: String::new(),
+            basis: None,
         };
         let (title, rows, note) = sheet_table(&sheet).unwrap_or_else(|e| panic!("{e}"));
         assert_eq!(title, "WPPSI-IV");
@@ -3808,6 +3825,7 @@ mod tests {
                 note: String::new(),
             }],
             notes: String::new(),
+            basis: None,
         };
         let (title, rows, _) = sheet_table(&ados).unwrap_or_else(|e| panic!("{e}"));
         assert_eq!(title, "ADOS-2 · מודול 2");
@@ -3849,6 +3867,7 @@ mod tests {
                 entry("block_design", 13.0, ""),
             ],
             notes: String::new(),
+            basis: None,
         };
         let ados = ScoreSheet {
             instrument: "ados_2".into(),
@@ -3856,6 +3875,7 @@ mod tests {
             cutoff: Some(8.0),
             entries: vec![entry("total", 11.0, "")],
             notes: String::new(),
+            basis: None,
         };
         let only_subtests = ScoreSheet {
             instrument: "wisc_v".into(),
@@ -3863,6 +3883,7 @@ mod tests {
             cutoff: None,
             entries: vec![entry("matrix", 9.0, "")],
             notes: String::new(),
+            basis: None,
         };
         let unknown = ScoreSheet {
             instrument: "no_such_test".into(),
@@ -3870,6 +3891,7 @@ mod tests {
             cutoff: None,
             entries: vec![entry("fsiq", 100.0, "")],
             notes: String::new(),
+            basis: None,
         };
         let sheets = [
             cognitive.clone(),

@@ -86,6 +86,7 @@ fn wppsi() -> dv_domain::ScoreSheet {
             entry("block_design", 6.0),
         ],
         notes: String::new(),
+        basis: None,
     }
 }
 

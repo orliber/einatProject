@@ -50,11 +50,8 @@ pub(crate) fn interpretations_for_request(
     if v.setting(PROFILE_OFF_KEY)?.as_deref() == Some("1") {
         return Ok(None);
     }
-    let critical = crate::instruments::critical_values(v)?;
-    let scores: Vec<dv_domain::ScoreCases> = sheets
-        .iter()
-        .flat_map(|s| dv_domain::sheet_cases_with(s, &critical))
-        .collect();
+    let scores: Vec<dv_domain::ScoreCases> =
+        sheets.iter().flat_map(dv_domain::sheet_cases).collect();
     let fits = |i: &Interpretation| {
         scores.iter().any(|c| {
             c.instrument == i.instrument && c.measure == i.measure && c.cases.contains(&i.case)
@@ -83,27 +80,16 @@ pub(crate) struct InterpretationCheck {
 impl InterpretationCheck {
     pub(crate) fn new(v: &Vault, sheets: &[dv_domain::ScoreSheet]) -> Result<Self, CoreError> {
         // Her style document is opened only when there is a score to check against.
-        let critical = crate::instruments::critical_values(v)?;
         if sheets.iter().all(|s| dv_domain::sheet_cases(s).is_empty()) {
-            return Ok(Self::with(&[], sheets, &critical));
+            return Ok(Self::with(&[], sheets));
         }
-        Ok(Self::with(
-            &local_style(v)?.interpretations,
-            sheets,
-            &critical,
-        ))
+        Ok(Self::with(&local_style(v)?.interpretations, sheets))
     }
 
     /// With her interpretations already read ([`LoadedStyle`]).
-    pub(crate) fn with(
-        all: &[Interpretation],
-        sheets: &[dv_domain::ScoreSheet],
-        critical: &[dv_domain::CriticalValue],
-    ) -> Self {
-        let scores: Vec<dv_domain::ScoreCases> = sheets
-            .iter()
-            .flat_map(|s| dv_domain::sheet_cases_with(s, critical))
-            .collect();
+    pub(crate) fn with(all: &[Interpretation], sheets: &[dv_domain::ScoreSheet]) -> Self {
+        let scores: Vec<dv_domain::ScoreCases> =
+            sheets.iter().flat_map(dv_domain::sheet_cases).collect();
         let mut misfits = Vec::new();
         if !scores.is_empty() {
             for i in all {

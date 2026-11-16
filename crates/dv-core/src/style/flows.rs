@@ -1444,6 +1444,7 @@ fn a_percentile_she_never_writes_beside_subtests_is_left_out_of_the_scores_mater
             note: String::new(),
         }],
         notes: String::new(),
+        basis: None,
     };
     assert!(core
         .preview_scores(&sheet)
@@ -1511,6 +1512,7 @@ fn her_recommendations_come_with_how_often_she_gave_them_in_reports_like_this_ca
             note: String::new(),
         }],
         notes: String::new(),
+        basis: None,
     };
     core.save_scores(&id, None, &sheet).unwrap();
     let lib = core.section_library(&id, "recommendations").unwrap();
@@ -1594,6 +1596,7 @@ fn her_approved_interpretations_that_fit_the_scores_go_out_and_a_misfit_is_noted
             entry("information", 10.0),
         ],
         notes: String::new(),
+        basis: None,
     };
     core.save_scores(&id, None, &sheet).unwrap();
     let p = core.prepare_section(&id, "cognitive", "נסחי").unwrap();

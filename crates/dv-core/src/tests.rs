@@ -1699,6 +1699,7 @@ fn entered_scores_feed_the_section_with_ranges_from_the_table() {
             },
         ],
         notes: "אלון שיתף פעולה לאורך כל ההעברה.".into(),
+        basis: None,
     };
     let saved = core.save_scores(&case, None, &sheet).unwrap();
     assert_eq!(saved.kind, InputKind::TestScores);
@@ -1708,9 +1709,21 @@ fn entered_scores_feed_the_section_with_ranges_from_the_table() {
         "{}",
         saved.content
     );
+    // Stored as entered, with what its relative places were computed with (D-190).
+    let stored = core.score_sheet(&case, &saved.id).unwrap().unwrap();
     assert_eq!(
-        core.score_sheet(&case, &saved.id).unwrap().as_ref(),
-        Some(&sheet)
+        stored
+            .basis
+            .as_ref()
+            .map(|b| (b.critical.is_empty(), b.age_months.is_some())),
+        Some((true, true))
+    );
+    assert_eq!(
+        dv_domain::ScoreSheet {
+            basis: None,
+            ..stored
+        },
+        sheet
     );
 
     // Editing keeps one material and replaces its text.
@@ -1787,6 +1800,7 @@ fn every_instrument_sheet_passes_the_filter_without_questions() {
             cutoff: Some(8.0),
             entries,
             notes: String::new(),
+            basis: None,
         };
         // With the scores spread (D-165): the lines of relative strengths and weaknesses
         // and of scales in an elevated range go out unchanged too.
@@ -1845,6 +1859,7 @@ fn a_half_point_score_is_not_mistaken_for_a_date() {
             note: String::new(),
         }],
         notes: String::new(),
+        basis: None,
     };
     let text = dv_domain::format_sheet(&sheet).unwrap();
     assert!(text.contains("ציון 29.5 – מעט או ללא תסמינים"), "{text}");
@@ -2359,6 +2374,7 @@ fn score_tables_and_section_titles_are_never_rewritten_silently() {
             cutoff: Some(1.0),
             entries,
             notes: String::new(),
+            basis: None,
         };
         texts.push(dv_domain::format_sheet(&sheet).unwrap());
         // The key scores of the closing sections (D-162): the same lines, under the test's name.
@@ -2397,6 +2413,7 @@ fn score_tables_and_section_titles_are_never_rewritten_silently() {
             })
             .collect(),
         notes: String::new(),
+        basis: None,
     };
     let with_patterns = dv_domain::key_scores(&[gap], dv_domain::SheetHabits::default()).unwrap();
     assert!(with_patterns.contains("דפוסי התוצאות"), "{with_patterns}");

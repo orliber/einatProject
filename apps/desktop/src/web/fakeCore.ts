@@ -1800,9 +1800,9 @@ function fakeStyleHint(d: { byAi: boolean; status: string; text: string }) {
 
 /** The comparison sets of relative strengths and weaknesses, as in dv_domain::relative_sets (D-190). */
 const RELATIVE_SETS: RelativeSet[] = [
-  { key: "wisc_v", instrument: "wisc_v", title_he: "WISC-V", measures: ["similarities", "vocabulary", "block_design", "visual_puzzles", "matrix", "figure_weights", "digit_span", "picture_span", "coding", "symbol_search"] },
-  { key: "wppsi_iv_4_7", instrument: "wppsi_iv", title_he: "WPPSI-IV, גילאי 4:0–7:7", measures: ["information", "similarities", "block_design", "object_assembly", "matrix", "picture_concepts", "picture_memory", "zoo_locations", "bug_search", "cancellation"] },
-  { key: "wppsi_iv_2_3", instrument: "wppsi_iv", title_he: "WPPSI-IV, גילאי 2:6–3:11", measures: ["receptive_vocabulary", "information", "block_design", "object_assembly", "picture_memory", "zoo_locations"] },
-  { key: "wppsi_iii_4_7", instrument: "wppsi_iii", title_he: "WPPSI-III, גילאי 4:0–7:3", measures: ["information", "vocabulary", "word_reasoning", "block_design", "matrix", "picture_concepts", "coding"] },
-  { key: "wppsi_iii_2_3", instrument: "wppsi_iii", title_he: "WPPSI-III, גילאי 2:6–3:11", measures: ["receptive_vocabulary", "information", "block_design", "object_assembly"] },
+  { key: "wisc_v", instrument: "wisc_v", title_he: "WISC-V", measures: ["similarities", "vocabulary", "block_design", "visual_puzzles", "matrix", "figure_weights", "digit_span", "picture_span", "coding", "symbol_search"], min_age_months: 72, max_age_months: 203 },
+  { key: "wppsi_iv_4_7", instrument: "wppsi_iv", title_he: "WPPSI-IV, גילאי 4:0–7:7", measures: ["information", "similarities", "block_design", "object_assembly", "matrix", "picture_concepts", "picture_memory", "zoo_locations", "bug_search", "cancellation"], min_age_months: 48, max_age_months: 91 },
+  { key: "wppsi_iv_2_3", instrument: "wppsi_iv", title_he: "WPPSI-IV, גילאי 2:6–3:11", measures: ["receptive_vocabulary", "information", "block_design", "object_assembly", "picture_memory", "zoo_locations"], min_age_months: 30, max_age_months: 47 },
+  { key: "wppsi_iii_4_7", instrument: "wppsi_iii", title_he: "WPPSI-III, גילאי 4:0–7:3", measures: ["information", "vocabulary", "word_reasoning", "block_design", "matrix", "picture_concepts", "coding"], min_age_months: 48, max_age_months: 87 },
+  { key: "wppsi_iii_2_3", instrument: "wppsi_iii", title_he: "WPPSI-III, גילאי 2:6–3:11", measures: ["receptive_vocabulary", "information", "block_design", "object_assembly"], min_age_months: 30, max_age_months: 47 },
 ];

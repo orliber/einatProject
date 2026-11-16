@@ -271,7 +271,7 @@ export const ipc = {
   /** Undoes the last deletion of this material (until another is deleted or the vault locks). */
   restoreInput: (caseId: string, inputId: string) => run("restore_input", { caseId, inputId }),
   scoreInstruments: () => call("score_instruments"),
-  previewScores: (sheet: ScoreSheet) => call("preview_scores", { sheet }),
+  previewScores: (caseId: string | null, sheet: ScoreSheet) => call("preview_scores", { caseId, sheet }),
   /** Saves (or, with `inputId`, replaces) a score table as a "test scores" material. */
   saveScores: (caseId: string, inputId: string | null, sheet: ScoreSheet) =>
     call("save_scores", { caseId, inputId, sheet }),
