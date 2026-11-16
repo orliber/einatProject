@@ -23,6 +23,7 @@ import { noteLockReason } from "./lockReason";
 import type { SettingsPane } from "./screens/settingsPanes";
 import type { ClinicTab } from "./screens/clinic/tabs";
 import { areaOf, homeOf, lastArea, rememberArea } from "./areas";
+import { isDiscreet, setDiscreet } from "./discreet";
 
 // The pages she opens rarely load on their own, so the first paint and the case pages carry
 // only what they need; they are fetched in the background right after the vault opens.
@@ -326,6 +327,21 @@ function Shell(props: {
     if (unsavedGuard()) setLeaving(r);
     else setRoute(r);
   }, [setRoute]);
+  // Ctrl+1 and Ctrl+2 go to the two parts; Ctrl+Shift+D turns discreet mode on or off (also
+  // while typing: a family may walk in at any moment).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (isCombo(e, KEYS.discreet)) {
+        e.preventDefault();
+        setDiscreet(!isDiscreet());
+      } else if (isCombo(e, KEYS.reportsPart) || isCombo(e, KEYS.clinicPart)) {
+        e.preventDefault();
+        go(homeOf(isCombo(e, KEYS.clinicPart) ? "clinic" : "reports"));
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [go]);
   // The part she is in is where the program opens next time (the settings belong to neither).
   useEffect(() => {
     const area = areaOf(route.name);

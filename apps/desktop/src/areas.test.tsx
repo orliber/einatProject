@@ -121,3 +121,18 @@ describe("from a case to the child's card in the clinic (D-195)", () => {
     expect(screen.queryByRole("menuitem", { name: "כרטיס המטופל בקליניקה" })).toBeNull();
   });
 });
+
+describe("keys (D-191, D-192)", () => {
+  it("Ctrl+2 and Ctrl+1 switch the parts, Ctrl+Shift+D turns discreet mode on and off", async () => {
+    const { user } = await openApp();
+    await user.keyboard("{Control>}2{/Control}");
+    expect(await screen.findByRole("tablist", { name: "חלקי הקליניקה" })).toBeInTheDocument();
+    await user.keyboard("{Control>}1{/Control}");
+    expect(await screen.findByRole("button", { name: /בתיק של נועם$/ })).toBeInTheDocument();
+    await user.keyboard("{Control>}{Shift>}D{/Shift}{/Control}");
+    expect(screen.getByRole("switch", { name: "מצב דיסקרטי" })).toHaveAttribute("aria-checked", "true");
+    expect(await screen.findByRole("button", { name: /בתיק של נ\.$/ })).toBeInTheDocument();
+    await user.keyboard("{Control>}{Shift>}D{/Shift}{/Control}");
+    expect(screen.getByRole("switch", { name: "מצב דיסקרטי" })).toHaveAttribute("aria-checked", "false");
+  });
+});

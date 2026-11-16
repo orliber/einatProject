@@ -42,7 +42,7 @@ export function TopBar({ active }: { active: Route["name"] }) {
   const area = areaOf(active);
   const part = (a: Area, icon: ReactNode, extra?: ReactNode) => (
     <button type="button" className={area === a ? "topbar-area topbar-area-on" : "topbar-area"}
-      aria-current={area === a ? "true" : undefined} onClick={() => go(homeOf(a))}>
+      aria-current={area === a ? "true" : undefined} title={`${AREA_LABEL[a]} (${MOD}+${a === "reports" ? 1 : 2})`} onClick={() => go(homeOf(a))}>
       {icon}<span>{AREA_LABEL[a]}</span>{extra}
     </button>
   );
@@ -59,7 +59,7 @@ export function TopBar({ active }: { active: Route["name"] }) {
         {status.demo_mode && <span className="topbar-demo" title="לא הוגדר מפתח API. התשובות הן דוגמאות מקומיות, ושום דבר לא נשלח.">מצב הדגמה</span>}
         <span className="topbar-safe"><span className="topbar-dot" aria-hidden="true" />{he.encrypted}</span>
         <button type="button" role="switch" aria-checked={discreet} aria-label="מצב דיסקרטי"
-          title={discreet ? "מצב דיסקרטי פעיל: שמות מוצגים בראשי תיבות. לחיצה מחזירה את השמות." : "מצב דיסקרטי: שמות מוצגים בראשי תיבות, למקרה שמישהו בחדר רואה את המסך."}
+          title={discreet ? `מצב דיסקרטי פעיל: שמות מוצגים בראשי תיבות. לחיצה מחזירה את השמות (${MOD}+Shift+D).` : `מצב דיסקרטי: שמות מוצגים בראשי תיבות, למקרה שמישהו בחדר רואה את המסך (${MOD}+Shift+D).`}
           className={discreet ? "btn btn-small topbar-discreet topbar-discreet-on" : "btn btn-small topbar-discreet"} onClick={() => setDiscreet(!discreet)}>
           <EyeIcon shut={discreet} /><span className="topbar-discreet-text">דיסקרטי</span>
         </button>
