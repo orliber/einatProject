@@ -1,0 +1,97 @@
+/* The patient list. Colours come only from styles/tokens.css, so both themes hold. */
+.patients {
+  gap: var(--space-4);
+}
+.patients .num {
+  font-variant-numeric: tabular-nums;
+}
+.patients-head {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+.patients-search {
+  flex: 1 1 280px;
+  max-width: 420px;
+}
+.patients-search .input {
+  width: 100%;
+}
+.patients-count {
+  margin: 0;
+  min-height: 1.5em;
+}
+.patients-table-wrap {
+  overflow-x: auto;
+}
+.patients-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-base);
+}
+.patients-table th,
+.patients-table td {
+  padding: var(--space-3) var(--space-4);
+  text-align: start;
+  vertical-align: middle;
+  font-weight: 400;
+}
+.patients-table thead th {
+  padding-block: var(--space-1);
+  border-bottom: 1px solid var(--line-strong);
+  background: var(--surface-alt);
+  white-space: nowrap;
+}
+.patients-table tbody tr {
+  border-top: 1px solid var(--line);
+}
+.patients-table tbody tr:first-child {
+  border-top: 0;
+}
+.patients-row {
+  cursor: pointer;
+}
+.patients-row:hover {
+  background: var(--surface-alt);
+}
+.patients-table .patients-num {
+  text-align: end;
+}
+.patients-sort {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--ink-soft);
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  cursor: pointer;
+}
+.patients-sort:hover {
+  color: var(--primary);
+}
+th[aria-sort="ascending"] .patients-sort,
+th[aria-sort="descending"] .patients-sort {
+  color: var(--ink);
+}
+.patients-sort-mark {
+  display: inline-block;
+  min-width: 1em;
+  font-size: var(--text-xs);
+  color: var(--primary);
+}
+.patients-who {
+  gap: 2px;
+}
+.patients-name {
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.patients-visit {
+  gap: 0;
+}

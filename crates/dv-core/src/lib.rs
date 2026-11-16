@@ -9,6 +9,7 @@ mod backup;
 mod binding;
 mod briefs;
 mod cases;
+mod clinic;
 mod consult;
 mod consultations;
 mod dates;

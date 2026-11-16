@@ -24,6 +24,7 @@ import type { DriveProblem } from "./generated/DriveProblem";
 import type { DriveCleanupResult } from "./generated/DriveCleanupResult";
 import type { NameMatch } from "./generated/NameMatch";
 import type { ChatView } from "./generated/ChatView";
+import type { ClinicRequest } from "./generated/ClinicRequest";
 import type { ConsultationSummary } from "./generated/ConsultationSummary";
 import type { ConsultationView } from "./generated/ConsultationView";
 import type { ExportCheck } from "./generated/ExportCheck";
@@ -408,6 +409,9 @@ export const ipc = {
   /** A secret to the clipboard: out of history and cloud sync (and on a Mac out of Universal
    *  Clipboard), cleared after N seconds (returned: 60, or 20 on a Mac). */
   copySecret: (text: string) => call("copy_secret", { text }),
+
+  /** The clinic's one command (D-170); `ipc/clinic.ts` is its typed client. */
+  clinic: (request: ClinicRequest) => call("clinic", { request }),
 
   /** The system's print window (the macOS webview ignores `window.print()`). */
   printPage: () => run("print_page"),

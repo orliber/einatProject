@@ -9,6 +9,8 @@ import type { CaseInput } from "./CaseInput";
 import type { CaseMeta } from "./CaseMeta";
 import type { CaseSummary } from "./CaseSummary";
 import type { ChatView } from "./ChatView";
+import type { ClinicReply } from "./ClinicReply";
+import type { ClinicRequest } from "./ClinicRequest";
 import type { ConsultResult } from "./ConsultResult";
 import type { ConsultationSummary } from "./ConsultationSummary";
 import type { ConsultationView } from "./ConsultationView";
@@ -101,6 +103,7 @@ export type Commands = {
   choose_backup: { args: undefined; returns: StagedBackup | null };
   clear_report_logo: { args: undefined; returns: null };
   clear_report_template: { args: undefined; returns: null };
+  clinic: { args: { request: ClinicRequest }; returns: ClinicReply };
   confirm_auto_hidden: { args: { caseId: string; token: string; tag: string }; returns: null };
   confirm_readiness: { args: { key: string; done: boolean }; returns: Readiness };
   confirm_recovery_key: { args: { typed: string }; returns: boolean };

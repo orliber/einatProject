@@ -16,6 +16,7 @@ use super::*;
 mod access;
 mod binding;
 mod briefs;
+mod clinic;
 mod closing_context;
 mod flows;
 mod guides;

@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { useApp, type Route } from "../App";
 import { he } from "../i18n/he";
 import { MOD } from "../shortcuts";
@@ -8,7 +9,7 @@ import "./TopBar.css";
 /** The bar of the screens outside a case: cases, consultation, writing style, settings. */
 export function TopBar({ active }: { active: Route["name"] }) {
   const { go, lockNow, status, showShortcuts } = useApp();
-  const tab = (name: Route["name"], label: string, route: Route) => (
+  const tab = (name: Route["name"], label: ReactNode, route: Route) => (
     <button type="button" className={active === name ? "topbar-link topbar-active" : "topbar-link"}
       aria-current={active === name ? "page" : undefined} onClick={() => go(route)}>{label}</button>
   );
@@ -17,6 +18,7 @@ export function TopBar({ active }: { active: Route["name"] }) {
       <span className="topbar-brand"><LockIcon size={22} color="var(--primary)" /> <span className="topbar-brand-name">{he.appName}</span></span>
       <nav className="topbar-nav" aria-label="ניווט ראשי">
         {tab("cases", "תיקים", { name: "cases" })}
+        {tab("clinic", <>קליניקה <span className="topbar-beta">בטא</span></>, { name: "clinic" })}
         {tab("consult", "התייעצות", { name: "consult" })}
         {tab("style", "הסגנון שלי", { name: "style" })}
         {tab("settings", "הגדרות", { name: "settings" })}

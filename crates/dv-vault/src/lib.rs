@@ -25,8 +25,8 @@ pub use password::{Argon2Params, PolicyViolation, MIN_PASSWORD_CHARS};
 pub use store::{
     drill_backup, peek_backup, BackupCheck, BackupInfo, BackupJob, BackupPeek, BackupWritten,
     Created, DraftVersion, IntegrityReport, NewSlot, Practitioner, RemovedInput, Secret,
-    StoredConsultation, StoredStyleProfile, StoredStyleSource, TokenHasher, Vault, WrittenBackup,
-    BACKUP_EXTENSION,
+    StoredClinicHistory, StoredClinicRecord, StoredConsultation, StoredStyleProfile,
+    StoredStyleSource, TokenHasher, Vault, WrittenBackup, BACKUP_EXTENSION,
 };
 
 #[derive(Debug, thiserror::Error)]
