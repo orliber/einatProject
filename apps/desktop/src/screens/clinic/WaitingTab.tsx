@@ -10,7 +10,7 @@ import type { Patient } from "../../ipc/generated/Patient";
 import type { PatientRow } from "../../ipc/generated/PatientRow";
 import { clinicKeys, useClinicSettings, useOptimistic, usePatients, useReloadClinic, useSavePatient, useToday } from "./clinicData";
 import { CONTACT_ROLE_LABEL, daysBetween, formatDate, isIsoDate } from "./format";
-import { ConfirmDialog, EmptyState, Pager, PatientName, ReadError, usePaged, useShownName } from "./parts";
+import { ConfirmDialog, EmptyState, Pager, PatientName, ReadError, useDiscreet, usePaged, useShownName } from "./parts";
 import { PatientDialog } from "./PatientDialog";
 import { VisitDialog } from "./VisitDialog";
 import "./WaitingTab.css";
@@ -56,6 +56,7 @@ export function WaitingTab() {
   const { notify } = useApp();
   const reload = useReloadClinic();
   const shown = useShownName();
+  const discreet = useDiscreet();
   const save = useSavePatient();
   const [open, setOpen] = useState<Open>(null);
 
@@ -123,11 +124,11 @@ export function WaitingTab() {
                     {days === 0 ? "ממתינים מהיום" : `ממתינים ${waitedWords(days)}, מאז ${formatDate(since)}`}
                     {long && <span className="chip chip-warn">המתנה ארוכה</span>}
                   </span>
-                  {p.reason && <span className="waiting-reason">{p.reason}</span>}
+                  {p.reason && !discreet && <span className="waiting-reason">{p.reason}</span>}
                   {(p.referred_by || contact) && (
                     <span className="muted small waiting-more">
                       {[
-                        p.referred_by ? `הפנה: ${p.referred_by}` : "",
+                        p.referred_by && !discreet ? `הפנה: ${p.referred_by}` : "",
                         contact ? `${CONTACT_ROLE_LABEL[contact.role]}${contact.name ? `: ${shown(contact.name)}` : ""}` : "",
                       ].filter(Boolean).join(" · ")}
                     </span>

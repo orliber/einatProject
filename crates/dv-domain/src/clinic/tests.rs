@@ -4755,3 +4755,20 @@ proptest! {
         }
     }
 }
+
+/// The window keeps the same defaults in a file ("לחזור לברירות המחדל" saves them): the file
+/// and `ClinicSettings::default` are held together here.
+#[test]
+fn the_windows_default_settings_are_the_cores() {
+    let file: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../apps/desktop/src/screens/clinic/defaultSettings.json"
+    ))
+    .unwrap();
+    let core = serde_json::to_value(ClinicSettings::default()).unwrap();
+    assert_eq!(
+        file,
+        core,
+        "{}",
+        serde_json::to_string_pretty(&core).unwrap()
+    );
+}

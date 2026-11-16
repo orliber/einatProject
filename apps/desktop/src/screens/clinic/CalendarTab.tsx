@@ -279,7 +279,7 @@ export function CalendarTab() {
         {view === "week" ? timeGrid : (
           <div className="cal-day-view">
             {timeGrid}
-            <Agenda date={anchor} visits={days.get(anchor) ?? NO_VISITS} onOpen={grid.open} onNew={() => newOn(anchor)}
+            <Agenda key={anchor} date={anchor} visits={days.get(anchor) ?? NO_VISITS} onOpen={grid.open} onNew={() => newOn(anchor)}
               onHold={(v) => void hold(v)} onNote={(patientId, visit) => setOpen({ kind: "note", patientId, visit })} onRemind={(v) => void remind(v)} />
           </div>
         )}

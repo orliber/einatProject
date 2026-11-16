@@ -139,7 +139,8 @@ function CardBody({ card, today, back, onBack }: { card: PatientCard; today: str
 
   async function reopen() {
     try {
-      await save.mutateAsync({ ...p, status: "active" });
+      // A family taken off the waiting list before any visit goes back to waiting, not into the process.
+      await save.mutateAsync({ ...p, status: p.waiting_since && card.visits.length === 0 ? "waiting" : "active" });
       notify("הכרטיס נפתח מחדש");
     } catch (e) {
       notify(messageOf(e, "הכרטיס לא נפתח מחדש. אפשר לנסות שוב."));
@@ -190,7 +191,7 @@ function CardBody({ card, today, back, onBack }: { card: PatientCard; today: str
               {p.status === "waiting" && p.urgent && <span className="chip chip-warn">דחוף</span>}
               {age && <span>{age}</span>}
               {p.birth_date && <span className="muted small">תאריך לידה: <span className="num" dir="ltr">{formatDate(p.birth_date)}</span></span>}
-              {p.framework && <span className="muted">{p.framework}</span>}
+              {p.framework && !discreet && <span className="muted">{p.framework}</span>}
             </span>
           </div>
           <span className="grow" />
@@ -226,7 +227,10 @@ function CardBody({ card, today, back, onBack }: { card: PatientCard; today: str
             </ul>
           )}
 
-        {(p.reason || p.referred_by || p.notes) && (
+        {(p.reason || p.referred_by || p.notes) && discreet && (
+          <p className="muted small">סיבת הפנייה וההערות מוסתרות במצב דיסקרטי.</p>
+        )}
+        {(p.reason || p.referred_by || p.notes) && !discreet && (
           <dl className="pcard-about">
             {p.reason && <div><dt>סיבת הפנייה</dt><dd>{p.reason}</dd></div>}
             {p.referred_by && <div><dt>מי הפנה</dt><dd>{p.referred_by}</dd></div>}
@@ -495,7 +499,7 @@ function NoteItem({ note, visit, caseCode, onEdit }: { note: SessionNote; visit:
         <button type="button" className="btn btn-small" aria-label={`עריכת הסיכום מיום ${when}`} onClick={onEdit}>עריכה</button>
       </div>
 
-      {record === "" ? <p className="muted clinic-quiet">לא נכתבה רשומה.</p> : (
+      {record === "" ? <p className="muted clinic-quiet">לא נכתבה רשומה.</p> : discreet ? <p className="muted small">הרשומה מוסתרת במצב דיסקרטי.</p> : (
         <div className="stack pcard-note-record">
           <p id={recordId} className={long && !whole ? "pcard-note-text pcard-note-folded" : "pcard-note-text"}>{record}</p>
           {long && (

@@ -135,7 +135,7 @@ function DiaryView({ today }: { today: string }) {
 
   const d = diary.data;
   const days = useMemo(() => (d ? (onlyMissing ? daysLackingReceipts(d.days) : d.days) : []), [d, onlyMissing]);
-  const paged = usePaged(days, 10);
+  const paged = usePaged(days, 10, `${month}|${onlyMissing ? "missing" : "all"}`);
 
   return (
     <div className="stack clinic-diary">

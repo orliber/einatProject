@@ -1,6 +1,6 @@
 // The clinic's shared building blocks: how a patient's name, an amount, a visit and an alert
 // look on every tab, so the tabs only arrange them. Everything shown is plain text.
-import { createContext, useContext, useId, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useId, useMemo, useState, type ReactNode } from "react";
 import { Dialog, ErrorLine, Skeleton, WarnIcon } from "../../components/ui";
 import { failureFor } from "../../errors";
 import type { Alert } from "../../ipc/generated/Alert";
@@ -370,8 +370,11 @@ export function VisitRow({ view, actions, onOpen, showDate = false }: { view: Vi
 
 /** A long list in pages: what to show now, and the pager's state. A list that got shorter
  *  never leaves her on a page that is no longer there. */
-export function usePaged<T>(items: T[], size = 20): { shown: T[]; page: number; pages: number; setPage: (page: number) => void } {
-  const [asked, setPage] = useState(0);
+export function usePaged<T>(items: T[], size = 20, resetKey = ""): { shown: T[]; page: number; pages: number; setPage: (page: number) => void } {
+  // The page is remembered with the list it belongs to: another month or filter starts at its first page.
+  const [at, setAt] = useState({ key: resetKey, page: 0 });
+  const asked = at.key === resetKey ? at.page : 0;
+  const setPage = useCallback((page: number) => setAt({ key: resetKey, page }), [resetKey]);
   const pages = Math.max(1, Math.ceil(items.length / size));
   const page = Math.min(asked, pages - 1);
   const shown = useMemo(() => items.slice(page * size, (page + 1) * size), [items, page, size]);
