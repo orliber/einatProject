@@ -181,4 +181,40 @@ describe("the closing strip on the report page", () => {
     expect(within(contents).getByRole("button", { name: /^נשאר לכתוב: .*סיכום/ })).toBeInTheDocument();
     expect(within(contents).getByRole("button", { name: "להוצאת הדוח ←" })).not.toHaveClass("btn-primary");
   });
+
+  it("before her diagnoses, the steps after them wait, and drafting them anyway is her choice, said quietly", async () => {
+    const { page, user, calls } = await openReport((d) => bodyApproved(d, false));
+    const strip = await within(page).findByRole("group", { name: "סעיפי הסיום, לפי הסדר" });
+    const steps = within(strip).getAllByRole("listitem");
+    expect(within(steps[1] as HTMLElement).queryByRole("button", { name: /^✦ לנסח/ })).toBeNull();
+    expect(within(strip).getByText("שאר סעיפי הסיום נכתבים אחרי שהאבחנות שלך מאושרות, כדי שיתבססו עליהן.")).toBeInTheDocument();
+    expect(within(strip).queryByText("הסיכום נכתב אחרי שההמלצות מאושרות, כדי שיכלול אותן.")).toBeNull();
+
+    await user.click(within(steps[1] as HTMLElement).getByRole("button", { name: "להמשיך בכל זאת" }));
+    expect(within(strip).getByText("האבחנות עוד לא אושרו: מה שינוסח עכשיו ייכתב בלעדיהן.")).toBeInTheDocument();
+    // The summary still waits for the recommendations.
+    expect(within(strip).getByText("הסיכום נכתב אחרי שההמלצות מאושרות, כדי שיכלול אותן.")).toBeInTheDocument();
+    await user.click(within(steps[1] as HTMLElement).getByRole("button", { name: "✦ לנסח את שניהם" }));
+    await waitFor(() => expect(calls.filter((c) => c.cmd === "send_section")).toHaveLength(2));
+  });
+
+  it("with the recommendations approved and her diagnoses not, the summary still waits for her diagnoses", async () => {
+    const { page, user, calls } = await openReport((d) => {
+      bodyApproved(d, false);
+      const model = d.sections.flatMap((s) => s.paragraphs).find((p) => p.status === "approved");
+      for (const s of d.sections) {
+        if (model && (s.key === "recommendations" || s.key === "dsm")) {
+          s.paragraphs = [{ ...model, id: `${s.key}-ok` }];
+          s.approved = true;
+        }
+      }
+    });
+    const strip = await within(page).findByRole("group", { name: "סעיפי הסיום, לפי הסדר" });
+    expect(within(strip).queryByRole("button", { name: "✦ לנסח את הסיכום" })).toBeNull();
+    expect(within(strip).getByText("שאר סעיפי הסיום נכתבים אחרי שהאבחנות שלך מאושרות, כדי שיתבססו עליהן.")).toBeInTheDocument();
+    await user.click(within(strip).getByRole("button", { name: "להמשיך בכל זאת" }));
+    expect(within(strip).getByText("האבחנות עוד לא אושרו: מה שינוסח עכשיו ייכתב בלעדיהן.")).toBeInTheDocument();
+    await user.click(within(strip).getByRole("button", { name: "✦ לנסח את הסיכום" }));
+    await waitFor(() => expect(calls.some((c) => c.cmd === "prepare_section" && c.args.sectionKey === "summary")).toBe(true));
+  });
 });
