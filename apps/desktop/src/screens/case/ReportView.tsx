@@ -454,7 +454,7 @@ function A4Section({ api, section: s, focused, onPick, onNext }: {
         {p.polish.length > 0 && (
           // D-167: proofreading, folded into one quiet line that opens on a click; advice for
           // the finish, never a warning and never a block. Nothing at all when there is none.
-          <details className="note-polish small" role="note" aria-label="הגהה">
+          <details className="note-polish small" aria-label="הגהה">
             <summary>הגהה · {p.polish.length}</summary>
             <ul>{p.polish.map((n, i) => <li key={i}>{n}</li>)}</ul>
           </details>

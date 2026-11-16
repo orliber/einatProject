@@ -90,7 +90,7 @@ describe("notes on the report page (D-161)", () => {
         { text: "פסקה נקייה." },
       ]);
     });
-    const folds = await within(page).findAllByRole("note", { name: "הערות לבדיקה" });
+    const folds = await within(page).findAllByRole("group", { name: "הערות לבדיקה" });
     expect(folds).toHaveLength(2);
     const [marked, light] = folds as [HTMLElement, HTMLElement];
     // Folded: the count, and the mark of the blocking kind; the notes themselves not shown.
@@ -109,8 +109,10 @@ describe("notes on the report page (D-161)", () => {
       "בבדיקה מול המקורות, סתירה: במקור כתוב שהוא נפרד בבכי",
     ]);
     // Proofreading stays in its own fold.
-    expect(within(page).getByRole("note", { name: "הגהה" })).toBeInTheDocument();
+    expect(within(page).getByRole("group", { name: "הגהה" })).toBeInTheDocument();
     expect(marked.querySelector("b, i, a, script")).toBeNull();
+    // A fold keeps its own meaning for a screen reader: no role is put over a <details>.
+    expect(page.querySelector("details[role]")).toBeNull();
   });
 
   it("what the answer said about a section shows only for the section in focus", async () => {
@@ -124,8 +126,8 @@ describe("notes on the report page (D-161)", () => {
       }
     });
     // One section is in focus: one line, though two sections have something to say.
-    const fold = await within(page).findByRole("note", { name: "מה עלה בניסוח הסעיף" });
-    expect(within(page).getAllByRole("note", { name: "מה עלה בניסוח הסעיף" })).toHaveLength(1);
+    const fold = await within(page).findByRole("group", { name: "מה עלה בניסוח הסעיף" });
+    expect(within(page).getAllByRole("group", { name: "מה עלה בניסוח הסעיף" })).toHaveLength(1);
     expect(fold).not.toHaveAttribute("open");
     const line = within(fold).getByText(/שאל 2 שאלות · חסר מידע בנושא אחד$/);
     expect(within(fold).getByText("מתי התחיל ללכת?")).not.toBeVisible();
@@ -138,8 +140,8 @@ describe("notes on the report page (D-161)", () => {
   it("a section with nothing to say has no line at all", async () => {
     const { page } = await openReport((d) => drafted(d, "kindergarten", [{ text: "טיוטה נקייה." }]));
     await within(page).findByText("טיוטה נקייה.");
-    expect(within(page).queryByRole("note", { name: "מה עלה בניסוח הסעיף" })).toBeNull();
-    expect(within(page).queryByRole("note", { name: "הערות לבדיקה" })).toBeNull();
+    expect(within(page).queryByRole("group", { name: "מה עלה בניסוח הסעיף" })).toBeNull();
+    expect(within(page).queryByRole("group", { name: "הערות לבדיקה" })).toBeNull();
   });
 
   it("approve all takes the clean drafts, says how many wait, and goes to the first one held", async () => {

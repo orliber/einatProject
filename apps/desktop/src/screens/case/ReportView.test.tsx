@@ -99,7 +99,7 @@ describe("proofreading under a paragraph (D-167)", () => {
         p.warnings = [];
       }
     });
-    const note = await within(page).findByRole("note", { name: "הגהה" });
+    const note = await within(page).findByRole("group", { name: "הגהה" });
     expect(note.tagName).toBe("DETAILS");
     expect(note).toHaveClass("note-polish");
     expect(note).not.toHaveClass("note-warn");
@@ -122,7 +122,7 @@ describe("proofreading under a paragraph (D-167)", () => {
   it("a paragraph with no notes has no proofreading block", async () => {
     const { page } = await openReport();
     await within(page).findAllByText(/./);
-    expect(within(page).queryByRole("note", { name: "הגהה" })).toBeNull();
+    expect(within(page).queryByRole("group", { name: "הגהה" })).toBeNull();
   });
 });
 

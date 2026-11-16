@@ -59,7 +59,7 @@ export function ParagraphNotes({ paragraph }: { paragraph: Pick<Paragraph, "note
   const marks = Array.from(new Set(notes.flatMap((n) => (n.kind && BLOCKING.includes(n.kind) ? [MARK[n.kind] ?? ""] : []))));
   const count = notes.length === 1 ? "הערה אחת לבדיקה" : `${notes.length} הערות לבדיקה`;
   return (
-    <details className={marks.length ? "note-fold small is-blocking" : "note-fold small"} role="note" aria-label="הערות לבדיקה">
+    <details className={marks.length ? "note-fold small is-blocking" : "note-fold small"} aria-label="הערות לבדיקה">
       <summary>
         {marks.length > 0 && <WarnIcon />}
         <span>{count}{marks.length > 0 ? ` · ${marks.join(" · ")}` : ""}</span>
@@ -94,7 +94,7 @@ export function SectionNotesFold({ notes, ai }: { notes: SectionNotes | undefine
     ["שורות בהנחיה שאין עליהן פסקה", notes.unanswered],
   ];
   return (
-    <details className="note-fold note-section small" role="note" aria-label="מה עלה בניסוח הסעיף">
+    <details className="note-fold note-section small" aria-label="מה עלה בניסוח הסעיף">
       <summary><span>{line}</span></summary>
       <div className="note-groups">
         {groups.filter(([, lines]) => lines.length > 0).map(([title, lines]) => (
