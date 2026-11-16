@@ -337,6 +337,21 @@ impl NameHints {
         dv_privacy::filter_with_hints(text, ctx, self.of(text))
     }
 
+    /// The hints of texts joined into one: each `(start, text)` is a text and the byte where
+    /// it starts in the joined text, and its hints are moved there.
+    pub(crate) fn placed(&self, parts: &[(usize, &str)]) -> Vec<NameHint> {
+        parts
+            .iter()
+            .flat_map(|(start, text)| {
+                self.of(text).iter().map(move |h| NameHint {
+                    start: h.start + start,
+                    end: h.end + start,
+                    score: h.score,
+                })
+            })
+            .collect()
+    }
+
     /// `dv_privacy::filter_split`, with this text's hints.
     pub(crate) fn filter_split(
         &self,

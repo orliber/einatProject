@@ -754,8 +754,9 @@ fn build_consult(
         stop()?;
         let label = |who: &str| format!("{who} ({})", n / 2 + 1);
         if role == "user" {
-            // Her own words: filtered again, with today's names and decisions.
-            let out = filter(shown, ctx).map_err(internal)?;
+            // Her own words: filtered again, with today's names and decisions, and what the
+            // name model reads in them.
+            let out = job.hints.filter(shown, ctx).map_err(internal)?;
             review.add(label("שאלה קודמת"), &out);
             history.push(TaggedTurn {
                 role: role.clone(),
@@ -776,15 +777,23 @@ fn build_consult(
     let mut case_context = None;
     if !read.approved.is_empty() {
         let mut lines = Vec::new();
+        // Where each paragraph starts in the joined text, for the name model's hints on it.
+        let mut placed: Vec<(usize, &str)> = Vec::new();
+        let mut at = 0;
         for (s, text) in &read.approved {
-            lines.push(format!("{}: {}", model_title(s, ctx)?, text));
+            let title = model_title(s, ctx)?;
+            placed.push((at + title.len() + 2, text.as_str()));
+            let line = format!("{title}: {text}");
+            at += line.len() + 1;
+            lines.push(line);
         }
         stop()?;
         let mut joined = lines.join("\n");
         for l in &mut lines {
             l.zeroize();
         }
-        let out = filter(&joined, ctx).map_err(internal);
+        let hints = job.hints.placed(&placed);
+        let out = dv_privacy::filter_with_hints(&joined, ctx, &hints).map_err(internal);
         joined.zeroize();
         let out = out?;
         review.add("סיכום התיק (סעיפים מאושרים)".to_owned(), &out);
@@ -1693,7 +1702,6 @@ impl Core {
         let key = ask.case_id.clone().unwrap_or_default();
         let data = self.privacy_data(&key)?;
         let fingerprint = data.fingerprint()?;
-        let hints = self.case_hints(&key, &[ask.message.as_str()])?;
         let demo_mode = self.demo_mode()?;
         let read = {
             let v = self.vault.as_ref().ok_or(CoreError::Locked)?;
@@ -1719,6 +1727,23 @@ impl Core {
                 }
             }
             Texts::Consult(ConsultRead { earlier, approved })
+        };
+        // Her question, her earlier questions and the approved paragraphs all go out filtered
+        // again: the name model reads each of them, not only today's question. A name only
+        // the model found in an earlier question is hidden again in the history.
+        let hints = match &read {
+            Texts::Consult(r) => {
+                let mut extra: Vec<&str> = vec![ask.message.as_str()];
+                extra.extend(
+                    r.earlier
+                        .iter()
+                        .filter(|(role, _, _)| role == "user")
+                        .map(|(_, shown, _)| shown.as_str()),
+                );
+                extra.extend(r.approved.iter().map(|(_, t)| t.as_str()));
+                self.case_hints(&key, &extra)?
+            }
+            _ => self.case_hints(&key, &[ask.message.as_str()])?,
         };
         let nonce = dv_ai::nonce_from(&dv_vault::crypto::random_array::<16>()?);
         let hasher = self.vault_ref()?.token_hasher();

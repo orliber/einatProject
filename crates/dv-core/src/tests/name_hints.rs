@@ -146,3 +146,71 @@ fn the_model_reads_the_paragraphs_the_check_sends() {
     assert!(!body.contains(ONLY_THE_MODEL), "{body}");
     assert!(body.contains("משחק בגן בעיקר עם"), "{body}");
 }
+
+/// A consultation with no case: a name only the model found in her first question is hidden
+/// again when that question goes out as the history of her next one.
+#[test]
+fn the_model_reads_her_earlier_questions_in_a_consultation() {
+    let fake = FakeTransport::default();
+    let (_dir, mut core, _case) = setup(Some(fake.clone()));
+    model_on(&mut core);
+    let first = core
+        .prepare_consult(
+            None,
+            None,
+            &format!("איך לעבוד עם {ONLY_THE_MODEL} על מעברים בגן?"),
+        )
+        .unwrap();
+    assert!(first.blocked.is_empty(), "{:?}", first.blocked);
+    let answer = core
+        .send_consult(first.approval_id.as_deref().unwrap())
+        .unwrap();
+    let body = fake.sent.lock().unwrap().last().unwrap().clone();
+    assert!(!body.contains(ONLY_THE_MODEL), "{body}");
+
+    let next = core
+        .prepare_consult(
+            None,
+            Some(&answer.conversation_id),
+            "ומה לגבי הפרידה בבוקר?",
+        )
+        .unwrap();
+    assert!(next.blocked.is_empty(), "{:?}", next.blocked);
+    core.send_consult(next.approval_id.as_deref().unwrap())
+        .unwrap();
+    let body = fake.sent.lock().unwrap().last().unwrap().clone();
+    assert!(body.contains("על מעברים בגן"), "{body}");
+    assert!(!body.contains(ONLY_THE_MODEL), "{body}");
+}
+
+/// A consultation about the case: a name only the model finds, in an approved paragraph she
+/// wrote herself, is hidden in the approved sections that go with it.
+#[test]
+fn the_model_reads_the_approved_paragraphs_a_consultation_sends() {
+    let fake = FakeTransport::default();
+    let (_dir, mut core, case) = setup(Some(fake.clone()));
+    // Her paragraph, written before she turned the model on.
+    core.add_own_paragraph(
+        &case,
+        "kindergarten",
+        &format!("בגן הוא משחק בעיקר עם {ONLY_THE_MODEL} ומספר עליה בבית."),
+    )
+    .unwrap();
+    core.add_own_paragraph(&case, "background", "נרדם באיחור ומתעורר בלילה.")
+        .unwrap();
+    model_on(&mut core);
+    let p = core
+        .prepare_consult(Some(&case), None, "איך לנסח את ההמלצות על הגן?")
+        .unwrap();
+    assert!(p.blocked.is_empty(), "{:?}", p.blocked);
+    core.send_consult(p.approval_id.as_deref().unwrap())
+        .unwrap();
+    let body = fake.sent.lock().unwrap().last().unwrap().clone();
+    assert!(body.contains("ומספר עליה בבית"), "{body}");
+    // Her named paragraph is not the first line of the joined sections: its hints are moved.
+    assert!(
+        body.find("ומתעורר בלילה").unwrap() < body.find("ומספר עליה בבית").unwrap(),
+        "{body}"
+    );
+    assert!(!body.contains(ONLY_THE_MODEL), "{body}");
+}
