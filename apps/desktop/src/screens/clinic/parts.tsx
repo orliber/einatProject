@@ -501,7 +501,11 @@ export function PatientPicker({ id, value, onChange, autoFocus = false, locked =
           tabIndex={-1} onKeyDown={(e) => {
             if (e.key !== "Enter" || e.target !== e.currentTarget) return;
             e.preventDefault();
-            e.currentTarget.closest("form")?.requestSubmit();
+            // As Enter in a field does: through the form's own button, and not while it is greyed
+            // out (a save under way) or for a held-down key.
+            if (e.repeat) return;
+            const go = e.currentTarget.closest("form")?.querySelector<HTMLButtonElement>('button[type="submit"]');
+            if (go && !go.disabled) go.click();
           }}>
           <span id={`${id}-name`}>{rows.isPending ? <span className="muted">טוען…</span> : <PatientName name={chosenName} strong />}</span>
           {!locked && <button type="button" className="link-btn" onClick={() => { focusNext.current = "field"; onChange(null); }}>החלפה</button>}

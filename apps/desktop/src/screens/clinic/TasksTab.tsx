@@ -257,6 +257,7 @@ function QuickAdd({ today }: { today: string }) {
   const [forChild, setForChild] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const sending = useRef(false); // one follow-up per press, also when two presses come before a render
   const titleBox = useRef<HTMLInputElement>(null);
 
   function setDate(iso: string) {
@@ -275,11 +276,13 @@ function QuickAdd({ today }: { today: string }) {
 
   async function submit(e: FormEvent) {
     e.preventDefault();
+    if (sending.current) return;
     if (title.trim() === "") {
       setError("צריך לכתוב מה המעקב.");
       titleBox.current?.focus();
       return;
     }
+    sending.current = true;
     setBusy(true);
     setError(null);
     try {
@@ -294,6 +297,7 @@ function QuickAdd({ today }: { today: string }) {
     } catch (err) {
       setError((err as { message?: string }).message ?? "המעקב לא נשמר. אפשר לנסות שוב.");
     } finally {
+      sending.current = false;
       setBusy(false);
     }
   }

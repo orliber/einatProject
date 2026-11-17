@@ -2,7 +2,7 @@
 // they are due, adding in one line (with the suggestions), ticking with a rollback, editing,
 // deleting, the folded list of what was done, the empty clinic, discreet mode and
 // accessibility. Every name is invented; the clock is held at a Sunday morning.
-import { configure, screen, waitFor, within } from "@testing-library/react";
+import { act, configure, screen, waitFor, within } from "@testing-library/react";
 import type { Alert } from "../../ipc/generated/Alert";
 import { a11yViolations } from "../../test/a11y";
 import { forgetDiscreet } from "./ClinicScreen";
@@ -301,6 +301,28 @@ describe("the follow-ups tab", () => {
     expect(await within(needs()).findByText("אין כרגע שום דבר שמחכה לטיפול בקליניקה.")).toBeInTheDocument();
     expect(within(mine()).getByRole("form", { name: "מעקב חדש" })).toBeInTheDocument();
     expect(await a11yViolations(view.container)).toEqual([]);
+  });
+
+  it("Enter on the chosen child adds the follow-up once, also when pressed again while it is saved", async () => {
+    const hold = holding("save_task");
+    const { user, requests } = await openOn(TASKS, hold.over);
+    await ready();
+    const form = within(mine()).getByRole("form", { name: "מעקב חדש" });
+    await user.type(within(form).getByLabelText("מעקב חדש"), "לדבר עם היועצת");
+    await user.click(within(form).getByRole("button", { name: "לשייך לילד או לילדה (לא חובה)" }));
+    await user.type(within(form).getByLabelText("מטופל"), "תמ");
+    await within(form).findByRole("option", { name: "תמר" });
+    await user.keyboard("{Enter}");
+    const picked = within(form).getByRole("group", { name: "מטופל" });
+    expect(picked).toHaveFocus();
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(within(form).getByRole("button", { name: /הוספה/ })).toBeDisabled());
+    expect(picked).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(requests().filter((r) => r.op === "save_task")).toHaveLength(1);
+    act(() => hold.release());
+    expect(await within(mine()).findAllByLabelText("לדבר עם היועצת")).toHaveLength(1);
+    expect(requests().filter((r) => r.op === "save_task")).toHaveLength(1);
   });
 
   it("shows the shape of the lists while they load", async () => {
