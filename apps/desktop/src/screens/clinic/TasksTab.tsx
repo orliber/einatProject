@@ -301,7 +301,7 @@ function QuickAdd({ today }: { today: string }) {
   return (
     <form className="stack clinic-quick-add" aria-label="מעקב חדש" onSubmit={(e) => void submit(e)}>
       <div className="clinic-quick-line">
-        <div className="field grow">
+        <div className="field grow fit-l">
           <label htmlFor="task-new-title">מעקב חדש</label>
           <input id="task-new-title" ref={titleBox} className="input" value={title} maxLength={TITLE_MAX} autoComplete="off"
             placeholder="מה לא לשכוח?" onChange={(e) => setTitle(e.target.value)} />

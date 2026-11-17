@@ -753,7 +753,7 @@ function PaymentDialog({ patientId, today, due, onClose }: { patientId: string; 
           <Field id="payment-date" label="תאריך"><DateField id="payment-date" value={form.date} onChange={(date) => set({ date })} /></Field>
         </div>
         <div className="clinic-form-row">
-          <TextField id="payment-receipt" label="מספר קבלה" value={form.receipt} maxLength={200} dir="ltr" className="grow"
+          <TextField id="payment-receipt" label="מספר קבלה" value={form.receipt} maxLength={200} dir="ltr" className="grow fit-s"
             hint="המספר של הקבלה שהופקה בתוכנת החשבוניות. אפשר להשלים אחר כך." onChange={(receipt) => set({ receipt })} />
           <TextField id="payment-payer" label="מי שילם (לא חובה)" value={form.payer} maxLength={200} className="grow"
             hint="כשלא ההורים שילמו: קופה, מוסד." onChange={(payer) => set({ payer })} />

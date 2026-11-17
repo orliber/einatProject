@@ -1,6 +1,6 @@
 // The clinic's shared building blocks: how a patient's name, an amount, a visit and an alert
 // look on every tab, so the tabs only arrange them. Everything shown is plain text.
-import { createContext, useCallback, useContext, useId, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { useDiscreet } from "../../discreet";
 import { Dialog, ErrorLine, Skeleton, WarnIcon } from "../../components/ui";
 import { failureFor } from "../../errors";
@@ -446,9 +446,12 @@ export function RecordHistory({ recordId }: { recordId: string }) {
 const PICKER_ROWS = 8;
 
 /**
- * Chooses a patient by name. The search waits a moment after she types; families whose work
- * ended are offered only when she searches for them. Once one is chosen the field shows the
- * name, with "החלפה" beside it; `locked`: the name only, for a record that stays on its card.
+ * Chooses a patient by name: a field the size of a name, and under it a short list that opens
+ * when she types, clicks the field or presses the down arrow, and closes once she chose, pressed
+ * Escape or moved on (Einat, 2026-11-17: the list as wide as the window was heavy on the eye).
+ * The search waits a moment after she types; families whose work ended are offered only when
+ * she searches for them. Once one is chosen the field shows the name, with "החלפה" beside it;
+ * `locked`: the name only, for a record that stays on its card.
  */
 export function PatientPicker({ id, value, onChange, autoFocus = false, locked = false }: {
   id: string; value: string | null; onChange: (patientId: string | null) => void; autoFocus?: boolean; locked?: boolean;
@@ -456,6 +459,9 @@ export function PatientPicker({ id, value, onChange, autoFocus = false, locked =
   const now = useToday();
   const rows = usePatients(now.date);
   const [text, setText] = useState("");
+  const [open, setOpen] = useState(false);
+  const box = useRef<HTMLDivElement>(null);
+  const input = useRef<HTMLInputElement>(null);
   const query = useDebounced(text.trim(), 200);
   const all = rows.data ?? [];
   const chosen = value === null ? null : (all.find((r) => r.patient.id === value) ?? null);
@@ -473,27 +479,54 @@ export function PatientPicker({ id, value, onChange, autoFocus = false, locked =
   const matches = all
     .filter((r) => (query === "" ? r.patient.status !== "closed" : r.patient.name.includes(query)))
     .slice(0, PICKER_ROWS);
+  const choices = () => Array.from(box.current?.querySelectorAll<HTMLButtonElement>(".clinic-picker-row") ?? []);
+  // The arrows walk the list and back up to the field; Escape closes it and leaves her typing.
+  const keys = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === "Escape" && open) {
+      e.stopPropagation();
+      setOpen(false);
+      input.current?.focus();
+      return;
+    }
+    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+    e.preventDefault();
+    if (!open) {
+      if (e.key === "ArrowDown") setOpen(true);
+      return;
+    }
+    const list = choices();
+    const at = list.findIndex((b) => b === document.activeElement);
+    const next = e.key === "ArrowDown" ? Math.min(at + 1, list.length - 1) : at - 1;
+    if (next < 0) input.current?.focus();
+    else list[next]?.focus();
+  };
   return (
-    <div className="field">
+    <div className="field clinic-picker" ref={box} onKeyDown={keys}
+      onBlur={(e) => { if (!box.current?.contains(e.relatedTarget as Node | null)) setOpen(false); }}>
       <label htmlFor={id}>מטופל</label>
-      <input id={id} className="input" value={text} placeholder="חיפוש לפי שם" autoFocus={autoFocus} autoComplete="off"
-        aria-describedby={`${id}-results`} onChange={(e) => setText(e.target.value)} />
-      <div id={`${id}-results`} className="clinic-picker-results">
-        {rows.isPending ? <Skeleton lines={2} label="טוען את המטופלים" />
-          : matches.length === 0 ? <p className="hint" role="status">{all.length === 0 ? "עוד אין מטופלים בקליניקה. אפשר להוסיף מטופל, ואז לקבוע לו פגישה." : "לא נמצא מטופל בשם הזה."}</p>
-          : (
-            <ul className="clinic-list clinic-picker-list" aria-label="מטופלים לבחירה">
-              {matches.map((r) => (
-                <li key={r.patient.id}>
-                  <button type="button" className="clinic-picker-row" onClick={() => onChange(r.patient.id)}>
-                    <PatientName name={r.patient.name} />
-                    {r.patient.status !== "active" && <span className="chip chip-sand">{PATIENT_STATUS_LABEL[r.patient.status]}</span>}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-      </div>
+      <input id={id} ref={input} className="input" value={text} placeholder="חיפוש לפי שם" autoFocus={autoFocus} autoComplete="off"
+        aria-describedby={open ? `${id}-results` : undefined}
+        onChange={(e) => { setText(e.target.value); setOpen(true); }} onClick={() => setOpen(true)} />
+      {open && (
+        // A click on a name keeps the focus in the field until the name is chosen (WebKit does
+        // not focus a clicked button, and the list would close under the pointer).
+        <div id={`${id}-results`} className="clinic-picker-results" onMouseDown={(e) => e.preventDefault()}>
+          {rows.isPending ? <Skeleton lines={2} label="טוען את המטופלים" />
+            : matches.length === 0 ? <p className="hint" role="status">{all.length === 0 ? "עוד אין מטופלים בקליניקה. אפשר להוסיף מטופל, ואז לקבוע לו פגישה." : "לא נמצא מטופל בשם הזה."}</p>
+            : (
+              <ul className="clinic-list clinic-picker-list" aria-label="מטופלים לבחירה">
+                {matches.map((r) => (
+                  <li key={r.patient.id}>
+                    <button type="button" className="clinic-picker-row" onClick={() => { setOpen(false); onChange(r.patient.id); }}>
+                      <PatientName name={r.patient.name} />
+                      {r.patient.status !== "active" && <span className="chip chip-sand">{PATIENT_STATUS_LABEL[r.patient.status]}</span>}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+        </div>
+      )}
     </div>
   );
 }

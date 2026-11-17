@@ -389,7 +389,34 @@
   border-radius: var(--radius-md);
   background: var(--surface);
   max-height: 240px;
+  max-width: var(--field-m);
   overflow: auto;
+}
+/* Choosing a patient: the field the size of a name, and the list under it only while she looks. */
+.clinic-picker {
+  position: relative;
+  max-width: var(--field-m);
+}
+.clinic-picker-results {
+  position: absolute;
+  inset-inline: 0;
+  top: 100%;
+  margin-top: 4px;
+  z-index: 20;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-2);
+  overflow: hidden;
+}
+.clinic-picker-results > .hint,
+.clinic-picker-results > [aria-busy] {
+  padding: 10px 12px;
+}
+.clinic-picker-results .clinic-picker-list {
+  border: 0;
+  border-radius: 0;
+  max-height: 264px;
 }
 .clinic-picker-row {
   width: 100%;
