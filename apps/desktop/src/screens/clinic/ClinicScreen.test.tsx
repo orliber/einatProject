@@ -620,17 +620,22 @@ describe("the visit dialog", () => {
     await user.keyboard("{Enter}");
     expect(marked()).toEqual([first?.textContent]);
     expect(within(dialog).queryByRole("alert")).toBeNull();
-    // Every letter narrows it at once; Enter on the one name left chooses it, and the keyboard is on "החלפה".
+    // Every letter narrows it at once; Enter on the one name left chooses it, and the keyboard stays
+    // on the chosen name (not on "החלפה", where the next Enter would undo it).
     await user.type(field, "אית");
     expect(names()).toEqual(["איתי"]);
     await user.keyboard("{Enter}");
-    expect(within(dialog).getByRole("group", { name: "מטופל" })).toHaveTextContent("איתי");
+    const picked = within(dialog).getByRole("group", { name: "מטופל" });
+    expect(picked).toHaveTextContent("איתי");
+    expect(picked).toHaveAccessibleDescription("איתי");
+    expect(picked).toHaveFocus();
     expect(list()).toBeNull();
     expect(within(dialog).queryByRole("alert")).toBeNull();
-    expect(screen.getByRole("dialog", { name: "פגישה חדשה" })).toBeInTheDocument();
-    expect(within(dialog).getByRole("button", { name: "החלפה" })).toHaveFocus();
-    // "החלפה" starts the search again from an empty field, with the keyboard in it.
     await user.keyboard("{Enter}");
+    expect(within(dialog).getByRole("group", { name: "מטופל" })).toHaveTextContent("איתי");
+    expect(screen.getByRole("dialog", { name: "פגישה חדשה" })).toBeInTheDocument();
+    // "החלפה" starts the search again from an empty field, with the keyboard in it.
+    await user.click(within(dialog).getByRole("button", { name: "החלפה" }));
     const again = within(dialog).getByRole("combobox", { name: "מטופל" });
     expect(again).toHaveValue("");
     expect(again).toHaveFocus();

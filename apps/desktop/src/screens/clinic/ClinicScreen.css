@@ -384,6 +384,11 @@
   min-height: 44px;
   gap: var(--space-3);
 }
+/* After a choice the keyboard is on the chosen name: the frame keeps clear of it. */
+.clinic-picked:focus-visible {
+  outline-offset: 6px;
+  border-radius: var(--radius-sm);
+}
 .clinic-picker-list {
   border: 1px solid var(--line);
   border-radius: var(--radius-md);

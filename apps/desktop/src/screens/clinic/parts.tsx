@@ -1,6 +1,6 @@
 // The clinic's shared building blocks: how a patient's name, an amount, a visit and an alert
 // look on every tab, so the tabs only arrange them. Everything shown is plain text.
-import { createContext, useCallback, useContext, useId, useEffect, useMemo, useState, type KeyboardEvent, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useId, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { useDiscreet } from "../../discreet";
 import { Dialog, ErrorLine, Skeleton, WarnIcon } from "../../components/ui";
 import { failureFor } from "../../errors";
@@ -452,9 +452,11 @@ const PICKER_ROWS = 8;
  * The focus stays in the field: the arrows mark a name, Enter or a click chooses it (a combobox,
  * so a screen reader says how many names there are and which one is marked). The list follows
  * every letter; families whose work ended are offered only when she searches for them. Enter
- * while the list is open never sends the form: one name left is chosen, otherwise the first is marked.
- * Once one is chosen the field shows the name, with "החלפה" beside it (the focus moves there), and
- * the field starts empty again after it; `locked`: the name only, for a record that stays on its card.
+ * while names are listed never sends the form: one name left is chosen, otherwise the first is marked.
+ * Once one is chosen the field shows the name, with "החלפה" beside it. The keyboard stays on the
+ * chosen name, where Enter sends the form as from any field (a follow-up "with a child, or just
+ * Enter"), and comes back to the empty field after "החלפה"; `locked`: the name only, for a record
+ * that stays on its card.
  */
 export function PatientPicker({ id, value, onChange, autoFocus = false, locked = false }: {
   id: string; value: string | null; onChange: (patientId: string | null) => void; autoFocus?: boolean; locked?: boolean;
@@ -465,8 +467,11 @@ export function PatientPicker({ id, value, onChange, autoFocus = false, locked =
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(-1);
   // Where the keyboard goes when the field and the chosen name swap places (the one that had the
-  // focus is gone): to "החלפה" after a choice, back to the field after "החלפה".
-  const [moved, setMoved] = useState<"chose" | "change" | null>(null);
+  // focus is gone): to the chosen name after a choice, back to the field after "החלפה". Not to
+  // "החלפה" itself, where the next Enter would undo the choice.
+  const focusNext = useRef<"chosen" | "field" | null>(null);
+  const picked = useRef<HTMLSpanElement>(null);
+  const field = useRef<HTMLInputElement>(null);
   const all = rows.data ?? [];
   const chosenName = value === null ? undefined : all.find((r) => r.patient.id === value)?.patient.name;
   const query = text.trim();
@@ -483,13 +488,23 @@ export function PatientPicker({ id, value, onChange, autoFocus = false, locked =
   useEffect(() => {
     if (marked >= 0) document.getElementById(`${id}-option-${marked}`)?.scrollIntoView({ block: "nearest" });
   }, [marked, id]);
+  useEffect(() => {
+    if (focusNext.current === "chosen") picked.current?.focus();
+    else if (focusNext.current === "field") field.current?.focus();
+    focusNext.current = null;
+  }, [value]);
   if (value !== null) {
     return (
       <div className="field">
         <span className="label" id={`${id}-label`}>מטופל</span>
-        <span className="row clinic-picked" role="group" aria-labelledby={`${id}-label`}>
-          {rows.isPending ? <span className="muted">טוען…</span> : <PatientName name={chosenName} strong />}
-          {!locked && <button type="button" className="link-btn" autoFocus={moved === "chose"} onClick={() => { setMoved("change"); onChange(null); }}>החלפה</button>}
+        <span ref={picked} className="row clinic-picked" role="group" aria-labelledby={`${id}-label`} aria-describedby={`${id}-name`}
+          tabIndex={-1} onKeyDown={(e) => {
+            if (e.key !== "Enter" || e.target !== e.currentTarget) return;
+            e.preventDefault();
+            e.currentTarget.closest("form")?.requestSubmit();
+          }}>
+          <span id={`${id}-name`}>{rows.isPending ? <span className="muted">טוען…</span> : <PatientName name={chosenName} strong />}</span>
+          {!locked && <button type="button" className="link-btn" onClick={() => { focusNext.current = "field"; onChange(null); }}>החלפה</button>}
         </span>
       </div>
     );
@@ -498,7 +513,7 @@ export function PatientPicker({ id, value, onChange, autoFocus = false, locked =
     setOpen(false);
     setActive(-1);
     setText("");
-    setMoved("chose");
+    focusNext.current = "chosen";
     onChange(patientId);
   };
   const shown = open && !rows.isPending && matches.length > 0;
@@ -521,7 +536,7 @@ export function PatientPicker({ id, value, onChange, autoFocus = false, locked =
         setActive(marked - 1); // up from the first name: back to what she typed, nothing marked
       }
     } else if (e.key === "Enter" && shown) {
-      // Not the form's Enter: a follow-up or a visit is not saved without the child she was looking for.
+      // Not the form's Enter while names are listed: a follow-up is not saved without the child she was looking for.
       e.preventDefault();
       const r = marked >= 0 ? matches[marked] : matches.length === 1 ? matches[0] : undefined;
       if (r) choose(r.patient.id);
@@ -531,7 +546,7 @@ export function PatientPicker({ id, value, onChange, autoFocus = false, locked =
   return (
     <div className="field clinic-picker">
       <label htmlFor={id}>מטופל</label>
-      <input id={id} className="input" value={text} placeholder="חיפוש לפי שם" autoFocus={autoFocus || moved === "change"} autoComplete="off"
+      <input id={id} ref={field} className="input" value={text} placeholder="חיפוש לפי שם" autoFocus={autoFocus} autoComplete="off"
         role="combobox" aria-autocomplete="list" aria-expanded={shown}
         aria-controls={shown ? `${id}-list` : undefined} aria-activedescendant={shown && marked >= 0 ? optionId(marked) : undefined}
         aria-describedby={open && !shown ? `${id}-results` : undefined}

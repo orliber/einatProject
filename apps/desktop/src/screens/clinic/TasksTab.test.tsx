@@ -137,10 +137,11 @@ describe("the follow-ups tab", () => {
     // Enter on the one name left chooses her, and does not send the line without her.
     await user.keyboard("{Enter}");
     expect(within(form).getByRole("group", { name: "מטופל" })).toHaveTextContent("תמר");
-    expect(within(form).getByRole("button", { name: "החלפה" })).toHaveFocus();
+    expect(within(form).getByRole("group", { name: "מטופל" })).toHaveFocus();
     expect(requests().some((r) => r.op === "save_task")).toBe(false);
     expect(await a11yViolations(view.container)).toEqual([]);
-    await user.click(within(form).getByRole("button", { name: "הוספה" }));
+    // The next Enter adds it, with her.
+    await user.keyboard("{Enter}");
 
     await waitFor(() => expect(notes).toContain("המעקב נוסף"));
     const sent = requests().find((r) => r.op === "save_task");
