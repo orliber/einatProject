@@ -66,7 +66,7 @@ fn refuse<T>(text: &str) -> Result<T, DomainError> {
 }
 
 /// A phone number as WhatsApp and SMS take it: country code and digits, no `+`.
-/// An Israeli number written locally (`050-1234567`, `03-1234567`) gets `972`; a number
+/// An Israeli number written locally (`05X-XXXXXXX`, `0X-XXXXXXX`) gets `972`; a number
 /// with `+` or `00` keeps its own country code. `None` when it is not a phone number.
 #[must_use]
 pub fn international_phone(raw: &str) -> Option<String> {
@@ -208,20 +208,20 @@ mod tests {
     #[test]
     fn israeli_numbers_get_their_country_code() {
         assert_eq!(
-            international_phone("050-1234567").as_deref(),
-            Some("972501234567")
+            international_phone("060-1234567").as_deref(),
+            Some("972601234567")
         );
         assert_eq!(
-            international_phone("03 123 4567").as_deref(),
-            Some("97231234567")
+            international_phone("06 123 4567").as_deref(),
+            Some("97261234567")
         );
         assert_eq!(
-            international_phone("+972 50 123 4567").as_deref(),
-            Some("972501234567")
+            international_phone("+972 60 123 4567").as_deref(),
+            Some("972601234567")
         );
         assert_eq!(
-            international_phone("00972501234567").as_deref(),
-            Some("972501234567")
+            international_phone("00972601234567").as_deref(),
+            Some("972601234567")
         );
         assert_eq!(
             international_phone("+1 (212) 555-0100").as_deref(),
@@ -233,9 +233,9 @@ mod tests {
             "05012",
             "+972 5",
             "1234567",
-            "050-1234567&text=x",
+            "060-1234567&text=x",
             "+97+2501234567",
-            "0501234567890123",
+            "0601234567890123",
         ] {
             assert_eq!(international_phone(bad), None, "{bad}");
         }
@@ -244,19 +244,19 @@ mod tests {
     #[test]
     fn email_must_be_plain() {
         assert_eq!(
-            plain_email(" a.b+c@mail.example.co.il ").as_deref(),
-            Some("a.b+c@mail.example.co.il")
+            plain_email(" a.b+c@mail.example.com ").as_deref(),
+            Some("a.b+c@mail.example.com")
         );
         for bad in [
             "",
             "a@b",
-            "a@@b.co",
-            "a b@c.co",
-            "a@b.co?subject=x",
-            "a@b.co&body=x",
-            ".a@b.co",
-            "a@b..co",
-            "שם@b.co",
+            "a@@example.com",
+            "a b@example.com",
+            "a@example.com?subject=x",
+            "a@example.com&body=x",
+            ".a@example.com",
+            "a@b..example.com",
+            "שם@example.com",
         ] {
             assert_eq!(plain_email(bad), None, "{bad}");
         }
@@ -264,30 +264,30 @@ mod tests {
 
     #[test]
     fn a_link_carries_the_address_only() {
-        let c = contact("050-1234567", "parent@example.com");
+        let c = contact("060-1234567", "parent@example.com");
         assert_eq!(
             chat_link(Channel::Whatsapp, &c).unwrap(),
-            "whatsapp://send?phone=972501234567"
+            "whatsapp://send?phone=972601234567"
         );
-        assert_eq!(chat_link(Channel::Sms, &c).unwrap(), "sms:+972501234567");
+        assert_eq!(chat_link(Channel::Sms, &c).unwrap(), "sms:+972601234567");
         assert_eq!(
             chat_link(Channel::Email, &c).unwrap(),
             "mailto:parent@example.com"
         );
         assert!(chat_link(Channel::Unknown, &c).is_err());
-        assert!(chat_link(Channel::Email, &contact("050-1234567", "")).is_err());
+        assert!(chat_link(Channel::Email, &contact("060-1234567", "")).is_err());
     }
 
     #[test]
     fn only_our_own_links_pass_the_last_check() {
-        let c = contact("050-1234567", "parent@example.com");
+        let c = contact("060-1234567", "parent@example.com");
         for ch in [Channel::Whatsapp, Channel::Sms, Channel::Email] {
             assert!(is_chat_link(&chat_link(ch, &c).unwrap()));
         }
         for bad in [
-            "https://wa.me/972501234567",
-            "whatsapp://send?phone=972501234567&text=hi",
-            "sms:+972501234567?body=hi",
+            "https://wa.me/972601234567",
+            "whatsapp://send?phone=972601234567&text=hi",
+            "sms:+972601234567?body=hi",
             "mailto:parent@example.com?body=hi",
             "file:///c:/windows",
             "whatsapp://send?phone=",
@@ -300,12 +300,12 @@ mod tests {
     #[test]
     fn the_contact_is_the_picked_one_or_the_first_that_fits() {
         let p = Patient {
-            contacts: vec![contact("", "a@example.com"), contact("050-1234567", "")],
+            contacts: vec![contact("", "a@example.com"), contact("060-1234567", "")],
             ..Patient::default()
         };
         assert_eq!(
             pick_contact(&p, Channel::Whatsapp, None).unwrap().phone,
-            "050-1234567"
+            "060-1234567"
         );
         assert_eq!(
             pick_contact(&p, Channel::Email, None).unwrap().email,

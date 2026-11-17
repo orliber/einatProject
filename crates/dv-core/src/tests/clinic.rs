@@ -4566,7 +4566,7 @@ fn a_message_opens_the_chat_with_the_number_only() {
                 Contact {
                     role: ContactRole::Father,
                     name: "יואב".to_owned(),
-                    phone: "050-0000000".to_owned(),
+                    phone: "060-0000000".to_owned(),
                     email: String::new(),
                 },
             ],
@@ -4590,7 +4590,7 @@ fn a_message_opens_the_chat_with_the_number_only() {
     };
     // WhatsApp goes to the first contact with a phone, and greets him.
     let w = composed(&mut core, compose(rules::Channel::Whatsapp, None));
-    assert_eq!(w.link, "whatsapp://send?phone=972500000000");
+    assert_eq!(w.link, "whatsapp://send?phone=972600000000");
     assert_eq!(w.to, "יואב");
     assert!(w.text.starts_with("שלום יואב,"), "{}", w.text);
     assert!(!w.link.contains("text") && !w.text.contains("נועם"));
@@ -4600,7 +4600,7 @@ fn a_message_opens_the_chat_with_the_number_only() {
     assert_eq!(e.link, "mailto:dana@example.com");
     assert!(e.text.starts_with("שלום דנה,"));
     let s = composed(&mut core, compose(rules::Channel::Sms, Some(1)));
-    assert_eq!(s.link, "sms:+972500000000");
+    assert_eq!(s.link, "sms:+972600000000");
     // The contact she picked must have what the channel needs.
     refused(&mut core, compose(rules::Channel::Sms, Some(0)));
     refused(&mut core, compose(rules::Channel::Unknown, None));

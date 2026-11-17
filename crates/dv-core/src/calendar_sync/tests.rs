@@ -173,7 +173,7 @@ fn patient(core: &mut Core) -> String {
         contacts: vec![Contact {
             role: ContactRole::Mother,
             name: PARENT.to_owned(),
-            phone: "050-0000000".to_owned(),
+            phone: "060-0000000".to_owned(),
             email: String::new(),
         }],
         status: PatientStatus::Active,
@@ -278,7 +278,7 @@ fn only_the_time_and_one_word_reach_google() {
             "נועה",
             PARENT,
             "רחוב בדוי",
-            "050-0000000",
+            "060-0000000",
             a.id.as_str(),
             pid.as_str(),
             "אבחון",
