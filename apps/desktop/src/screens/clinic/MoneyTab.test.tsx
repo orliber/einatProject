@@ -274,6 +274,7 @@ describe("open balances", () => {
     const { user, calls, notes } = await openOn(MONEY);
     const list = await owing();
     await user.click(within(within(list).getByRole("group", { name: "פעולות עבור יובל" })).getByRole("button", { name: "הודעת תשלום" }));
+    await user.click(await screen.findByRole("menuitem", { name: "רק להעתיק" }));
     await waitFor(() => expect(notes).toHaveLength(1));
     expect(notes[0]).toBe("הודעת התשלום הועתקה ללוח המוגן, ואפשר להדביק אותה בהודעה. יימחק מהלוח בעוד דקה.");
     const copied = calls.filter((c) => c.cmd === "copy_secret");
@@ -290,11 +291,13 @@ describe("open balances", () => {
     };
     const first = await openOn(MONEY, broken);
     await first.user.click(within(within(await owing()).getByRole("group", { name: "פעולות עבור יובל" })).getByRole("button", { name: "הודעת תשלום" }));
+    await first.user.click(await screen.findByRole("menuitem", { name: "רק להעתיק" }));
     await waitFor(() => expect(first.notes).toEqual(["ההעתקה לא הצליחה."]));
     first.view.unmount();
 
     const second = await openOn(MONEY, refusing("message", "אין יתרה לתשלום, ולכן אין מה לשלוח."));
     await second.user.click(within(within(await owing()).getByRole("group", { name: "פעולות עבור יובל" })).getByRole("button", { name: "הודעת תשלום" }));
+    await second.user.click(await screen.findByRole("menuitem", { name: "רק להעתיק" }));
     await waitFor(() => expect(second.notes).toEqual(["אין יתרה לתשלום, ולכן אין מה לשלוח."]));
     expect(second.calls.some((c) => c.cmd === "copy_secret")).toBe(false);
   });

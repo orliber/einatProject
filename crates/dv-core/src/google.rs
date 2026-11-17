@@ -128,7 +128,7 @@ pub fn sign_in(
     open: &dyn Fn(&str) -> Result<(), CoreError>,
     keep_grant: bool,
 ) -> Result<(GoogleHttp, Session), CoreError> {
-    sign_in_with(open, false, keep_grant)
+    sign_in_with(open, Purpose::Recovery, keep_grant)
 }
 
 /// As [`sign_in`], asking Google for a lasting permission too: for the encrypted backup
@@ -137,12 +137,28 @@ pub fn sign_in_lasting(
     open: &dyn Fn(&str) -> Result<(), CoreError>,
     keep_grant: bool,
 ) -> Result<(GoogleHttp, Session), CoreError> {
-    sign_in_with(open, true, keep_grant)
+    sign_in_with(open, Purpose::DriveCopy, keep_grant)
+}
+
+/// As [`sign_in_lasting`], for the copy of the clinic's calendar (D-202): a lasting
+/// permission for the calendars the app makes itself, nothing of her Drive.
+pub fn sign_in_calendar(
+    open: &dyn Fn(&str) -> Result<(), CoreError>,
+    keep_grant: bool,
+) -> Result<(GoogleHttp, Session), CoreError> {
+    sign_in_with(open, Purpose::Calendar, keep_grant)
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Purpose {
+    Recovery,
+    DriveCopy,
+    Calendar,
 }
 
 fn sign_in_with(
     open: &dyn Fn(&str) -> Result<(), CoreError>,
-    lasting: bool,
+    purpose: Purpose,
     keep_grant: bool,
 ) -> Result<(GoogleHttp, Session), CoreError> {
     let cfg = config()?;
@@ -154,17 +170,26 @@ fn sign_in_with(
     CANCEL.store(false, Ordering::SeqCst);
     let result = (|| {
         let http = GoogleHttp::new().map_err(|e| from_google(&e))?;
-        let mut pending = if lasting {
-            google::begin_lasting(&cfg)
-        } else {
-            google::begin(&cfg)
+        let mut pending = match purpose {
+            Purpose::Recovery => google::begin(&cfg),
+            Purpose::DriveCopy => google::begin_lasting(&cfg),
+            Purpose::Calendar => google::begin_calendar(&cfg),
         }
         .map_err(|e| from_google(&e))?;
         open(&pending.url)?;
         let code = google::wait(&mut pending, &CANCEL, google::SIGN_IN_TIMEOUT)
             .map_err(|e| from_google(&e))?;
-        let session = google::finish_with(&http, &cfg, &pending, &code, keep_grant)
-            .map_err(|e| from_google(&e))?;
+        let session =
+            google::finish_with(&http, &cfg, &pending, &code, keep_grant).map_err(|e| {
+                if purpose == Purpose::Calendar && matches!(e, GoogleError::ScopeNotGranted) {
+                    refused(
+                        "בחלון של גוגל לא סומנה הגישה ליומנים שהתוכנה יוצרת, ובלעדיה הסנכרון \
+                         לא עובד. אפשר לנסות שוב ולסמן אותה.",
+                    )
+                } else {
+                    from_google(&e)
+                }
+            })?;
         Ok((http, session))
     })();
     BUSY.store(false, Ordering::SeqCst);

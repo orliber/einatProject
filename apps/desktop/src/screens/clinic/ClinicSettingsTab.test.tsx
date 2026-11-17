@@ -103,7 +103,7 @@ describe("the clinic's settings", () => {
     expect(within(within(part("מקומות")).getByRole("list", { name: "המקומות, לפי הסדר" })).getAllByRole("listitem").map((p) => p.textContent)).toEqual(
       ["הקליניקהמוצע ראשוןלמעלהלמטה", "בגן או בבית הספרלמעלהלמטה", "שיחת וידאולמעלהלמטה"]);
     expect(within(part("הודעות להורים")).getByLabelText("נוסח התזכורת לפגישה")).toHaveValue("שלום {הורה}, תזכורת לפגישה ביום {יום}, {תאריך}, בשעה {שעה}. להתראות, {שמי}");
-    expect(part("הודעות להורים")).toHaveTextContent("התוכנה לא שולחת הודעות.");
+    expect(part("הודעות להורים")).toHaveTextContent("התוכנה לא שולחת הודעות בעצמה.");
     expect(part("הודעות להורים")).toHaveTextContent("לא כולל את שם הילד בכוונה");
     expect(within(part("תבניות לסיכום פגישה")).getAllByRole("group")).toHaveLength(4);
     const thresholds = part("מתי להסב את תשומת הלב");
@@ -396,5 +396,26 @@ describe("the clinic's settings", () => {
 
     await openOn(SETTINGS, refusing("settings", "ההגדרות לא נקראו מהכספת."));
     expect(await screen.findByRole("alert")).toHaveTextContent("ההגדרות לא נקראו מהכספת.");
+  });
+
+  it("the copy to Google Calendar says what goes, turns on and off at once, and is outside the form's save", async () => {
+    const { user, calls, notes } = await openOn(SETTINGS);
+    await form();
+    const sync = await screen.findByRole("region", { name: "סנכרון עם יומן גוגל" });
+    expect(sync).toHaveTextContent("רק השעה והמילה \"פגישה\"");
+    expect(sync).toHaveTextContent("בלי שם, סוג פגישה, מקום או הערה");
+    const toggle = within(sync).getByRole("switch", { name: "להעתיק את הפגישות ליומן נפרד בגוגל" });
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+    await user.click(toggle);
+    await waitFor(() => expect(toggle).toHaveAttribute("aria-checked", "true"));
+    expect(calls.some((c) => c.cmd === "calendar_turn_on")).toBe(true);
+    expect(notes.at(-1)).toContain("בלי שמות");
+    await user.click(within(sync).getByRole("button", { name: "לסנכרן עכשיו" }));
+    await waitFor(() => expect(calls.some((c) => c.cmd === "calendar_sync_now")).toBe(true));
+    await user.click(toggle);
+    await waitFor(() => expect(toggle).toHaveAttribute("aria-checked", "false"));
+    expect(notes.at(-1)).toBe("הסנכרון כובה, והיומן \"פגישות\" נמחק מגוגל.");
+    // The switch acts by itself: the form has nothing to save.
+    expect(saveButton()).toBeDisabled();
   });
 });

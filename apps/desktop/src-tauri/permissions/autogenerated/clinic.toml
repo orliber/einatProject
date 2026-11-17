@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-clinic"
+description = "Enables the clinic command without any pre-configured scope."
+commands.allow = ["clinic"]
+
+[[permission]]
+identifier = "deny-clinic"
+description = "Denies the clinic command without any pre-configured scope."
+commands.deny = ["clinic"]

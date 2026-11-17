@@ -2,9 +2,7 @@
 // figures. The reference for the other tabs: data through the hooks of clinicData, names and
 // money through parts, quick actions that show first and roll back if the vault refuses.
 import { useState } from "react";
-import { useApp } from "../../App";
 import { PlusIcon, Skeleton } from "../../components/ui";
-import { asUiError, ipc } from "../../ipc/client";
 import { clinicApi } from "../../ipc/clinic";
 import type { Alert } from "../../ipc/generated/Alert";
 import type { ClinicTask } from "../../ipc/generated/ClinicTask";
@@ -17,6 +15,7 @@ import { formatDate, formatDateLong, formatMoney, greeting, TASK_KIND_LABEL } fr
 import { NoteDialog } from "./NoteDialog";
 import { AlertList, EmptyState, PatientName, ReadError, Section, useClinicNav, VisitRow } from "./parts";
 import { PatientDialog } from "./PatientDialog";
+import { SendMenu } from "./SendMenu";
 import { VisitDialog } from "./VisitDialog";
 
 /** What is open over the tab: one dialog at a time. */
@@ -26,17 +25,11 @@ type Open =
   | { kind: "note"; patientId: string; visit: Visit }
   | null;
 
-/** When the protected clipboard lets go of a copy (the app says how long: 20 s on a Mac). */
-function clearsIn(seconds: number): string {
-  return seconds === 60 ? "יימחק מהלוח בעוד דקה" : `יימחק מהלוח בעוד ${seconds} שניות`;
-}
-
 const markHeld = (v: VisitView, id: string): VisitView => (v.visit.id === id ? { ...v, visit: { ...v.visit, status: "held" } } : v);
 
 export function TodayTab() {
   const now = useToday();
   const overview = useOverview(now.date);
-  const { notify, fail } = useApp();
   const nav = useClinicNav();
   const [open, setOpen] = useState<Open>(null);
   const reload = useReloadClinic();
@@ -53,20 +46,6 @@ export function TodayTab() {
     (o, task) => ({ ...o, tasks: o.tasks.map((t) => (t.task.id === task.id ? { ...t, overdue: false, task: { ...t.task, done_on: now.date } } : t)) }),
     (task) => clinicApi.saveTask({ ...task, done_on: now.date }),
   );
-
-  /** Fills the reminder for a visit and puts it on the protected clipboard, for her to paste. */
-  async function remind(visit: Visit) {
-    if (visit.patient_id === null) return;
-    try {
-      const text = await clinicApi.message("reminder", visit.patient_id, visit.id);
-      // The text carries names: only the protected clipboard (out of clipboard history and
-      // cloud sync, cleared by itself). Never the ordinary one.
-      const seconds = await ipc.copySecret(text);
-      notify(`התזכורת הועתקה ללוח המוגן, ואפשר להדביק אותה בהודעה. ${clearsIn(seconds)}.`);
-    } catch (e) {
-      notify(fail(asUiError(e)));
-    }
-  }
 
   if (overview.error && !overview.data) {
     return <ReadError error={overview.error.message} retry={reload} />;
@@ -98,7 +77,7 @@ export function TodayTab() {
         {v.status !== "cancelled" && (
           <button type="button" className="btn btn-small" onClick={() => setOpen({ kind: "note", patientId, visit: v })}>סיכום</button>
         )}
-        {v.status === "planned" && <button type="button" className="btn btn-small" onClick={() => void remind(v)}>תזכורת</button>}
+        {v.status === "planned" && <SendMenu kind="reminder" patientId={patientId} visitId={v.id} label="תזכורת" />}
       </>
     );
   };

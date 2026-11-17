@@ -162,6 +162,38 @@ fn describe(
             .to_owned(),
             text("result") == "withdrawn",
         ),
+        "calendar_sync_on" => (
+            "security",
+            "הופעל סנכרון של יומן הקליניקה ליומן גוגל (שעות בלבד, בלי שמות)".to_owned(),
+            true,
+        ),
+        "calendar_sync_off" if flag("restore") => (
+            "security",
+            "אחרי שחזור מגיבוי, הסנכרון ליומן גוגל כבוי עד שתדליקי אותו שוב".to_owned(),
+            true,
+        ),
+        "calendar_sync_off" => (
+            "security",
+            "כובה הסנכרון של יומן הקליניקה ליומן גוגל".to_owned(),
+            true,
+        ),
+        "calendar_sync_failed" => (
+            "security",
+            "הסנכרון ליומן גוגל לא הצליח, וינוסה שוב".to_owned(),
+            false,
+        ),
+        "calendar_sync_cleanup" => (
+            "security",
+            match text("result") {
+                "cleaned" => "היומן של התוכנה ביומן גוגל נמחק",
+                "withdrawn" => {
+                    "ההרשאה בגוגל כבר הייתה מבוטלת, ולכן את היומן \"פגישות\" ביומן גוגל התוכנה לא יכולה למחוק"
+                }
+                _ => "מחיקת היומן של התוכנה ביומן גוגל עוד לא הושלמה, ותנוסה שוב",
+            }
+            .to_owned(),
+            text("result") == "withdrawn",
+        ),
         "drive_backup_uploaded" => (
             "security",
             "עותק מוצפן של הגיבוי עלה לגוגל דרייב".to_owned(),
@@ -445,6 +477,10 @@ mod tests {
             "drive_backup_uploaded",
             "drive_backup_failed",
             "drive_backup_cleanup",
+            "calendar_sync_on",
+            "calendar_sync_off",
+            "calendar_sync_failed",
+            "calendar_sync_cleanup",
             "case_created",
             "case_opened",
             "case_trashed",

@@ -12,6 +12,11 @@ pub(crate) fn open_in_browser(url: &str) -> Result<(), CoreError> {
             "refused to open an unexpected address".to_owned(),
         ));
     }
+    launch(url).map_err(|_| CoreError::Refused("הדפדפן לא נפתח. אפשר לנסות שוב.".to_owned()))
+}
+
+/// Hand an address the caller checked to the program the system opens it with.
+pub(crate) fn launch(url: &str) -> std::io::Result<()> {
     let opened = if cfg!(windows) {
         // By full path; `url.dll` takes the address as one argument, no shell in between.
         let rundll = std::env::var_os("SystemRoot").map_or_else(
@@ -26,9 +31,7 @@ pub(crate) fn open_in_browser(url: &str) -> Result<(), CoreError> {
     } else {
         std::process::Command::new("xdg-open").arg(url).spawn()
     };
-    opened
-        .map(|_| ())
-        .map_err(|_| CoreError::Refused("הדפדפן לא נפתח. אפשר לנסות שוב.".to_owned()))
+    opened.map(|_| ())
 }
 
 /// Sign in outside the core's lock, then run `then` with the session (still outside it).

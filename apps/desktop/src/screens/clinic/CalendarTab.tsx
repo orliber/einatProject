@@ -9,7 +9,6 @@ import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef,
 import { useApp } from "../../App";
 import { Segmented } from "../../components/Switch";
 import { Dialog, PlusIcon, Skeleton } from "../../components/ui";
-import { asUiError, ipc } from "../../ipc/client";
 import { clinicApi } from "../../ipc/clinic";
 import type { Holiday } from "../../ipc/generated/Holiday";
 import type { Scope } from "../../ipc/generated/Scope";
@@ -27,6 +26,7 @@ import {
 } from "./format";
 import { NoteDialog } from "./NoteDialog";
 import { EmptyState, Pager, PatientName, ReadError, Section, StatusBadge, usePaged, useShownName, VisitRow } from "./parts";
+import { SendMenu } from "./SendMenu";
 import { VisitDialog, type VisitStart } from "./VisitDialog";
 import "./CalendarTab.css";
 
@@ -81,11 +81,6 @@ type Open =
   | { kind: "scope"; view: VisitView; by: MoveBy | null; refocus: boolean }
   | null;
 
-/** When the protected clipboard lets go of a copy (the app says how long). */
-function clearsIn(seconds: number): string {
-  return seconds === 60 ? "יימחק מהלוח בעוד דקה" : `יימחק מהלוח בעוד ${seconds} שניות`;
-}
-
 const markHeld = (v: VisitView, id: string): VisitView => (v.visit.id === id ? { ...v, visit: { ...v.visit, status: "held" } } : v);
 const countText = (n: number) => (n === 0 ? "אין פגישות" : n === 1 ? "פגישה אחת" : `${n} פגישות`);
 
@@ -109,7 +104,7 @@ function MoveIcon() {
 
 export function CalendarTab() {
   const now = useToday();
-  const { notify, fail } = useApp();
+  const { notify } = useApp();
   const reload = useReloadClinic();
   const [view, setView] = useState<CalendarView>("week");
   const [anchor, setAnchor] = useState(now.date);
@@ -249,19 +244,6 @@ export function CalendarTab() {
     else setChosen((c) => (c?.id === v.visit.id ? { ...c, scope } : c));
   }
 
-  /** Fills the reminder for a visit and puts it on the protected clipboard, for her to paste. */
-  async function remind(visit: Visit) {
-    if (visit.patient_id === null) return;
-    try {
-      const text = await clinicApi.message("reminder", visit.patient_id, visit.id);
-      // The text carries names: only the protected clipboard. Never the ordinary one.
-      const seconds = await ipc.copySecret(text);
-      notify(`התזכורת הועתקה ללוח המוגן, ואפשר להדביק אותה בהודעה. ${clearsIn(seconds)}.`);
-    } catch (e) {
-      notify(fail(asUiError(e)));
-    }
-  }
-
   const newOn = (date: string) => setOpen({ kind: "new", start: { date, start: suggestStart(date, now, dayStart, dayEnd) } });
   const grid: GridActions = {
     open: (v) => setOpen({ kind: "visit", view: v }),
@@ -308,7 +290,7 @@ export function CalendarTab() {
           <div className="cal-day-view">
             {timeGrid}
             <Agenda key={anchor} date={anchor} today={now.date} visits={days.get(anchor) ?? NO_VISITS} onOpen={grid.open} onNew={() => newOn(anchor)}
-              onHold={(v) => void hold(v)} onNote={(patientId, visit) => setOpen({ kind: "note", patientId, visit })} onRemind={(v) => void remind(v)} />
+              onHold={(v) => void hold(v)} onNote={(patientId, visit) => setOpen({ kind: "note", patientId, visit })} />
           </div>
         )}
       </>
@@ -567,9 +549,9 @@ function GridVisit({ view, chosen, short, style, actions }: {
 // ------------------------------------------------------------------ the day's list
 
 /** The day as a list beside its grid, with the quick actions of the front page. */
-function Agenda({ date, today, visits, onOpen, onNew, onHold, onNote, onRemind }: {
+function Agenda({ date, today, visits, onOpen, onNew, onHold, onNote }: {
   date: string; today: string; visits: VisitView[]; onOpen: (view: VisitView) => void; onNew: () => void;
-  onHold: (visit: Visit) => void; onNote: (patientId: string, visit: Visit) => void; onRemind: (visit: Visit) => void;
+  onHold: (visit: Visit) => void; onNote: (patientId: string, visit: Visit) => void;
 }) {
   const { shown, page, pages, setPage } = usePaged(visits, 12);
   const actionsOf = (view: VisitView) => {
@@ -582,7 +564,7 @@ function Agenda({ date, today, visits, onOpen, onNew, onHold, onNote, onRemind }
       <>
         {v.status === "planned" && due && <button type="button" className="btn btn-small" onClick={() => onHold(v)}>התקיימה</button>}
         {v.status !== "cancelled" && <button type="button" className="btn btn-small" onClick={() => onNote(patientId, v)}>סיכום</button>}
-        {v.status === "planned" && <button type="button" className="btn btn-small" onClick={() => onRemind(v)}>תזכורת</button>}
+        {v.status === "planned" && <SendMenu kind="reminder" patientId={patientId} visitId={v.id} label="תזכורת" />}
       </>
     );
   };

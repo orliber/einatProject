@@ -4547,3 +4547,61 @@ fn the_picture_counts_without_names() {
         },
     );
 }
+
+/// D-201: a message opens the family's chat on her own device; the address carries the
+/// number or the email only, and the text greets the contact it goes to.
+#[test]
+fn a_message_opens_the_chat_with_the_number_only() {
+    let (_dir, mut core) = open_clinic();
+    let noam = save_patient(
+        &mut core,
+        Patient {
+            contacts: vec![
+                Contact {
+                    role: ContactRole::Mother,
+                    name: "דנה".to_owned(),
+                    phone: String::new(),
+                    email: "dana@example.com".to_owned(),
+                },
+                Contact {
+                    role: ContactRole::Father,
+                    name: "יואב".to_owned(),
+                    phone: "050-0000000".to_owned(),
+                    email: String::new(),
+                },
+            ],
+            ..child("נועם")
+        },
+    );
+    let visit = save_visit(
+        &mut core,
+        a_visit(&noam, VisitKind::Assessment, "2026-11-17", 570),
+    );
+    let compose = |channel, contact| ClinicRequest::Compose {
+        kind: MessageKind::Reminder,
+        patient_id: noam.id.clone(),
+        visit_id: Some(visit.id.clone()),
+        channel,
+        contact,
+    };
+    let composed = |core: &mut Core, request| match ask(core, request) {
+        ClinicReply::Composed(c) => c,
+        other => panic!("{other:?}"),
+    };
+    // WhatsApp goes to the first contact with a phone, and greets him.
+    let w = composed(&mut core, compose(rules::Channel::Whatsapp, None));
+    assert_eq!(w.link, "whatsapp://send?phone=972500000000");
+    assert_eq!(w.to, "יואב");
+    assert!(w.text.starts_with("שלום יואב,"), "{}", w.text);
+    assert!(!w.link.contains("text") && !w.text.contains("נועם"));
+    assert!(rules::is_chat_link(&w.link));
+    // Email goes to the first contact with an address.
+    let e = composed(&mut core, compose(rules::Channel::Email, None));
+    assert_eq!(e.link, "mailto:dana@example.com");
+    assert!(e.text.starts_with("שלום דנה,"));
+    let s = composed(&mut core, compose(rules::Channel::Sms, Some(1)));
+    assert_eq!(s.link, "sms:+972500000000");
+    // The contact she picked must have what the channel needs.
+    refused(&mut core, compose(rules::Channel::Sms, Some(0)));
+    refused(&mut core, compose(rules::Channel::Unknown, None));
+}

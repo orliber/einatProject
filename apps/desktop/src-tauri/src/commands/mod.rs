@@ -24,6 +24,8 @@ mod recovery;
 pub(crate) use recovery::*;
 mod backup;
 pub(crate) use backup::*;
+mod calendar;
+pub(crate) use calendar::*;
 mod drive_backup;
 pub(crate) use drive_backup::*;
 mod updates;

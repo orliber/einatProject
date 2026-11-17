@@ -446,6 +446,7 @@ describe("the day", () => {
   it("“סיכום” opens the visit's note, and “תזכורת” copies through the protected clipboard only", async () => {
     const { user, row, calls, notes } = await openDay();
     await user.click(within(row("תמר")).getByRole("button", { name: "תזכורת" }));
+    await user.click(await screen.findByRole("menuitem", { name: "רק להעתיק" }));
     await waitFor(() => expect(notes).toEqual(["התזכורת הועתקה ללוח המוגן, ואפשר להדביק אותה בהודעה. יימחק מהלוח בעוד דקה."]));
     const copied = calls.filter((c) => c.cmd === "copy_secret");
     expect(copied).toHaveLength(1);

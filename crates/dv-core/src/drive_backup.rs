@@ -414,6 +414,9 @@ pub struct DriveCleanup {
     copies: bool,
     generation: Arc<AtomicU64>,
     at: u64,
+    /// Withdraw the permission at Google at the end. Not while the calendar copy (D-202)
+    /// rests on the same grant: it would stop too.
+    revoke: bool,
     _running: Running,
 }
 
@@ -470,6 +473,8 @@ impl DriveCleanup {
         let moved = || self.generation.load(Ordering::Acquire) != self.at;
         let outcome = if moved() {
             Cleaned::Superseded
+        } else if !self.copies && !self.revoke {
+            Cleaned::Done(DriveCleanupResult::Cleaned)
         } else if !self.copies {
             match google::revoke_token(http, &self.token) {
                 Ok(()) => Cleaned::Done(DriveCleanupResult::Cleaned),
@@ -482,6 +487,7 @@ impl DriveCleanup {
                 Ok(s) => match drive::delete_all_copies(http, &s, &self.vault_id) {
                     Err(_) => Cleaned::Done(DriveCleanupResult::Pending),
                     Ok(_) if moved() => Cleaned::Superseded,
+                    Ok(_) if !self.revoke => Cleaned::Done(DriveCleanupResult::Cleaned),
                     Ok(_) => match google::revoke_token(http, &self.token) {
                         Ok(()) => Cleaned::Done(DriveCleanupResult::Cleaned),
                         Err(_) => Cleaned::Done(DriveCleanupResult::Pending),
@@ -586,6 +592,7 @@ impl Core {
             copies,
             generation: Arc::clone(&self.drive_generation),
             at,
+            revoke: !self.calendar_holds_grant(),
             _running: Running::new(&self.drive_cleanups),
         })
     }
@@ -601,7 +608,14 @@ impl Core {
     /// is locked and that is not known. A short token kept this way runs out within the hour.
     #[must_use]
     pub fn drive_keeps_grant(&self) -> bool {
-        self.vault.is_none() || self.drive_backup_on() || self.drive_cleanup_token().is_some()
+        self.vault.is_none() || self.drive_holds_grant() || self.calendar_holds_grant()
+    }
+
+    /// The Drive copy rests on the app's grant at Google: on, or a cleanup owed. The calendar
+    /// copy (D-202) leaves the grant alone meanwhile.
+    #[must_use]
+    pub fn drive_holds_grant(&self) -> bool {
+        self.drive_backup_on() || self.drive_cleanup_token().is_some()
     }
 
     pub fn drive_backup_status(

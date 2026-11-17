@@ -10,7 +10,6 @@ import { useApp } from "../../App";
 import { Segmented } from "../../components/Switch";
 import { Dialog, ErrorLine, Skeleton } from "../../components/ui";
 import { asUiError, ipc } from "../../ipc/client";
-import { clinicApi } from "../../ipc/clinic";
 import type { Alert } from "../../ipc/generated/Alert";
 import type { DiaryDay } from "../../ipc/generated/DiaryDay";
 import type { DiaryLine } from "../../ipc/generated/DiaryLine";
@@ -21,6 +20,7 @@ import type { DiaryErased } from "../../ipc/generated/DiaryErased";
 import { useClinicSettings, useDiary, useHistory, useIncome, useOverview, usePatients, useReloadClinic, useToday, useYearErased } from "./clinicData";
 import { formatDate, formatDateLong, formatMoney, formatMonth, formatTime, monthOf, PAY_METHOD_LABEL, VISIT_KIND_LABEL } from "./format";
 import { EmptyState, HistoryEntries, Money, Pager, PatientName, ReadError, Section, StatusBadge, useClinicNav, useDiscreet, usePaged, useShownName } from "./parts";
+import { SendMenu } from "./SendMenu";
 import "./MoneyTab.css";
 
 // ------------------------------------------------------------------ pure pieces
@@ -76,11 +76,6 @@ export function openBalances(rows: PatientRow[], alerts: Alert[]): OpenBalance[]
 /** The share of `value` in `max`, as a whole percent for a bar's length (0 when there is no max). */
 export function barPercent(value: number, max: number): number {
   return max <= 0 || value <= 0 ? 0 : Math.max(1, Math.round((value / max) * 100));
-}
-
-/** When the protected clipboard lets go of a copy (the app says how long). */
-function clearsIn(seconds: number): string {
-  return seconds === 60 ? "יימחק מהלוח בעוד דקה" : `יימחק מהלוח בעוד ${seconds} שניות`;
 }
 
 const visitsWord = (n: number) => (n === 1 ? "פגישה אחת" : `${n} פגישות`);
@@ -370,7 +365,6 @@ function HistoryDialog({ line, onClose }: { line: DiaryLine; onClose: () => void
 function Balances({ today, rows, error }: { today: string; rows: PatientRow[] | undefined; error: string | null }) {
   const overview = useOverview(today);
   const settings = useClinicSettings();
-  const { notify, fail } = useApp();
   const nav = useClinicNav();
   const shown = useShownName();
   const reload = useReloadClinic();
@@ -379,18 +373,6 @@ function Balances({ today, rows, error }: { today: string; rows: PatientRow[] | 
   const total = useMemo(() => list.reduce((sum, b) => sum + b.row.due, 0), [list]);
   const paged = usePaged(list, 20);
   const debtDays = settings.data?.debt_days;
-
-  /** Fills the payment message and puts it on the protected clipboard, for her to paste. */
-  async function message(patientId: string) {
-    try {
-      const text = await clinicApi.message("payment", patientId);
-      // The text may carry names: only the protected clipboard, never the ordinary one.
-      const seconds = await ipc.copySecret(text);
-      notify(`הודעת התשלום הועתקה ללוח המוגן, ואפשר להדביק אותה בהודעה. ${clearsIn(seconds)}.`);
-    } catch (e) {
-      notify(fail(asUiError(e)));
-    }
-  }
 
   /** Since when: the date when the clinic knows it (a debt it already points out), else that it is a recent one. */
   const sinceWords = (b: OpenBalance) => (b.since !== null ? `מאז ${formatDate(b.since)}`
@@ -413,7 +395,7 @@ function Balances({ today, rows, error }: { today: string; rows: PatientRow[] | 
                   </div>
                   <Money agorot={b.row.due} tone="owed" />
                   <div className="row clinic-balance-actions" role="group" aria-label={`פעולות עבור ${shown(b.row.patient.name)}`}>
-                    <button type="button" className="btn btn-small" onClick={() => void message(b.row.patient.id)}>הודעת תשלום</button>
+                    <SendMenu kind="payment" patientId={b.row.patient.id} label="הודעת תשלום" />
                     <button type="button" className="btn btn-small" onClick={() => nav.openPatient(b.row.patient.id)}>לכרטיס</button>
                   </div>
                 </li>
