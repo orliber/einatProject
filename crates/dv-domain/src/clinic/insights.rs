@@ -9,12 +9,13 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use super::slots::working_day;
 use super::{
-    balance, clean_line, closed_day, date_of_day, day_number, income_with_erased, income_year,
-    month_bounds, oldest_uncovered, parse_date, parse_month, weekday, Agorot, Charge,
-    ClinicRecords, ClinicSettings, ErasedCards, ErasedMonth, ErasedTally, IncomeMonth, KindCount,
-    MethodTotal, Patient, PatientStatus, PayMethod, Payment, Visit, VisitKind, VisitStatus,
-    PAY_METHODS, VISIT_KINDS,
+    balance, clean_line, date_of_day, day_number, income_with_erased, income_year, month_bounds,
+    oldest_uncovered, parse_date, parse_month, weekday, Agorot, Charge, ClinicRecords,
+    ClinicSettings, ErasedCards, ErasedMonth, ErasedTally, IncomeMonth, KindCount, MethodTotal,
+    Patient, PatientStatus, PayMethod, Payment, Visit, VisitKind, VisitStatus, PAY_METHODS,
+    VISIT_KINDS,
 };
 use crate::DomainError;
 
@@ -214,7 +215,7 @@ pub fn insights(
         occupancy: per_thousand(live.held_minutes, u64::from(work_minutes)),
         new_patients: opened(records.patients, cards, stretch),
         referrals: referrals(records.patients, stretch),
-        assessments_done: live.feedbacks,
+        assessments_done: feedbacks_with_erased(live.feedbacks, tally, stretch),
         intake_to_feedback_days,
         assessment_to_feedback_days,
         waited_days: waited(records.patients, &seen, stretch),
@@ -494,6 +495,15 @@ fn by_kind(mut kinds: Vec<KindCount>, tally: &ErasedTally, stretch: Months) -> V
     kinds
 }
 
+/// The feedback meetings held: those of the cards that still exist, and what the erased
+/// cards counted for, as [`by_kind`] counts them.
+fn feedbacks_with_erased(live: u32, tally: &ErasedTally, stretch: Months) -> u32 {
+    erased_in(tally, stretch)
+        .flat_map(|erased| &erased.held)
+        .filter(|entry| entry.kind == VisitKind::Feedback)
+        .fold(live, |sum, entry| sum.saturating_add(entry.count))
+}
+
 /// One held visit of a patient, as the times of the pathway need it.
 #[derive(Clone, Copy)]
 struct Seen {
@@ -606,8 +616,9 @@ fn waiting_now(patients: &[Patient], now: i64) -> (u32, Option<u32>) {
     (count(waiting.len()), median(waits.collect()))
 }
 
-/// Her working minutes on her working days that were not closed for a holiday, from the
-/// first day of the stretch to its last or to today, the earlier.
+/// Her working minutes on her working days (without the days closed for a holiday when she
+/// has the holidays on, as free times count them), from the first day of the stretch to its
+/// last or to today, the earlier.
 fn work_minutes(settings: &ClinicSettings, from_month: &str, to_month: &str, now: i64) -> u32 {
     let first = month_bounds(from_month).and_then(|(first, _)| day_number(&first));
     let last = month_bounds(to_month).and_then(|(_, last)| day_number(&last));
@@ -617,9 +628,7 @@ fn work_minutes(settings: &ClinicSettings, from_month: &str, to_month: &str, now
     let per_day = u32::from(settings.day_end.saturating_sub(settings.day_start));
     (first..=last.min(now))
         .filter_map(date_of_day)
-        .filter(|date| {
-            weekday(date).is_some_and(|d| settings.work_days.contains(&d)) && !closed_day(date)
-        })
+        .filter(|date| working_day(date, settings))
         .fold(0_u32, |sum, _| sum.saturating_add(per_day))
 }
 
@@ -1724,6 +1733,43 @@ mod tests {
             .ask(&settings, "2026-01", "2026-01", "2026-01-02")
             .unwrap();
         assert_eq!((tight.work_minutes, tight.occupancy), (5, u16::MAX));
+        // September 2026: Rosh Hashana's Sunday and Yom Kippur's Monday are closed days. With
+        // the holidays off, they are working days, as free times count them (D-196).
+        let closed = clinic.picture("2026-09", "2026-09", TODAY);
+        let open = ClinicSettings {
+            holidays: false,
+            ..ClinicSettings::default()
+        };
+        let open = clinic.ask(&open, "2026-09", "2026-09", TODAY).unwrap();
+        assert_eq!(
+            (closed.work_minutes, open.work_minutes),
+            (20 * 720, 22 * 720)
+        );
+    }
+
+    #[test]
+    fn finished_assessments_count_the_erased_cards_too() {
+        let mut clinic = Clinic {
+            patients: vec![card("p1", "2026-01-01")],
+            visits: vec![held("v1", "p1", VisitKind::Feedback, "2026-03-10")],
+            ..Clinic::default()
+        };
+        clinic.tally.months = BTreeMap::from([(
+            "2026-03".to_owned(),
+            ErasedMonth {
+                held: kinds(&[(VisitKind::Feedback, 1), (VisitKind::Intake, 2)]),
+                ..ErasedMonth::default()
+            },
+        )]);
+        let picture = clinic.picture("2026-03", "2026-03", TODAY);
+        let feedbacks = picture
+            .by_kind
+            .iter()
+            .find(|k| k.kind == VisitKind::Feedback)
+            .map(|k| k.count);
+        assert_eq!((feedbacks, picture.assessments_done), (Some(2), 2));
+        // The breakdowns by day know only the cards that still exist.
+        assert_eq!(picture.by_weekday.iter().map(|d| d.held).sum::<u32>(), 1);
     }
 
     #[test]

@@ -474,6 +474,10 @@ pub fn normalize_settings(mut settings: ClinicSettings) -> ClinicSettings {
         template.name = clean_line(&template.name);
     }
     settings.package_name = clean_line(&settings.package_name);
+    // The first step is on the day she starts from (D-198): it has no gap.
+    if let Some(first) = settings.pathway.first_mut() {
+        first.gap_days = 0;
+    }
     for task in &mut settings.starter_tasks {
         task.title = clean_line(&task.title);
     }

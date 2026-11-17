@@ -552,8 +552,9 @@ function Referrals({ i }: { i: Insights }) {
         // Her words for who referred a family may name a person: hidden while a family may look on.
         : discreet ? <p className="muted clinic-quiet">מקורות ההפניה מוסתרים במצב דיסקרטי.</p> : (
         <>
-          <Ranked label="מקורות ההפניה" rows={i.referrals.map((r) => ({
-            key: r.source,
+          <Ranked label="מקורות ההפניה" rows={i.referrals.map((r, n) => ({
+            // Her own words may repeat the "אחרים" row's name: the place keeps the key unique.
+            key: `${n}-${r.source}`,
             name: r.source,
             value: r.count,
             figure: <><Num n={r.count} /> <span className="muted">(<span className="num" dir="ltr">{percentText(Math.round((r.count * 1000) / Math.max(1, total)))}</span>)</span></>,

@@ -352,7 +352,8 @@ pub struct NoteTemplate {
 }
 
 /// One step of the assessment pathway (D-198): a visit of this kind, at least `gap_days`
-/// after the step before (the first step: from the day she starts from).
+/// after the step before, and at least the next day. The first step is from the day she
+/// starts from: its gap is not used, and saved settings keep it at 0.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(default)]
 #[ts(export)]

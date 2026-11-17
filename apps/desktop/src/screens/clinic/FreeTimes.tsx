@@ -2,7 +2,7 @@
 // when a day is a holiday, and, on request, the first free times of her calendar for the
 // visit's length. A click on one puts its date and hour in the form. Everything is worked out
 // by the core from her own calendar; nothing leaves the computer.
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Slot } from "../../ipc/generated/Slot";
 import { useFreeSlots, useHolidays } from "./clinicData";
 import { dayName, formatDate, formatTime, isIsoDate } from "./format";
@@ -30,20 +30,31 @@ export function FreeTimes({ from, minutes, skip, today, onPick }: {
   const [open, setOpen] = useState(false);
   const usable = isIsoDate(from) && Number.isInteger(minutes) && minutes >= 5 && minutes <= 720;
   const read = useFreeSlots(open && usable ? from : "", minutes, skip, today);
+  // The button she pressed goes away (opening, hiding, or a pick that changes the list):
+  // focus moves to what took its place, not back to the top of the dialog.
+  const group = useRef<HTMLDivElement>(null);
+  const opener = useRef<HTMLButtonElement>(null);
+  const focusNext = useRef<"group" | "opener" | null>(null);
+  useEffect(() => {
+    if (focusNext.current === "group") group.current?.focus();
+    else if (focusNext.current === "opener") opener.current?.focus();
+    focusNext.current = null;
+  });
   if (!open) {
     return (
-      <button type="button" className="link-btn clinic-free-open" disabled={!usable} onClick={() => setOpen(true)}>
+      <button ref={opener} type="button" className="link-btn clinic-free-open" disabled={!usable}
+        onClick={() => { focusNext.current = "group"; setOpen(true); }}>
         להציע שעות פנויות
       </button>
     );
   }
   const slots = read.data ?? [];
   return (
-    <div className="clinic-free" role="group" aria-label="שעות פנויות ביומן">
+    <div ref={group} tabIndex={-1} className="clinic-free" role="group" aria-label="שעות פנויות ביומן">
       <div className="row clinic-free-head">
         <span className="small muted">שעות פנויות של {minutes} דקות, מ-{formatDate(from)}:</span>
         <span className="grow" />
-        <button type="button" className="link-btn small" onClick={() => setOpen(false)}>להסתיר</button>
+        <button type="button" className="link-btn small" onClick={() => { focusNext.current = "opener"; setOpen(false); }}>להסתיר</button>
       </div>
       {read.isLoading && <span className="small muted" role="status">מחפשת שעות פנויות…</span>}
       {read.error && <span className="small clinic-free-error" role="alert">{read.error.message}</span>}
@@ -54,7 +65,7 @@ export function FreeTimes({ from, minutes, skip, today, onPick }: {
         <ul className="clinic-free-list">
           {slots.map((s) => (
             <li key={`${s.date}-${s.start}`}>
-              <button type="button" className="chip clinic-free-slot" onClick={() => onPick(s)}
+              <button type="button" className="chip clinic-free-slot" onClick={() => { if (s.date !== from) focusNext.current = "group"; onPick(s); }}
                 aria-label={`יום ${dayName(s.date)}, ${formatDate(s.date)}, בשעה ${formatTime(s.start)}`}>
                 <span>{dayName(s.date)} {formatDate(s.date).slice(0, 5)}</span>
                 <span className="num" dir="ltr">{formatTime(s.start)}</span>

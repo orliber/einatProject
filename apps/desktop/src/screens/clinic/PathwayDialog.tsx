@@ -32,9 +32,12 @@ export function PathwayDialog({ patientId, patientName, onClose }: { patientId: 
   // until then.
   const proposal = useProposedPathway(patientId, from, now.date);
   const [shownFor, setShownFor] = useState<Visit[] | null>(null);
+  // Each proposal shown starts the rows' date boxes afresh, even when it came from the cache.
+  const [rev, setRev] = useState(0);
   if (proposal.data && proposal.data !== shownFor) {
     setShownFor(proposal.data);
     setRows(proposal.data.map((visit) => ({ visit, start: formatTime(visit.start) })));
+    setRev((n) => n + 1);
   }
 
   const fee = settings.data?.package_fee ?? 0;
@@ -65,15 +68,18 @@ export function PathwayDialog({ patientId, patientName, onClose }: { patientId: 
     }
   }
 
-  const loading = proposal.isFetching || rows === null || proposal.data !== shownFor;
-  const refused = proposal.error && !proposal.isFetching ? proposal.error.message : null;
+  // No start day (empty, or not a whole date yet): nothing is asked, and nothing can be saved.
+  const noStart = from === "";
+  const loading = !noStart && (proposal.isFetching || rows === null || proposal.data !== shownFor);
+  const refused = !noStart && proposal.error && !proposal.isFetching ? proposal.error.message : null;
+  const shown = !noStart && !loading && !refused && rows !== null && rows.length > 0;
   return (
     <Dialog wide title="לקבוע את מסלול האבחון" subtitle={<PatientName name={patientName} />} onClose={onClose} dirty={rows !== null && rows.length > 0}
       footer={(close) => <>
         <span className="grow" />
         <button type="button" className="btn" onClick={close}>ביטול</button>
-        <button type="button" className="btn btn-primary" disabled={busy || loading || refused !== null || !rows || rows.length === 0} onClick={() => void submit()}>
-          {rows && rows.length > 0 ? `לקבוע ${rows.length} פגישות` : "לקבוע"}
+        <button type="button" className="btn btn-primary" disabled={busy || !shown} onClick={() => void submit()}>
+          {shown ? `לקבוע ${rows.length} פגישות` : "לקבוע"}
         </button>
       </>}>
       <div className="stack clinic-form">
@@ -83,12 +89,13 @@ export function PathwayDialog({ patientId, patientName, onClose }: { patientId: 
         <Field id="pathway-from" label="מתחילים מיום">
           <DateField id="pathway-from" value={from} onChange={setFrom} />
         </Field>
+        {noStart && <p className="hint" role="status">צריך לכתוב את היום שמתחילים ממנו: יום.חודש.שנה.</p>}
         {loading && !refused && <Skeleton lines={4} label="מחפשת שעות פנויות למסלול" />}
         {refused && <ErrorLine error={refused} />}
-        {!loading && !refused && rows.length > 0 && (
+        {shown && (
           <ol className="clinic-list pathway-rows" aria-label="פגישות המסלול">
             {rows.map((r, i) => (
-              <li key={i}><div className="clinic-step" role="group" aria-label={`פגישה ${i + 1}: ${VISIT_KIND_LABEL[r.visit.kind]}`}>
+              <li key={`${rev}-${i}`}><div className="clinic-step" role="group" aria-label={`פגישה ${i + 1}: ${VISIT_KIND_LABEL[r.visit.kind]}`}>
                 <span className="clinic-step-num num" aria-hidden="true">{i + 1}</span>
                 <div className="stack pathway-what">
                   <strong>{VISIT_KIND_LABEL[r.visit.kind]}</strong>
@@ -103,7 +110,7 @@ export function PathwayDialog({ patientId, patientName, onClose }: { patientId: 
             ))}
           </ol>
         )}
-        {fee > 0 && !loading && !refused && rows.length > 0 && (
+        {fee > 0 && shown && (
           <CheckField id="pathway-package" label={`לחייב כחבילה: ${settings.data?.package_name ?? "חבילת אבחון"}`} checked={packaged} onChange={setPackaged}
             hint={<>נרשם חיוב אחד של <Money agorot={fee} />, ביום הפגישה הראשונה, והפגישות של המסלול עצמן בלי מחיר. בלי החבילה כל פגישה מחויבת לפי המחיר שלה.</>} />
         )}

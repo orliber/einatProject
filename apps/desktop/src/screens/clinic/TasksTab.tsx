@@ -28,7 +28,7 @@ import "./TasksTab.css";
 /** The kinds of "מה דורש אותי" in the order she would deal with them: rows that were not read
  *  first (every figure is without them, D-178), then what is quick to close, then what takes
  *  a decision. */
-const ALERT_ORDER: AlertKind[] = ["unreadable", "unmarked", "no_note", "task_overdue", "feedback_soon", "report_due", "debt", "no_next_visit", "waiting"];
+const ALERT_ORDER: AlertKind[] = ["unreadable", "unmarked", "no_note", "task_overdue", "feedback_soon", "materials_missing", "report_due", "debt", "no_next_visit", "waiting"];
 
 /** How many lines of a kind show before "להציג את כולן". */
 const ALERTS_SHOWN = 4;

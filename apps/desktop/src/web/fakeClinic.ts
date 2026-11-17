@@ -518,29 +518,52 @@ export class FakeClinic {
     need(visits.length > 0, "אין פגישות לשמור במסלול.");
     need(visits.length <= 12, "יש יותר מדי פגישות במסלול אחד.");
     if (!this.patients.some((x) => x.id === patientId)) refuse("המטופל שנבחר לא נמצא. ייתכן שהכרטיס נמחק.");
-    for (const v of visits) {
+    // All of them, or none (the core's one transaction): every check passes before the first
+    // visit is written.
+    const rows: Visit[] = [];
+    for (const input of visits) {
+      const v = this.normalVisit(input);
       need(v.id === "" && v.patient_id === patientId, "במסלול יש פגישה שלא שייכת לכרטיס הזה. אפשר לפתוח את המסלול מחדש.");
       need(v.kind !== "block", "במסלול האבחון אין זמנים שמורים, רק פגישות.");
       need(v.date >= today.date, "אחת הפגישות במסלול נקבעה לתאריך שעבר. אפשר לבחור תאריך אחר.");
+      v.status = "planned";
+      v.series_id = null;
+      if (packaged) {
+        v.fee = 0;
+        v.charge_missed = false;
+      }
+      this.checkVisit(v);
+      rows.push(v);
     }
-    if (packaged) need(this.settings.package_fee > 0, "עוד אין מחיר לחבילת האבחון. אפשר לקבוע אותו בהגדרות הקליניקה.");
-    const saved: VisitView[] = [];
-    let overlapping = 0;
-    for (const v of visits) {
-      const one = this.saveVisit({ ...v, status: "planned", series_id: null, ...(packaged ? { fee: 0, charge_missed: false } : {}) }, null, "one");
-      saved.push(...one.visits);
-      overlapping += one.overlapping;
-    }
+    let charge: Charge | null = null;
     if (packaged) {
-      const first = visits.map((v) => v.date).sort()[0] ?? today.date;
-      this.saveCharge({ id: "", patient_id: patientId, date: first, amount: this.settings.package_fee, what: this.settings.package_name, voided: false, void_reason: "" });
+      need(this.settings.package_fee > 0, "עוד אין מחיר לחבילת האבחון. אפשר לקבוע אותו בהגדרות הקליניקה.");
+      const first = rows.map((v) => v.date).sort()[0] ?? today.date;
+      charge = { id: "", patient_id: patientId, date: first, amount: this.settings.package_fee, what: cleanLine(this.settings.package_name), voided: false, void_reason: "" };
+      // The charge's checks (`validate_charge`), before anything is written.
+      need(whole(charge.amount, 1, MAX_AGOROT), "הסכום צריך להיות גדול מאפס, ועד 100,000 ₪.");
+      need(charge.what !== "", "צריך לכתוב על מה החיוב.");
+      short(charge.what, "על מה החיוב");
     }
-    return { visits: saved, overlapping, left_alone: 0 };
+    // The waiting family's card is checked before the first write too.
+    const card = this.patient(patientId);
+    if (card.status === "waiting") patientKnown(card);
+    const written = rows.map((v): Visit => ({ ...v, id: this.newId("visit") }));
+    for (const w of written) {
+      this.visits.push(w);
+      this.keepVisit(w, "created");
+    }
+    this.wrote(patientId);
+    this.activate(patientId);
+    if (charge !== null) this.saveCharge(charge);
+    // The overlaps are counted with every visit of the pathway written.
+    return this.saved(written);
   }
 
   private starterTasks(patientId: string, today: Today): TaskView[] {
     const p = this.patients.find((x) => x.id === patientId);
     if (!p) refuse(NO_PATIENT, "not_found");
+    need(this.settings.starter_tasks.length > 0, "עוד אין ערכת פתיחה. אפשר להגדיר אותה בהגדרות הקליניקה.");
     const key = (t: string) => cleanLine(t).toLowerCase();
     const have = new Set(this.tasks.filter((t) => t.patient_id === patientId && t.done_on === null).map((t) => key(t.title)));
     const made: ClinicTask[] = [];
@@ -1470,6 +1493,8 @@ export class FakeClinic {
     need(whole(s.report_days, 0, 65_535) && whole(s.debt_days, 0, 65_535) && whole(s.waiting_weeks, 0, 65_535), "מספר הימים או השבועות לא תקין.");
     s.package_name = cleanLine(s.package_name);
     s.starter_tasks = s.starter_tasks.map((t) => ({ ...t, title: cleanLine(t.title) }));
+    // The first step is on the day she starts from (D-198): it has no gap.
+    s.pathway = s.pathway.map((step, i) => (i === 0 ? { ...step, gap_days: 0 } : step));
     need(whole(s.buffer_minutes, 0, 120), "הזמן הפנוי בין פגישות יכול להיות עד 120 דקות.");
     need(whole(s.package_fee, 0, MAX_AGOROT), "מחיר הפגישה צריך להיות בין 0 ל-100,000 ₪.");
     short(s.package_name, "שם החבילה");

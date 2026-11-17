@@ -64,6 +64,9 @@ describe("the pure pieces", () => {
     const alert = (kind: Alert["kind"], since: string): Alert => ({ kind, patient_id: null, patient_name: null, visit_id: null, task_id: null, text: "", since });
     const groups = alertGroups([alert("debt", "2026-10-01"), alert("no_note", "2026-10-05"), alert("debt", "2026-10-09"), alert("unmarked", "2026-11-01")]);
     expect(groups.map((g) => [g.kind, g.alerts.map((a) => a.since)])).toEqual([["unmarked", ["2026-11-01"]], ["no_note", ["2026-10-05"]], ["debt", ["2026-10-01", "2026-10-09"]]]);
+    // Missing questionnaires come right after the feedback meeting they are for, as the core ranks them.
+    const soon = alertGroups([alert("waiting", "2026-09-01"), alert("debt", "2026-10-01"), alert("materials_missing", "2026-11-10"), alert("feedback_soon", "2026-11-10")]);
+    expect(soon.map((g) => g.kind)).toEqual(["feedback_soon", "materials_missing", "debt", "waiting"]);
   });
 
   it("offers the six follow-ups of an assessment clinic", () => {

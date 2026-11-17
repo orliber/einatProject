@@ -527,10 +527,14 @@ fn records_are_stored_clean() {
         "גן".to_owned(),
     ];
     s.note_templates[0].name = "  היכרות ".to_owned();
+    s.pathway[0].gap_days = 7;
+    s.pathway[1].gap_days = 0;
     let s = normalize_settings(s);
     assert_eq!(s.work_days, [0, 2, 4]);
     assert_eq!(s.places, ["הקליניקה", "גן"]);
     assert_eq!(s.note_templates[0].name, "היכרות");
+    // The first step is on the day she starts from: it keeps no gap. The others keep theirs.
+    assert_eq!((s.pathway[0].gap_days, s.pathway[1].gap_days), (0, 0));
     assert!(validate_settings(&s).is_ok());
 }
 

@@ -247,23 +247,26 @@ minutes, count, skip_visit)`: up to `SLOT_SEARCH_DAYS` (120) ahead from the late
 today (today, not before her minute), on `work_days` not closed (when `settings.holidays`),
 within `day_start..day_end`, starts on the quarter hour, clear of every visit that is not
 cancelled by `buffer_minutes` (0–120) on each side, at most `SLOTS_PER_DAY` (3) non-overlapping
-a day, `count` 1–12. `propose_pathway`: each `settings.pathway` step (≤ 12, not a block, gap
-0–180) at the first free time on or after the previous step's date + its gap (at least the next
-day), the kind's minutes, the patient's fee (or the kind's), the first place; never saved by
-itself. `SavePathway` takes only new planned visits of that patient, not before today (≤ 12),
-and with `package` (needs `package_fee` > 0) sets each fee to 0 and adds one charge
-(`package_name`, dated the first visit) in the same transaction (`Vault::clinic_put_groups`,
-`created` history for each). `starter_tasks(settings, patient_id, open, today)`: one task per
+a day, `count` 1–12. `propose_pathway`: the first `settings.pathway` step at the first free time
+from `from` (its gap is unused; `normalize_settings` keeps it 0), each later step (≤ 12, not a
+block, gap 0–180) on or after the previous step's date + its gap (at least the next day), the
+kind's minutes, the patient's fee (or the kind's), the first place; never saved by itself. The
+core reads the visits for Σ(max(gap, 1) + 120) days, as far as the last step can reach.
+`SavePathway` takes only new planned visits of that patient, not before today (≤ 12), and with
+`package` (needs `package_fee` > 0) sets each fee to 0 and adds one charge (`package_name`,
+dated the first visit) in the same transaction (`Vault::clinic_put_groups`, `created` history for
+each); every check, the waiting card's activation included, runs before that transaction. `starter_tasks(settings, patient_id, open, today)`: one task per
 `settings.starter_tasks` (≤ 20, title ≤ 200, due 0–365 days), skipping a title (case and spaces
-ignored) already open for the patient; refused when none is left. Alert `MaterialsMissing`: a
+ignored) already open for the patient; refused when none is left, or when the kit is empty. Alert `MaterialsMissing`: a
 planned Feedback within `FEEDBACK_SOON_DAYS` while Questionnaire/Document tasks of the patient
 are open; the text gives their number only.
 
 Insights (D-200, `clinic/insights.rs`): `insights(records, settings, from_month, to_month,
 today, tally, cards)` over whole months (≤ 24). Totals (held, cancelled, no-show, by kind,
-charged, received, new patients, by method) come from `income_year` + `income_with_erased`, so
-they equal the yearly summary; weekday, occupancy, cycle times, referrals and debt ageing are of
-existing cards only. No field carries a name, an id or her text.
+charged, received, new patients, by method, finished assessments) come from `income_year` +
+`income_with_erased`, so they equal the yearly summary; weekday, occupancy (working days as
+`free_slots` counts them, holidays closed only when `settings.holidays`), cycle times, referrals
+and debt ageing are of existing cards only. No field carries a name, an id or her text.
 
 Messages: placeholders `{הורה} {ילד} {יום} {תאריך} {שעה} {מקום} {סכום} {שמי}`; a missing parent
 name becomes "רב" ("שלום רב"); the date is `15.11.2026`, the time `09:30`, the day `ראשון`.
@@ -337,7 +340,7 @@ preview answers with a path and the core's file name, and writes and downloads n
 ## תכנון ותמונת מצב (D-196 עד D-200)
 - **חגי ישראל ביומן.** מחושבים במחשב מהלוח העברי, בלי רשת. ימי חג מסומנים ומוצללים, ולא מוצעות בהם שעות; ערבי חג, חול המועד, חנוכה, פורים וימי הזיכרון מופיעים בשמם. אפשר לכבות בהגדרות.
 - **שעות פנויות.** בחלון פגישה, "להציע שעות פנויות" מראה את השעות הראשונות שמתאימות לאורך הפגישה: בימי העבודה, בשעות היומן, בלי ימי חג, ובמרחק שעינת קבעה מכל פגישה אחרת.
-- **מסלול אבחון.** בכרטיס וברשימת ההמתנה, "לקבוע את כל המסלול" מציע את כל פגישות האבחון (לפי השלבים שבהגדרות) בשעות הפנויות הראשונות. עינת רואה ומשנה, ורק אז שומרת, הכל יחד. עם מחיר חבילה בהגדרות אפשר לחייב את האבחון כחבילה: חיוב אחד, והפגישות בלי מחיר.
+- **מסלול אבחון.** בכרטיס וברשימת ההמתנה, "לקבוע את כל המסלול" מציע את כל פגישות האבחון (לפי השלבים שבהגדרות) בשעות הפנויות הראשונות: השלב הראשון מהיום שבוחרים, וכל שלב אחריו לפחות כמה ימים אחרי השלב שלפניו. עינת רואה ומשנה, ורק אז שומרת, הכל יחד. עם מחיר חבילה בהגדרות אפשר לחייב את האבחון כחבילה: חיוב אחד, והפגישות בלי מחיר.
 - **ערכת פתיחה.** בלחיצה אחת בכרטיס נפתחים השאלונים והמסמכים שמבקשים מכל משפחה, כמעקבים עם תאריך יעד. שבוע לפני שיחת המשוב, מה שעוד פתוח מופיע ב"מה דורש אותי" (כמה, לא מה).
 - **תמונת מצב.** לשונית עם המגמות של טווח חודשים: פגישות, ביטולים ואי-הגעות, תפוסה, משך האבחון, הפניות, כסף וחובות לפי ותק. מספרים בלבד, בלי שמות.
 

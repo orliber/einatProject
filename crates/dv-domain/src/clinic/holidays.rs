@@ -214,15 +214,17 @@ fn year_holidays(year: i64) -> Vec<Day> {
     add(on(Tishrei, 21), "הושענא רבה", false);
     add(on(Tishrei, 22), "שמיני עצרת ושמחת תורה", true);
 
-    // The day after the evening of the nth candle; it runs into Tevet.
-    let hanukkah = on(Kislev, 25);
+    // Candle n on the day whose evening lights it, as the eves above are marked on their
+    // day (the first on 24 Kislev), then the eighth day; it runs into Tevet.
+    let first_candle = on(Kislev, 24);
     for candle in 1..=8 {
         add(
-            hanukkah + candle - 1,
+            first_candle + candle - 1,
             &format!("חנוכה (נר {candle})"),
             false,
         );
     }
+    add(first_candle + 8, "חנוכה (יום אחרון)", false);
     add(on(Shevat, 15), "ט\"ו בשבט", false);
 
     // A fast is never on Shabbat: Esther's moves back to Thursday, Av's on to Sunday.
@@ -325,9 +327,13 @@ mod tests {
         has("2026-04-08", "שביעי של פסח");
         has("2025-06-02", "שבועות");
         has("2026-05-22", "שבועות");
-        has("2025-12-15", "חנוכה (נר 1)");
-        has("2025-12-22", "חנוכה (נר 8)");
-        has("2026-12-05", "חנוכה (נר 1)");
+        // The first candle is lit on the evening of 2025-12-14, the eighth on 2025-12-21.
+        has("2025-12-14", "חנוכה (נר 1)");
+        has("2025-12-15", "חנוכה (נר 2)");
+        has("2025-12-21", "חנוכה (נר 8)");
+        has("2025-12-22", "חנוכה (יום אחרון)");
+        has("2026-12-04", "חנוכה (נר 1)");
+        has("2026-12-12", "חנוכה (יום אחרון)");
         // 2024 is a leap year: Purim in Adar II, and the fast moved off Shabbat to Thursday.
         has("2024-03-24", "פורים");
         has("2024-03-21", "תענית אסתר");
@@ -418,7 +424,10 @@ mod tests {
         // From the eve of Rosh Hashana 5787 to the end of Hanukkah, which ends in Tevet.
         let all = holidays_between("2026-09-11", "2026-12-12");
         assert_eq!(all.first().map(|h| h.name.as_str()), Some("ערב ראש השנה"));
-        assert_eq!(all.last().map(|h| h.name.as_str()), Some("חנוכה (נר 8)"));
+        assert_eq!(
+            all.last().map(|h| h.name.as_str()),
+            Some("חנוכה (יום אחרון)")
+        );
         assert_eq!(all.iter().filter(|h| h.closed).count(), 5);
         // Hanukkah 5788 runs from December 2027 into January 2028.
         let hanukkah = holidays_between("2027-12-01", "2028-01-31");
@@ -427,10 +436,11 @@ mod tests {
                 .iter()
                 .filter(|h| h.name.starts_with("חנוכה"))
                 .count(),
-            8
+            9
         );
         // A stretch inside January still finds the Hebrew year that began the autumn before.
-        assert_eq!(names_on("2028-01-01"), ["חנוכה (נר 8)"]);
+        assert_eq!(names_on("2027-12-31"), ["חנוכה (נר 8)"]);
+        assert_eq!(names_on("2028-01-01"), ["חנוכה (יום אחרון)"]);
         // The first and last days of the range.
         assert!(!holidays_between("2000-01-01", "2000-12-31").is_empty());
         assert!(!holidays_between("2200-01-01", "2200-12-31").is_empty());

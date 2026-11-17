@@ -189,6 +189,11 @@
 .clinic-step-remove {
   align-self: center;
 }
+/* The first step has no gap: it is on the day she starts from. */
+.clinic-step-first {
+  margin: 0;
+  align-self: center;
+}
 .clinic-package {
   margin-top: 6px;
 }

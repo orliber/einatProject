@@ -42,8 +42,9 @@ const TALLY_ID: &str = "tally";
 const CREATED: &str = "created";
 /// The longest stretch of holidays one request may ask for, in days after the first.
 const HOLIDAY_RANGE_DAYS: i64 = 400;
-/// How far ahead the visits are read when a pathway is proposed, in days.
-const PATHWAY_LOOK_DAYS: i64 = 730;
+/// The furthest the visits are read when a pathway is proposed, in days: what the longest
+/// pathway `validate_pathway` allows can reach, 12 steps of a 180-day gap and a 120-day search.
+const PATHWAY_LOOK_DAYS: i64 = 12 * (180 + 120);
 const CHANGED: &str = "changed";
 const VOIDED: &str = "voided";
 
@@ -756,10 +757,15 @@ impl Core {
         let v = self.vault_ref()?;
         let child = patient(v, patient_id)?;
         let settings = settings(v);
-        // Every step may look as far ahead as one search does.
-        let steps = i64::try_from(settings.pathway.len()).unwrap_or(i64::MAX);
-        let span = rules::SLOT_SEARCH_DAYS.saturating_mul(steps.max(1));
-        let visits = self.visits_ahead(today, from, span.min(PATHWAY_LOOK_DAYS))?;
+        // As far as the rule can reach: every step its gap (at least a day) and one search,
+        // at most 12 × (180 + 120) days, as `validate_pathway` bounds the steps.
+        let span = settings
+            .pathway
+            .iter()
+            .map(|step| i64::from(step.gap_days.max(1)) + rules::SLOT_SEARCH_DAYS)
+            .sum::<i64>()
+            .clamp(rules::SLOT_SEARCH_DAYS, PATHWAY_LOOK_DAYS);
+        let visits = self.visits_ahead(today, from, span)?;
         let proposed =
             rules::propose_pathway(&visits, &settings, &child, today, from).map_err(refusal)?;
         Ok(ClinicReply::Proposed(proposed))
@@ -783,6 +789,7 @@ impl Core {
         }
         let v = self.vault_ref()?;
         patient_exists(v, patient_id)?;
+        let child = patient(v, patient_id)?;
         let settings = settings(v);
         let mut rows = Vec::with_capacity(visits.len());
         for visit in visits {
@@ -828,6 +835,12 @@ impl Core {
         } else {
             None
         };
+        // A family on the waiting list that gets a visit is in the process now. The card is
+        // checked before anything is written, so that a refusal leaves nothing behind.
+        let activated = rules::activated(&child);
+        if let Some(active) = &activated {
+            rules::patient_known(active).map_err(refusal)?;
+        }
         let put = |row: &dyn Fn() -> Result<String, CoreError>, patient: &str, day: i64| {
             Ok::<_, CoreError>((None, Some(patient.to_owned()), day, row()?))
         };
@@ -847,10 +860,8 @@ impl Core {
             .vault_mut()?
             .clinic_put_groups(&groups, Some(CREATED))?;
         let ids: Vec<String> = ids.into_iter().next().unwrap_or_default();
-        // A family on the waiting list that gets a visit is in the process now.
-        let v = self.vault_mut()?;
-        if let Some(mut active) = rules::activated(&patient(v, patient_id)?) {
-            write_patient(v, &mut active)?;
+        if let Some(mut active) = activated {
+            write_patient(self.vault_mut()?, &mut active)?;
         }
         let book = Book::load(self.vault_ref()?)?;
         let written: Vec<Visit> = book
@@ -878,6 +889,9 @@ impl Core {
         let v = self.vault_ref()?;
         let child = patient(v, patient_id)?;
         let settings = settings(v);
+        if settings.starter_tasks.is_empty() {
+            return refuse("עוד אין ערכת פתיחה. אפשר להגדיר אותה בהגדרות הקליניקה.");
+        }
         let tasks: Vec<ClinicTask> = all(v)?;
         let new = rules::starter_tasks(&settings, patient_id, &tasks, &today.date);
         if new.is_empty() {

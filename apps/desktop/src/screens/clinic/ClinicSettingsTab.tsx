@@ -108,7 +108,8 @@ export function fromDraft(d: SettingsDraft): { settings: ClinicSettings } | { pr
   for (const [i, step] of d.pathway.entries()) {
     const gap = wholeNumber(step.gap);
     if (gap === null) return { problem: `הרווח בשלב ${i + 1} של מסלול האבחון צריך להיות מספר של ימים, למשל 7.` };
-    pathway.push({ kind: step.kind, gap_days: gap });
+    // The first step is on the day she starts from (D-198): it has no gap.
+    pathway.push({ kind: step.kind, gap_days: i === 0 ? 0 : gap });
   }
   const packageFee = d.packageFee.trim() === "" ? 0 : parseMoney(d.packageFee);
   if (packageFee === null) return { problem: "המחיר של חבילת האבחון צריך להיות סכום בשקלים, למשל 4500, עד 100,000. ריק: בלי חבילה." };
@@ -289,8 +290,8 @@ function SettingsForm({ stored }: { stored: ClinicSettings }) {
 
       <Section title="מסלול האבחון" aside={<span className="muted small">{draft.pathway.length === 1 ? "שלב אחד" : `${draft.pathway.length} שלבים`}</span>}>
         <p className="hint clinic-quiet">
-          השלבים שהתוכנה קובעת בלחיצה אחת מכרטיס המטופל: כל שלב בשעה הפנויה הראשונה, לפחות כמה ימים אחרי השלב שלפניו.
-          לפני השמירה רואים את כל הפגישות, ואפשר לשנות כל אחת.
+          השלבים שהתוכנה קובעת בלחיצה אחת מכרטיס המטופל: השלב הראשון בשעה הפנויה הראשונה מהיום שבוחרים, וכל שלב אחריו
+          לפחות כמה ימים אחרי השלב שלפניו (לפחות יום אחד). לפני השמירה רואים את כל הפגישות, ואפשר לשנות כל אחת.
         </p>
         {draft.pathway.length === 0 && <p className="muted clinic-quiet">עוד אין שלבים במסלול.</p>}
         <ol className="clinic-list clinic-steps" aria-label="שלבי מסלול האבחון, לפי הסדר">
@@ -298,8 +299,10 @@ function SettingsForm({ stored }: { stored: ClinicSettings }) {
             <li key={i}><div className="clinic-step" role="group" aria-label={`שלב ${i + 1}: ${VISIT_KIND_LABEL[step.kind]}`}>
               <span className="clinic-step-num num" aria-hidden="true">{i + 1}</span>
               <SelectField id={`settings-step-${i}-kind`} label="סוג הפגישה" value={step.kind} options={stepKinds} onChange={(kind) => setStep(i, { kind })} />
-              <TextField id={`settings-step-${i}-gap`} label={i === 0 ? "ימים מהיום שבוחרים" : "ימים אחרי השלב הקודם"} value={step.gap} maxLength={3} dir="ltr"
-                inputMode="numeric" className="clinic-narrow" onChange={(gap) => setStep(i, { gap })} />
+              {i === 0
+                ? <p className="clinic-step-first muted small">מהיום שבוחרים</p>
+                : <TextField id={`settings-step-${i}-gap`} label="ימים אחרי השלב הקודם" value={step.gap} maxLength={3} dir="ltr"
+                  inputMode="numeric" className="clinic-narrow" onChange={(gap) => setStep(i, { gap })} />}
               <div className="row clinic-place-actions">
                 <button type="button" className="btn btn-small" disabled={i === 0} aria-label={`להעלות את שלב ${i + 1}`} onClick={() => set({ pathway: moved(draft.pathway, i, -1) })}>למעלה</button>
                 <button type="button" className="btn btn-small" disabled={i === draft.pathway.length - 1} aria-label={`להוריד את שלב ${i + 1}`} onClick={() => set({ pathway: moved(draft.pathway, i, 1) })}>למטה</button>

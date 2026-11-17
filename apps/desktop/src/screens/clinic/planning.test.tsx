@@ -55,6 +55,29 @@ describe("planning from a card", () => {
     expect(card.visits.length).toBe(before + 4);
     expect(card.patient.status).toBe("active");
   });
+
+  it("asks for a start day when the box is empty, and offers nothing to save", async () => {
+    const { user } = await openCard("עומר");
+    await user.click(await screen.findByRole("button", { name: "לקבוע את כל המסלול" }));
+    const dialog = await screen.findByRole("dialog", { name: /לקבוע את מסלול האבחון/ });
+    await within(dialog).findByRole("list", { name: "פגישות המסלול" });
+    await user.clear(within(dialog).getByLabelText("מתחילים מיום"));
+    expect(await within(dialog).findByText(/צריך לכתוב את היום שמתחילים ממנו/)).toBeInTheDocument();
+    expect(within(dialog).queryByRole("list", { name: "פגישות המסלול" })).toBeNull();
+    expect(within(dialog).getByRole("button", { name: "לקבוע" })).toBeDisabled();
+  });
+
+  it("writes none of the pathway when one of its visits is refused", async () => {
+    const { id, ...served } = await openCard("עומר");
+    const before = await cardOf(served, id);
+    const visits = await ask(served, { op: "propose_pathway", patient_id: id, today: NOW, from: "2026-11-16" }, "proposed");
+    // A year the clinic does not keep, on the third visit only.
+    const bad = visits.map((v, i) => (i === 2 ? { ...v, date: "2300-01-01" } : v));
+    await expect(ask(served, { op: "save_pathway", patient_id: id, visits: bad, package: false, today: NOW }, "saved")).rejects.toBeTruthy();
+    const after = await cardOf(served, id);
+    expect(after.visits.length).toBe(before.visits.length);
+    expect(after.patient.status).toBe(before.patient.status);
+  });
 });
 
 describe("free times and holidays", () => {
@@ -69,6 +92,23 @@ describe("free times and holidays", () => {
     const hour = /בשעה (\d\d:\d\d)/.exec(label)?.[1] ?? "?";
     await user.click(first);
     expect(within(dialog).getByLabelText("שעת התחלה")).toHaveValue(hour);
+  });
+
+  it("a free time on another day shows its date in the date box", async () => {
+    const { user } = await openCard("נועם");
+    await user.click((await screen.findAllByRole("button", { name: /פגישה חדשה/ }))[0] as HTMLElement);
+    const dialog = await screen.findByRole("dialog", { name: "פגישה חדשה" });
+    const shown = (within(dialog).getByLabelText("תאריך") as HTMLInputElement).value;
+    await user.click(await within(dialog).findByRole("button", { name: "להציע שעות פנויות" }));
+    const offer = await within(dialog).findByRole("group", { name: "שעות פנויות ביומן" });
+    const slots = await within(offer).findAllByRole("button", { name: /בשעה/ });
+    const other = slots.find((b) => !(b.getAttribute("aria-label") ?? "").includes(shown));
+    const date = /(\d\d\.\d\d\.\d{4})/.exec(other?.getAttribute("aria-label") ?? "")?.[1];
+    expect(date).toBeDefined();
+    await user.click(other as HTMLElement);
+    expect(within(dialog).getByLabelText("תאריך")).toHaveValue(date);
+    // The keyboard stays with the free times, not thrown back to the top of the form.
+    expect(document.activeElement).toBe(within(dialog).getByRole("group", { name: "שעות פנויות ביומן" }));
   });
 
   it("names the holidays in the calendar's days", async () => {

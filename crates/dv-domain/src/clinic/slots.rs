@@ -52,7 +52,7 @@ fn busy_span(visit: &Visit, buffer: u16) -> (u32, u32) {
 
 /// Whether the clinic works on this date: one of her working days, and not a day closed for
 /// a holiday (when she has the holidays on).
-fn working_day(date: &str, settings: &ClinicSettings) -> bool {
+pub(super) fn working_day(date: &str, settings: &ClinicSettings) -> bool {
     weekday(date).is_some_and(|day| settings.work_days.contains(&day))
         && !(settings.holidays && closed_day(date))
 }

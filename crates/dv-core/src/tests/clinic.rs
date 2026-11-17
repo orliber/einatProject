@@ -4354,6 +4354,101 @@ fn the_starter_kit_opens_its_follow_ups_once() {
     let text = refused(&mut core, request());
     assert!(text.contains("כבר פתוחים"), "{text}");
     assert_eq!(card(&mut core, &yoav.id).tasks.len(), 4);
+    // With no follow-ups in the kit, she is sent to the settings, not told they are open.
+    let settings = ClinicSettings {
+        starter_tasks: Vec::new(),
+        ..ClinicSettings::default()
+    };
+    ask(&mut core, ClinicRequest::SaveSettings { settings });
+    let tamar = new_patient(&mut core, "תמר בדויה");
+    let text = refused(
+        &mut core,
+        ClinicRequest::StarterTasks {
+            patient_id: tamar.id.clone(),
+            today: now(),
+        },
+    );
+    assert!(text.contains("עוד אין ערכת פתיחה"), "{text}");
+    assert!(card(&mut core, &tamar.id).tasks.is_empty());
+}
+
+#[test]
+fn a_long_pathway_sees_the_visits_as_far_as_its_last_step() {
+    let (_d, mut core) = open_clinic();
+    let settings = ClinicSettings {
+        pathway: [
+            (VisitKind::Intake, 0),
+            (VisitKind::Assessment, 180),
+            (VisitKind::Assessment, 180),
+            (VisitKind::Feedback, 180),
+        ]
+        .into_iter()
+        .map(|(kind, gap_days)| rules::PathwayStep { kind, gap_days })
+        .collect(),
+        ..ClinicSettings::default()
+    };
+    ask(&mut core, ClinicRequest::SaveSettings { settings });
+    let yoav = new_patient(&mut core, "יואב בדוי");
+    let first = proposed(&mut core, &yoav, "2026-11-16");
+    let last = first.last().unwrap().clone();
+    // More than a year and a half ahead, further than four searches of 120 days.
+    assert!(
+        rules::day_number(&last.date).unwrap() - rules::day_number("2026-11-16").unwrap() > 480
+    );
+    // Time she keeps for herself at that hour: the feedback goes around it.
+    save_visit(
+        &mut core,
+        Visit {
+            kind: VisitKind::Block,
+            title: "כתיבת דוחות".to_owned(),
+            date: last.date.clone(),
+            start: last.start,
+            minutes: 60,
+            ..Visit::default()
+        },
+    );
+    let again = proposed(&mut core, &yoav, "2026-11-16");
+    let moved = again.last().unwrap();
+    assert_ne!((&moved.date, moved.start), (&last.date, last.start));
+}
+
+#[test]
+fn a_pathway_for_a_card_that_cannot_be_moved_on_writes_nothing() {
+    let (_d, mut core) = open_clinic();
+    let mut waiting = child("יואב בדוי");
+    waiting.status = PatientStatus::Waiting;
+    waiting.waiting_since = Some("2026-10-01".to_owned());
+    let yoav = save_patient(&mut core, waiting);
+    let settings = ClinicSettings {
+        package_fee: 600_000,
+        ..ClinicSettings::default()
+    };
+    ask(&mut core, ClinicRequest::SaveSettings { settings });
+    let visits = proposed(&mut core, &yoav, "2026-11-16");
+    // A role of a later version on the card (D-178): it reads, and this version may not write it.
+    let json = serde_json::to_string(&yoav)
+        .unwrap()
+        .replace(r#""role":"mother""#, r#""role":"grandmother""#);
+    assert!(json.contains("grandmother"));
+    core.vault_mut()
+        .unwrap()
+        .save_clinic_patient(Some(&yoav.id), &json)
+        .unwrap();
+    let text = refused(
+        &mut core,
+        ClinicRequest::SavePathway {
+            patient_id: yoav.id.clone(),
+            visits,
+            package: true,
+            today: now(),
+        },
+    );
+    assert!(text.contains("הקשר לילד"), "{text}");
+    let mine = card(&mut core, &yoav.id);
+    assert_eq!(
+        (mine.visits.len(), mine.charges.len(), mine.patient.status),
+        (0, 0, PatientStatus::Waiting)
+    );
 }
 
 #[test]
