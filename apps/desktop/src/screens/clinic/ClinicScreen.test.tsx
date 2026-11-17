@@ -605,6 +605,7 @@ describe("the visit dialog", () => {
     // The down arrow opens it on the first name; the arrows mark a name and the focus stays in the field.
     await user.keyboard("{ArrowDown}");
     await waitFor(() => expect(list()).not.toBeNull());
+    expect(list()).toHaveAttribute("tabindex", "-1"); // Tab goes on to the next field, also when the list scrolls
     const [first, second] = options();
     expect(field).toHaveAttribute("aria-activedescendant", first?.id);
     await user.keyboard("{ArrowDown}");
@@ -615,23 +616,33 @@ describe("the visit dialog", () => {
     await user.keyboard("{ArrowUp}{ArrowUp}");
     expect(marked()).toEqual([]);
     expect(field).not.toHaveAttribute("aria-activedescendant");
-    // Every letter narrows it at once; Enter on the marked name chooses it and does not send the form.
+    // Enter while the list is open never sends the form: with nothing marked it marks the first name.
+    await user.keyboard("{Enter}");
+    expect(marked()).toEqual([first?.textContent]);
+    expect(within(dialog).queryByRole("alert")).toBeNull();
+    // Every letter narrows it at once; Enter on the one name left chooses it, and the keyboard is on "החלפה".
     await user.type(field, "אית");
     expect(names()).toEqual(["איתי"]);
-    await user.keyboard("{ArrowDown}{Enter}");
+    await user.keyboard("{Enter}");
     expect(within(dialog).getByRole("group", { name: "מטופל" })).toHaveTextContent("איתי");
     expect(list()).toBeNull();
     expect(within(dialog).queryByRole("alert")).toBeNull();
     expect(screen.getByRole("dialog", { name: "פגישה חדשה" })).toBeInTheDocument();
-    // "החלפה" starts the search again from an empty field.
-    await user.click(within(dialog).getByRole("button", { name: "החלפה" }));
+    expect(within(dialog).getByRole("button", { name: "החלפה" })).toHaveFocus();
+    // "החלפה" starts the search again from an empty field, with the keyboard in it.
+    await user.keyboard("{Enter}");
     const again = within(dialog).getByRole("combobox", { name: "מטופל" });
     expect(again).toHaveValue("");
+    expect(again).toHaveFocus();
     await user.type(again, "מא");
     expect(names()).toEqual(["מאיה"]);
     // Leaving the field closes the list too.
     await user.click(within(dialog).getByLabelText("כותרת (לא חובה)"));
     expect(list()).toBeNull();
+    // Back in it, the arrow marks the name and Enter chooses it.
+    await user.click(again);
+    await user.keyboard("{ArrowDown}{Enter}");
+    expect(within(dialog).getByRole("group", { name: "מטופל" })).toHaveTextContent("מאיה");
   });
 
   it("time she keeps for herself has no patient and no fee, and can repeat", async () => {

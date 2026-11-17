@@ -133,7 +133,12 @@ describe("the follow-ups tab", () => {
 
     await user.click(within(form).getByRole("button", { name: "לשייך לילד או לילדה (לא חובה)" }));
     await user.type(within(form).getByLabelText("מטופל"), "תמ");
-    await user.click(await within(form).findByRole("option", { name: "תמר" }));
+    await within(form).findByRole("option", { name: "תמר" });
+    // Enter on the one name left chooses her, and does not send the line without her.
+    await user.keyboard("{Enter}");
+    expect(within(form).getByRole("group", { name: "מטופל" })).toHaveTextContent("תמר");
+    expect(within(form).getByRole("button", { name: "החלפה" })).toHaveFocus();
+    expect(requests().some((r) => r.op === "save_task")).toBe(false);
     expect(await a11yViolations(view.container)).toEqual([]);
     await user.click(within(form).getByRole("button", { name: "הוספה" }));
 

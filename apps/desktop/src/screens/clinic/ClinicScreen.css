@@ -437,6 +437,10 @@
 .clinic-picker-list > .clinic-picker-row:first-child {
   border-top: 0;
 }
+/* A long name on two lines keeps its row's height; the list scrolls instead. */
+.clinic-picker-list > .clinic-picker-row {
+  flex-shrink: 0;
+}
 .clinic-picker-row:hover {
   background: var(--surface-alt);
 }
@@ -447,6 +451,13 @@
 }
 [dir="rtl"] .clinic-picker-row[aria-selected="true"] {
   box-shadow: inset -3px 0 0 var(--primary);
+}
+/* A Windows contrast theme drops the background and the stripe: a frame in its own colour. */
+@media (forced-colors: active) {
+  .clinic-picker-row[aria-selected="true"] {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
 }
 .clinic-overlap {
   margin-bottom: var(--space-3);

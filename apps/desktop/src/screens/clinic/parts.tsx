@@ -451,9 +451,10 @@ const PICKER_ROWS = 8;
  * Escape or moved on (Einat, 2026-11-17: the list as wide as the window was heavy on the eye).
  * The focus stays in the field: the arrows mark a name, Enter or a click chooses it (a combobox,
  * so a screen reader says how many names there are and which one is marked). The list follows
- * every letter; families whose work ended are offered only when she searches for them. Once one
- * is chosen the field shows the name, with "החלפה" beside it, and starts empty again after it;
- * `locked`: the name only, for a record that stays on its card.
+ * every letter; families whose work ended are offered only when she searches for them. Enter
+ * while the list is open never sends the form: one name left is chosen, otherwise the first is marked.
+ * Once one is chosen the field shows the name, with "החלפה" beside it (the focus moves there), and
+ * the field starts empty again after it; `locked`: the name only, for a record that stays on its card.
  */
 export function PatientPicker({ id, value, onChange, autoFocus = false, locked = false }: {
   id: string; value: string | null; onChange: (patientId: string | null) => void; autoFocus?: boolean; locked?: boolean;
@@ -463,6 +464,9 @@ export function PatientPicker({ id, value, onChange, autoFocus = false, locked =
   const [text, setText] = useState("");
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(-1);
+  // Where the keyboard goes when the field and the chosen name swap places (the one that had the
+  // focus is gone): to "החלפה" after a choice, back to the field after "החלפה".
+  const [moved, setMoved] = useState<"chose" | "change" | null>(null);
   const all = rows.data ?? [];
   const chosenName = value === null ? undefined : all.find((r) => r.patient.id === value)?.patient.name;
   const query = text.trim();
@@ -485,7 +489,7 @@ export function PatientPicker({ id, value, onChange, autoFocus = false, locked =
         <span className="label" id={`${id}-label`}>מטופל</span>
         <span className="row clinic-picked" role="group" aria-labelledby={`${id}-label`}>
           {rows.isPending ? <span className="muted">טוען…</span> : <PatientName name={chosenName} strong />}
-          {!locked && <button type="button" className="link-btn" onClick={() => onChange(null)}>החלפה</button>}
+          {!locked && <button type="button" className="link-btn" autoFocus={moved === "chose"} onClick={() => { setMoved("change"); onChange(null); }}>החלפה</button>}
         </span>
       </div>
     );
@@ -494,10 +498,12 @@ export function PatientPicker({ id, value, onChange, autoFocus = false, locked =
     setOpen(false);
     setActive(-1);
     setText("");
+    setMoved("chose");
     onChange(patientId);
   };
   const shown = open && !rows.isPending && matches.length > 0;
   const keys = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.nativeEvent.isComposing) return;
     if (e.key === "Escape" && open) {
       // Closes the list and leaves the window open.
       e.stopPropagation();
@@ -514,16 +520,18 @@ export function PatientPicker({ id, value, onChange, autoFocus = false, locked =
       } else {
         setActive(marked - 1); // up from the first name: back to what she typed, nothing marked
       }
-    } else if (e.key === "Enter" && shown && marked >= 0) {
+    } else if (e.key === "Enter" && shown) {
+      // Not the form's Enter: a follow-up or a visit is not saved without the child she was looking for.
       e.preventDefault();
-      const r = matches[marked];
+      const r = marked >= 0 ? matches[marked] : matches.length === 1 ? matches[0] : undefined;
       if (r) choose(r.patient.id);
+      else setActive(0);
     }
   };
   return (
     <div className="field clinic-picker">
       <label htmlFor={id}>מטופל</label>
-      <input id={id} className="input" value={text} placeholder="חיפוש לפי שם" autoFocus={autoFocus} autoComplete="off"
+      <input id={id} className="input" value={text} placeholder="חיפוש לפי שם" autoFocus={autoFocus || moved === "change"} autoComplete="off"
         role="combobox" aria-autocomplete="list" aria-expanded={shown}
         aria-controls={shown ? `${id}-list` : undefined} aria-activedescendant={shown && marked >= 0 ? optionId(marked) : undefined}
         aria-describedby={open && !shown ? `${id}-results` : undefined}
@@ -535,7 +543,8 @@ export function PatientPicker({ id, value, onChange, autoFocus = false, locked =
           {rows.isPending ? <Skeleton lines={2} label="טוען את המטופלים" />
             : matches.length === 0 ? <p className="hint" role="status">{all.length === 0 ? "עוד אין מטופלים בקליניקה. אפשר להוסיף מטופל, ואז לקבוע לו פגישה." : "לא נמצא מטופל בשם הזה."}</p>
             : (
-              <ul id={`${id}-list`} role="listbox" className="clinic-list clinic-picker-list" aria-label="מטופלים לבחירה">
+              // Not a stop for Tab (a list that scrolls would be one): Tab goes on to the next field.
+              <ul id={`${id}-list`} role="listbox" tabIndex={-1} className="clinic-list clinic-picker-list" aria-label="מטופלים לבחירה">
                 {matches.map((r, at) => (
                   // The field keeps the keyboard; a click here is the same as Enter on a marked name.
                   <li key={r.patient.id} id={optionId(at)} role="option" aria-selected={at === marked} className="clinic-picker-row"
