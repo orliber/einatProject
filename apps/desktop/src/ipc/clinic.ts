@@ -10,6 +10,8 @@
 //   diary → diary · income → income · history → history
 //   settings, save_settings → settings · message → text
 //   case_choices → cases · link_case → patient · create_case → case
+//   holidays → holidays · free_slots → slots · propose_pathway → proposed · save_pathway → saved
+//   starter_tasks → tasks · insights → insights
 import { ipc, type UiError } from "./client";
 import type { CaseChoice } from "./generated/CaseChoice";
 import type { CaseLink } from "./generated/CaseLink";
@@ -20,6 +22,8 @@ import type { ClinicSettings } from "./generated/ClinicSettings";
 import type { ClinicTask } from "./generated/ClinicTask";
 import type { DiaryMonth } from "./generated/DiaryMonth";
 import type { HistoryEntry } from "./generated/HistoryEntry";
+import type { Holiday } from "./generated/Holiday";
+import type { Insights } from "./generated/Insights";
 import type { IncomeYear } from "./generated/IncomeYear";
 import type { MessageKind } from "./generated/MessageKind";
 import type { Overview } from "./generated/Overview";
@@ -31,6 +35,7 @@ import type { Repeat } from "./generated/Repeat";
 import type { SavedVisits } from "./generated/SavedVisits";
 import type { Scope } from "./generated/Scope";
 import type { SessionNote } from "./generated/SessionNote";
+import type { Slot } from "./generated/Slot";
 import type { TaskView } from "./generated/TaskView";
 import type { Today } from "./generated/Today";
 import type { Visit } from "./generated/Visit";
@@ -105,4 +110,21 @@ export const clinicApi = {
     ask({ op: "link_case", patient_id: patientId, case_id: caseId }, "patient"),
   createCase: (patientId: string, today: Today): Promise<CaseLink> =>
     ask({ op: "create_case", patient_id: patientId, today }, "case"),
+  /** Israel's holidays from `from` to `to` (ISO dates, both included; D-196). */
+  holidays: (from: string, to: string): Promise<Holiday[]> => ask({ op: "holidays", from, to }, "holidays"),
+  /** Free times of `minutes` from `from` on (D-197). `skipVisit`: the visit being moved. */
+  freeSlots: (today: Today, from: string, minutes: number, count: number, skipVisit: string | null = null): Promise<Slot[]> =>
+    ask({ op: "free_slots", today, from, minutes, count, skip_visit: skipVisit }, "slots"),
+  /** The assessment pathway's visits, proposed and not saved (D-198). */
+  proposePathway: (patientId: string, today: Today, from: string): Promise<Visit[]> =>
+    ask({ op: "propose_pathway", patient_id: patientId, today, from }, "proposed"),
+  /** Saves the pathway's visits; with `package`, one charge of the package and free visits. */
+  savePathway: (patientId: string, visits: Visit[], packaged: boolean, today: Today): Promise<SavedVisits> =>
+    ask({ op: "save_pathway", patient_id: patientId, visits, package: packaged, today }, "saved"),
+  /** Opens the starter follow-ups of a family (D-199). */
+  starterTasks: (patientId: string, today: Today): Promise<TaskView[]> =>
+    ask({ op: "starter_tasks", patient_id: patientId, today }, "tasks"),
+  /** The picture of the clinic over whole months (D-200). */
+  insights: (today: Today, fromMonth: string, toMonth: string): Promise<Insights> =>
+    ask({ op: "insights", today, from_month: fromMonth, to_month: toMonth }, "insights"),
 };

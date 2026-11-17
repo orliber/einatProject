@@ -4395,3 +4395,43 @@ fn the_holidays_are_given_for_a_stretch_and_closed_days_get_no_free_time() {
     };
     assert_eq!(slots[0].date, "2026-09-22");
 }
+
+#[test]
+fn the_picture_counts_without_names() {
+    let (_d, mut core) = open_clinic();
+    let noa = new_patient(&mut core, "נועה בדויה");
+    let held = save_visit(
+        &mut core,
+        a_visit(&noa, VisitKind::Intake, "2026-11-02", 600),
+    );
+    mark(&mut core, &held, VisitStatus::Held);
+    let missed = save_visit(
+        &mut core,
+        a_visit(&noa, VisitKind::Assessment, "2026-11-09", 600),
+    );
+    mark(&mut core, &missed, VisitStatus::NoShow);
+    let picture = match ask(
+        &mut core,
+        ClinicRequest::Insights {
+            today: now(),
+            from_month: "2026-11".to_owned(),
+            to_month: "2026-11".to_owned(),
+        },
+    ) {
+        ClinicReply::Insights(picture) => picture,
+        other => panic!("{other:?}"),
+    };
+    assert_eq!((picture.held, picture.no_show), (1, 1));
+    assert_eq!(picture.no_show_rate, 500);
+    // Nothing on the screen can name anyone.
+    let json = serde_json::to_string(&picture).unwrap();
+    assert!(!json.contains("נועה"), "{json}");
+    refused(
+        &mut core,
+        ClinicRequest::Insights {
+            today: now(),
+            from_month: "2026-12".to_owned(),
+            to_month: "2026-11".to_owned(),
+        },
+    );
+}
