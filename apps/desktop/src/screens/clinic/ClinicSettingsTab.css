@@ -155,3 +155,40 @@
   flex-wrap: wrap;
   gap: var(--space-3);
 }
+
+/* The pathway's steps and the starter kit (D-198, D-199): one row each, wrapping on a narrow window. */
+.clinic-steps,
+.clinic-starter {
+  display: grid;
+  gap: 8px;
+}
+.clinic-step {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-alt);
+}
+.clinic-step .field {
+  margin: 0;
+}
+.clinic-step-num {
+  align-self: center;
+  min-width: 26px;
+  height: 26px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-weight: 600;
+}
+.clinic-step-remove {
+  align-self: center;
+}
+.clinic-package {
+  margin-top: 6px;
+}

@@ -35,6 +35,9 @@ export const clinicKeys = {
   history: (recordId: string) => ["clinic", "history", recordId] as const,
   settings: () => ["clinic", "settings"] as const,
   caseChoices: () => ["clinic", "case-choices"] as const,
+  holidays: (from: string, to: string) => ["clinic", "holidays", from, to] as const,
+  slots: (from: string, minutes: number, skip: string | null, date: string) => ["clinic", "slots", from, minutes, skip, date] as const,
+  insights: (from: string, to: string, date: string) => ["clinic", "insights", from, to, date] as const,
 };
 
 /** Her local date and minute, kept current while a clinic screen is open: at midnight "today"
@@ -103,6 +106,18 @@ export const useHistory = (recordId: string | null) =>
   useRead(clinicKeys.history(recordId ?? ""), () => clinicApi.history(recordId ?? ""), { enabled: recordId !== null });
 export const useClinicSettings = () => useRead(clinicKeys.settings(), clinicApi.settings);
 export const useCaseChoices = (enabled = true) => useRead(clinicKeys.caseChoices(), clinicApi.caseChoices, { enabled });
+/** Israel's holidays of a stretch (D-196); nothing is asked while `enabled` is false. */
+export const useHolidays = (from: string, to: string, enabled = true) =>
+  useRead(clinicKeys.holidays(from, to), () => clinicApi.holidays(from, to), { enabled });
+/** Free times of `minutes` from `from` (D-197); `from` = "" asks nothing. */
+export const useFreeSlots = (from: string, minutes: number, skip: string | null, date: string, count = 6) =>
+  useRead(clinicKeys.slots(from, minutes, skip, date), () => clinicApi.freeSlots(today(), from, minutes, count, skip), { enabled: from !== "" && minutes >= 5 && minutes <= 720 });
+/** The assessment pathway proposed for a patient from `from` (D-198); nothing is saved. */
+export const useProposedPathway = (patientId: string, from: string, date: string) =>
+  useRead(["clinic", "pathway", patientId, from, date], () => clinicApi.proposePathway(patientId, today(), from), { enabled: from !== "" });
+/** The picture of the clinic over the months `from` to `to` (D-200). */
+export const useInsights = (from: string, to: string, date: string) =>
+  useRead(clinicKeys.insights(from, to, date), () => clinicApi.insights(today(), from, to));
 
 /** Reads the clinic's data again: what "לנסות שוב" does after a read that failed. */
 export function useReloadClinic(): () => void {
@@ -149,6 +164,9 @@ export const useDeleteTask = () => useWrite((id: string) => clinicApi.deleteTask
 export const useSaveSettings = () => useWrite((settings: ClinicSettings) => clinicApi.saveSettings(settings));
 export const useLinkCase = () => useWrite((a: { patientId: string; caseId: string | null }) => clinicApi.linkCase(a.patientId, a.caseId), true);
 export const useCreateCase = () => useWrite((patientId: string) => clinicApi.createCase(patientId, today()), true);
+export const useSavePathway = () =>
+  useWrite((a: { patientId: string; visits: Visit[]; packaged: boolean }) => clinicApi.savePathway(a.patientId, a.visits, a.packaged, today()));
+export const useStarterTasks = () => useWrite((patientId: string) => clinicApi.starterTasks(patientId, today()));
 
 /**
  * A quick action that shows on screen before the vault answers (marking a visit, a task done).

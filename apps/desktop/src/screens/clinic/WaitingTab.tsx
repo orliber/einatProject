@@ -12,6 +12,7 @@ import { clinicKeys, useClinicSettings, useOptimistic, usePatients, useReloadCli
 import { CONTACT_ROLE_LABEL, daysBetween, formatDate, isIsoDate } from "./format";
 import { ConfirmDialog, EmptyState, Pager, PatientName, ReadError, useDiscreet, usePaged, useShownName } from "./parts";
 import { PatientDialog } from "./PatientDialog";
+import { PathwayDialog } from "./PathwayDialog";
 import { VisitDialog } from "./VisitDialog";
 import "./WaitingTab.css";
 
@@ -19,6 +20,7 @@ type Open =
   | { kind: "add" }
   | { kind: "edit"; patient: Patient }
   | { kind: "schedule"; patient: Patient }
+  | { kind: "pathway"; patient: Patient }
   | { kind: "remove"; patient: Patient }
   | null;
 
@@ -136,6 +138,7 @@ export function WaitingTab() {
                 </div>
                 <div className="waiting-actions" role="group" aria-label={`פעולות עבור ${who}`}>
                   <button type="button" className="btn btn-small btn-primary" onClick={() => setOpen({ kind: "schedule", patient: p })}>לקבוע פגישת היכרות</button>
+                  <button type="button" className="btn btn-small" onClick={() => setOpen({ kind: "pathway", patient: p })}>לקבוע את כל המסלול</button>
                   <button type="button" className="btn btn-small" aria-pressed={p.urgent} onClick={() => void mark({ patient: p, urgent: !p.urgent })}>
                     {p.urgent ? "להסיר את הסימון דחוף" : "לסמן כדחוף"}
                   </button>
@@ -152,6 +155,7 @@ export function WaitingTab() {
       {open?.kind === "add" && <PatientDialog waiting onClose={() => setOpen(null)} />}
       {open?.kind === "edit" && <PatientDialog patient={open.patient} onClose={() => setOpen(null)} />}
       {open?.kind === "schedule" && <VisitDialog start={{ patientId: open.patient.id, kind: "intake" }} onClose={() => setOpen(null)} />}
+      {open?.kind === "pathway" && <PathwayDialog patientId={open.patient.id} patientName={open.patient.name} onClose={() => setOpen(null)} />}
       {open?.kind === "remove" && (
         <ConfirmDialog title="להסיר מרשימת ההמתנה" action="להסיר מהרשימה" onClose={() => setOpen(null)}
           onConfirm={async () => {

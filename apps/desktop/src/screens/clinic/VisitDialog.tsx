@@ -19,6 +19,7 @@ import type { Visit } from "../../ipc/generated/Visit";
 import type { VisitKind } from "../../ipc/generated/VisitKind";
 import type { VisitStatus } from "../../ipc/generated/VisitStatus";
 import type { VisitView } from "../../ipc/generated/VisitView";
+import { FreeTimes, HolidayLine } from "./FreeTimes";
 import { useClinicSettings, useDeleteVisit, usePatients, useReloadClinic, useSaveVisit, useToday } from "./clinicData";
 import {
   addDays, formatDate, formatDateLong, formatTime, leftAloneWords, optionsWith, parseMoney, parseTime, VISIT_KIND_LABEL, VISIT_KINDS,
@@ -280,6 +281,11 @@ export function VisitDialog(props: VisitDialogProps) {
           <TextField id="visit-minutes" label="משך (דקות)" value={form.minutes} dir="ltr" inputMode="numeric" className="clinic-narrow"
             onChange={(minutes) => { setTyped((t) => ({ ...t, minutes: true })); set({ minutes }); }} />
         </div>
+        <HolidayLine date={form.date} enabled={settings.holidays} />
+        {(!existing || existing.status === "planned") && (
+          <FreeTimes from={form.date === "" ? now.date : form.date} minutes={Number(form.minutes)} skip={existing?.id ?? null} today={now.date}
+            onPick={(slot) => set({ date: slot.date, start: formatTime(slot.start) })} />
+        )}
 
         <div className="clinic-form-row">
           <TextField id="visit-place" label="מקום" value={form.place} maxLength={200} list="visit-places" className="grow" onChange={(place) => set({ place })} />

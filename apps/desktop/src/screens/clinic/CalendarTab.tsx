@@ -3,13 +3,15 @@
 // shown: the day and the week share the week's answer, the month asks for its whole page.
 // A visit is opened by pressing it; it is moved, without opening, by the buttons of the bar
 // over the grid (or Alt and the arrow keys on the visit): at once on screen, and back where it
-// was if the vault refuses. The arithmetic is in calendarLayout.ts.
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
+// was if the vault refuses. The arithmetic is in calendarLayout.ts. Israel's holidays (D-196),
+// when she has them on, are named in each day's head; a day the clinic is closed is shaded.
+import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { useApp } from "../../App";
 import { Segmented } from "../../components/Switch";
 import { Dialog, PlusIcon, Skeleton } from "../../components/ui";
 import { asUiError, ipc } from "../../ipc/client";
 import { clinicApi } from "../../ipc/clinic";
+import type { Holiday } from "../../ipc/generated/Holiday";
 import type { Scope } from "../../ipc/generated/Scope";
 import type { Today } from "../../ipc/generated/Today";
 import type { Visit } from "../../ipc/generated/Visit";
@@ -18,7 +20,7 @@ import {
   applyMove, byDate, gridHeight, gridHours, hourMarks, HOUR_PX, minutesToPx, MONTH_ROWS, monthWeeks, movedTo, nowOffset, placeDay, rangeTitle,
   shiftAnchor, slotAt, STEP_MINUTES, suggestStart, viewRange, weekDays, type CalendarView, type Hours, type MoveBy,
 } from "./calendarLayout";
-import { useCalendar, useClinicSettings, useOptimistic, useReloadClinic, useToday } from "./clinicData";
+import { useCalendar, useClinicSettings, useHolidays, useOptimistic, useReloadClinic, useToday } from "./clinicData";
 import {
   dayName, formatDateLong, formatDateShort, formatMonth, formatSpan, formatTime, leftAloneWords, monthOf, VISIT_KIND_LABEL, VISIT_STATUS_LABEL,
   visitTitle, weekday,
@@ -31,6 +33,25 @@ import "./CalendarTab.css";
 /** Every cached answer of the calendar: a quick action shows on each range that holds the visit. */
 const CALENDARS = ["clinic", "calendar"] as const;
 const NO_VISITS: VisitView[] = [];
+const NO_HOLIDAYS: Holiday[] = [];
+
+/** The holidays of the range shown, by date (empty when she has them off). */
+const HolidaysOf = createContext<Map<string, Holiday[]>>(new Map());
+
+/** The holiday names of a day, in one quiet line; a closed day says so to a screen reader too. */
+function HolidayNames({ date, className }: { date: string; className: string }) {
+  const list = useContext(HolidaysOf).get(date) ?? NO_HOLIDAYS;
+  if (list.length === 0) return null;
+  const closed = list.some((h) => h.closed);
+  return (
+    <span className={`${className}${closed ? " cal-holiday-closed" : ""}`} title={list.map((h) => h.name).join(", ")}>
+      {list.map((h) => h.name).join(", ")}
+      {closed && <span className="visually-hidden">, יום חג</span>}
+    </span>
+  );
+}
+
+const isClosed = (map: Map<string, Holiday[]>, date: string) => (map.get(date) ?? NO_HOLIDAYS).some((h) => h.closed);
 
 const VIEWS: { value: CalendarView; label: string }[] = [{ value: "day", label: "יום" }, { value: "week", label: "שבוע" }, { value: "month", label: "חודש" }];
 const PREVIOUS: Record<CalendarView, string> = { day: "היום הקודם", week: "השבוע הקודם", month: "החודש הקודם" };
@@ -107,6 +128,13 @@ export function CalendarTab() {
   const settings = useClinicSettings();
   const views = calendar.data;
   const s = settings.data;
+  const holidaysRead = useHolidays(range.from, range.to, s?.holidays === true);
+  const holidays = useMemo(() => {
+    const map = new Map<string, Holiday[]>();
+    if (s?.holidays !== true) return map;
+    for (const h of holidaysRead.data ?? NO_HOLIDAYS) map.set(h.date, [...(map.get(h.date) ?? NO_HOLIDAYS), h]);
+    return map;
+  }, [holidaysRead.data, s?.holidays]);
 
   const days = useMemo(() => byDate(views ?? NO_VISITS), [views]);
   const workDays = s?.work_days;
@@ -301,7 +329,7 @@ export function CalendarTab() {
         <button type="button" className="btn btn-primary" onClick={() => (view === "day" ? newOn(anchor) : setOpen({ kind: "new" }))}><PlusIcon /> פגישה חדשה</button>
       </header>
 
-      {body}
+      <HolidaysOf.Provider value={holidays}>{body}</HolidaysOf.Provider>
 
       {open?.kind === "visit" && <VisitDialog view={open.view} onClose={() => setOpen(null)} />}
       {open?.kind === "new" && (open.start ? <VisitDialog start={open.start} onClose={() => setOpen(null)} /> : <VisitDialog onClose={() => setOpen(null)} />)}
@@ -434,6 +462,7 @@ function DayColumn({ date, visits, hours, height, today, nowAt, chosenId, action
 }) {
   const placed = useMemo(() => new Map(placeDay(visits.map((v) => v.visit), hours).map((p) => [p.id, p])), [visits, hours]);
   const long = formatDateLong(date);
+  const closed = isClosed(useContext(HolidaysOf), date);
   // Seen: "ראשון 15.11". Read out: "יום ראשון 15.11.2026".
   const name = (
     <>
@@ -451,7 +480,7 @@ function DayColumn({ date, visits, hours, height, today, nowAt, chosenId, action
   }
 
   return (
-    <section className={today ? "cal-day cal-day-today" : "cal-day"} aria-label={long}>
+    <section className={["cal-day", today ? "cal-day-today" : "", closed ? "cal-day-closed" : ""].filter(Boolean).join(" ")} aria-label={long}>
       <header className="cal-day-head">
         <h3>
           {onDay
@@ -459,6 +488,7 @@ function DayColumn({ date, visits, hours, height, today, nowAt, chosenId, action
             : <span className="cal-day-name">{name}</span>}
         </h3>
         {today && <span className="chip">היום</span>}
+        <HolidayNames date={date} className="cal-holiday" />
         <button type="button" className="btn btn-small icon-btn cal-day-add" aria-label={`פגישה חדשה ב${long}`} title="פגישה חדשה ביום הזה" onClick={() => actions.add(date)}><PlusIcon size={15} /></button>
       </header>
       <div className="cal-day-body" style={{ height }} onClick={press}>
@@ -601,7 +631,8 @@ function MonthGrid({ anchor, days, today, onDay }: { anchor: string; days: Map<s
 
 function MonthDay({ date, visits, today, outside, onDay }: { date: string; visits: VisitView[]; today: boolean; outside: boolean; onDay: (date: string) => void }) {
   const more = visits.length - MONTH_ROWS;
-  const classes = ["cal-month-day", today ? "cal-month-today" : "", outside ? "cal-month-outside" : ""];
+  const closed = isClosed(useContext(HolidaysOf), date);
+  const classes = ["cal-month-day", today ? "cal-month-today" : "", outside ? "cal-month-outside" : "", closed ? "cal-month-closed" : ""];
   return (
     // The whole day answers a press; the date is its button, for the keyboard (its press reaches the cell).
     <td className={classes.filter(Boolean).join(" ")} onClick={() => onDay(date)}>
@@ -619,6 +650,7 @@ function MonthDay({ date, visits, today, outside, onDay }: { date: string; visit
           <span className="muted small cal-month-more"><span dir="ltr">+{more}</span><span className="visually-hidden"> פגישות נוספות</span></span>
         )}
       </div>
+      <HolidayNames date={date} className="cal-holiday cal-month-holiday" />
       {visits.length > 0 && (
         <ul className="clinic-list cal-month-visits">
           {visits.slice(0, MONTH_ROWS).map((view) => {

@@ -1,6 +1,8 @@
 // The clinic's settings: calendar hours and working days, the usual length and fee of each
 // kind of visit, places, the two message texts (with their placeholders and a live preview),
-// the note templates, and the three thresholds of "מה דורש אותי". Everything is saved at
+// the note templates, the assessment pathway and its package (D-198), the starter kit of a new
+// family (D-199), the gap kept around a visit and the holidays (D-196, D-197), and the three
+// thresholds of "מה דורש אותי". Everything is saved at
 // once, with "שמירה": the core tidies and checks it, and its refusal is the message shown.
 // What she changed and did not save yet is kept while the program is open (in memory only),
 // so going to another tab and back loses nothing.
@@ -9,11 +11,12 @@ import { useApp } from "../../App";
 import { CloseIcon, ErrorLine, PlusIcon, Skeleton } from "../../components/ui";
 import type { ClinicSettings } from "../../ipc/generated/ClinicSettings";
 import type { NoteTemplate } from "../../ipc/generated/NoteTemplate";
+import type { TaskKind } from "../../ipc/generated/TaskKind";
 import type { VisitKind } from "../../ipc/generated/VisitKind";
 import { useClinicSettings, useReloadClinic, useSaveSettings } from "./clinicData";
 import { defaultClinicSettings, fillPreview, PLACEHOLDERS, sampleValues } from "./clinicDefaults";
-import { formatTime, moneyInput, parseMoney, parseTime, VISIT_KIND_LABEL } from "./format";
-import { CheckField, ConfirmDialog, ReadError, Section, TextAreaField, TextField, TimeField } from "./parts";
+import { formatTime, moneyInput, parseMoney, parseTime, TASK_KIND_LABEL, TASK_KINDS, VISIT_KIND_LABEL, VISIT_KINDS } from "./format";
+import { CheckField, ConfirmDialog, ReadError, Section, SelectField, TextAreaField, TextField, TimeField } from "./parts";
 import "./ClinicSettingsTab.css";
 
 // ------------------------------------------------------------------ the form's own shape
@@ -31,6 +34,12 @@ export interface SettingsDraft {
   reportDays: string;
   debtDays: string;
   waitingWeeks: string;
+  buffer: string;
+  holidays: boolean;
+  pathway: { kind: VisitKind; gap: string }[];
+  packageFee: string;
+  packageName: string;
+  starter: { kind: TaskKind; title: string; due: string }[];
 }
 
 /** The limits of the core, for the boxes (the core checks them again). */
@@ -39,6 +48,10 @@ const MAX_TEMPLATES = 20;
 const PLACE_MAX = 200;
 const MESSAGE_MAX = 1000;
 const TEMPLATE_MAX = 5000;
+const MAX_STEPS = 12;
+const MAX_STARTER = 20;
+/** The kinds a step of the pathway can be: every visit with the family or the child. */
+const STEP_KINDS = VISIT_KINDS.filter((k) => k !== "block");
 
 const DAY_NAMES = ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת"];
 
@@ -56,6 +69,12 @@ export function toDraft(s: ClinicSettings): SettingsDraft {
     reportDays: String(s.report_days),
     debtDays: String(s.debt_days),
     waitingWeeks: String(s.waiting_weeks),
+    buffer: String(s.buffer_minutes),
+    holidays: s.holidays,
+    pathway: s.pathway.map((p) => ({ kind: p.kind, gap: String(p.gap_days) })),
+    packageFee: s.package_fee === 0 ? "" : moneyInput(s.package_fee),
+    packageName: s.package_name,
+    starter: s.starter_tasks.map((t) => ({ kind: t.kind, title: t.title, due: String(t.due_days) })),
   };
 }
 
@@ -83,6 +102,22 @@ export function fromDraft(d: SettingsDraft): { settings: ClinicSettings } | { pr
   if (reportDays === null) return { problem: "מספר הימים עד שהדוח אמור להיות מוכן צריך להיות מספר שלם, למשל 21." };
   if (debtDays === null) return { problem: "מספר הימים עד שמצביעים על חוב צריך להיות מספר שלם, למשל 30." };
   if (waitingWeeks === null) return { problem: "מספר השבועות ברשימת ההמתנה צריך להיות מספר שלם, למשל 6." };
+  const buffer = wholeNumber(d.buffer);
+  if (buffer === null) return { problem: "הזמן הפנוי בין פגישות צריך להיות מספר של דקות, למשל 15, או 0." };
+  const pathway = [];
+  for (const [i, step] of d.pathway.entries()) {
+    const gap = wholeNumber(step.gap);
+    if (gap === null) return { problem: `הרווח בשלב ${i + 1} של מסלול האבחון צריך להיות מספר של ימים, למשל 7.` };
+    pathway.push({ kind: step.kind, gap_days: gap });
+  }
+  const packageFee = d.packageFee.trim() === "" ? 0 : parseMoney(d.packageFee);
+  if (packageFee === null) return { problem: "המחיר של חבילת האבחון צריך להיות סכום בשקלים, למשל 4500, עד 100,000. ריק: בלי חבילה." };
+  const starter = [];
+  for (const [i, t] of d.starter.entries()) {
+    const due = wholeNumber(t.due);
+    if (due === null) return { problem: `מספר הימים במעקב ${i + 1} של ערכת הפתיחה צריך להיות מספר שלם, למשל 14.` };
+    starter.push({ kind: t.kind, title: t.title, due_days: due });
+  }
   return {
     settings: {
       day_start: start,
@@ -96,6 +131,12 @@ export function fromDraft(d: SettingsDraft): { settings: ClinicSettings } | { pr
       report_days: reportDays,
       debt_days: debtDays,
       waiting_weeks: waitingWeeks,
+      buffer_minutes: buffer,
+      holidays: d.holidays,
+      pathway,
+      package_fee: packageFee,
+      package_name: d.packageName,
+      starter_tasks: starter,
     },
   };
 }
@@ -210,6 +251,10 @@ function SettingsForm({ stored }: { stored: ClinicSettings }) {
 
   const setKind = (kind: VisitKind, patch: { minutes?: string; fee?: string }) => set({ kinds: draft.kinds.map((k) => (k.kind === kind ? { ...k, ...patch } : k)) });
   const setTemplate = (i: number, patch: Partial<NoteTemplate>) => set({ templates: draft.templates.map((t, j) => (j === i ? { ...t, ...patch } : t)) });
+  const setStep = (i: number, patch: Partial<SettingsDraft["pathway"][number]>) => set({ pathway: draft.pathway.map((p, j) => (j === i ? { ...p, ...patch } : p)) });
+  const setStarter = (i: number, patch: Partial<SettingsDraft["starter"][number]>) => set({ starter: draft.starter.map((t, j) => (j === i ? { ...t, ...patch } : t)) });
+  const stepKinds = STEP_KINDS.map((value) => ({ value, label: VISIT_KIND_LABEL[value] }));
+  const taskKinds = TASK_KINDS.map((value) => ({ value, label: TASK_KIND_LABEL[value] }));
   const sample = sampleValues(draft.places[0] ?? "");
   const placeTaken = newPlace.trim() !== "" && draft.places.includes(newPlace.split(/\s+/).filter(Boolean).join(" "));
 
@@ -234,6 +279,65 @@ function SettingsForm({ stored }: { stored: ClinicSettings }) {
             ))}
           </div>
         </fieldset>
+        <div className="clinic-form-row">
+          <TextField id="settings-buffer" label="דקות פנויות לפני ואחרי כל פגישה" value={draft.buffer} maxLength={3} dir="ltr" inputMode="numeric" className="clinic-threshold"
+            hint="כשהתוכנה מציעה שעה פנויה, היא משאירה את הזמן הזה בין פגישה לפגישה. 0: צמוד." onChange={(buffer) => set({ buffer })} />
+        </div>
+        <CheckField id="settings-holidays" label="להציג את חגי ישראל ביומן" checked={draft.holidays} onChange={(holidays) => set({ holidays })}
+          hint="החגים מחושבים במחשב לפי הלוח העברי. בימי חג (ראש השנה, יום כיפור, סוכות, שמחת תורה, פסח, שבועות ויום העצמאות) התוכנה לא מציעה שעות פנויות." />
+      </Section>
+
+      <Section title="מסלול האבחון" aside={<span className="muted small">{draft.pathway.length === 1 ? "שלב אחד" : `${draft.pathway.length} שלבים`}</span>}>
+        <p className="hint clinic-quiet">
+          השלבים שהתוכנה קובעת בלחיצה אחת מכרטיס המטופל: כל שלב בשעה הפנויה הראשונה, לפחות כמה ימים אחרי השלב שלפניו.
+          לפני השמירה רואים את כל הפגישות, ואפשר לשנות כל אחת.
+        </p>
+        {draft.pathway.length === 0 && <p className="muted clinic-quiet">עוד אין שלבים במסלול.</p>}
+        <ol className="clinic-list clinic-steps" aria-label="שלבי מסלול האבחון, לפי הסדר">
+          {draft.pathway.map((step, i) => (
+            <li key={i}><div className="clinic-step" role="group" aria-label={`שלב ${i + 1}: ${VISIT_KIND_LABEL[step.kind]}`}>
+              <span className="clinic-step-num num" aria-hidden="true">{i + 1}</span>
+              <SelectField id={`settings-step-${i}-kind`} label="סוג הפגישה" value={step.kind} options={stepKinds} onChange={(kind) => setStep(i, { kind })} />
+              <TextField id={`settings-step-${i}-gap`} label={i === 0 ? "ימים מהיום שבוחרים" : "ימים אחרי השלב הקודם"} value={step.gap} maxLength={3} dir="ltr"
+                inputMode="numeric" className="clinic-narrow" onChange={(gap) => setStep(i, { gap })} />
+              <div className="row clinic-place-actions">
+                <button type="button" className="btn btn-small" disabled={i === 0} aria-label={`להעלות את שלב ${i + 1}`} onClick={() => set({ pathway: moved(draft.pathway, i, -1) })}>למעלה</button>
+                <button type="button" className="btn btn-small" disabled={i === draft.pathway.length - 1} aria-label={`להוריד את שלב ${i + 1}`} onClick={() => set({ pathway: moved(draft.pathway, i, 1) })}>למטה</button>
+                <button type="button" className="btn btn-small icon-btn" aria-label={`הסרת שלב ${i + 1}`} onClick={() => set({ pathway: draft.pathway.filter((_, j) => j !== i) })}><CloseIcon /></button>
+              </div>
+            </div></li>
+          ))}
+        </ol>
+        {draft.pathway.length < MAX_STEPS
+          ? <button type="button" className="btn btn-small clinic-add" onClick={() => set({ pathway: [...draft.pathway, { kind: "assessment", gap: "7" }] })}><PlusIcon /> שלב נוסף</button>
+          : <p className="hint">אפשר להגדיר עד {MAX_STEPS} שלבים.</p>}
+        <div className="clinic-form-row clinic-package">
+          <TextField id="settings-package-fee" label="מחיר חבילת אבחון (₪)" value={draft.packageFee} maxLength={12} dir="ltr" inputMode="numeric" className="clinic-threshold"
+            hint="ריק: כל פגישה במסלול מחויבת בנפרד. עם מחיר: אפשר לבחור חבילה, ואז נרשם חיוב אחד והפגישות עצמן בלי מחיר." onChange={(packageFee) => set({ packageFee })} />
+          <TextField id="settings-package-name" label="השם של החבילה בחיוב" value={draft.packageName} maxLength={200} className="grow" onChange={(packageName) => set({ packageName })} />
+        </div>
+      </Section>
+
+      <Section title="ערכת פתיחה למשפחה חדשה" aside={<span className="muted small">{draft.starter.length === 1 ? "מעקב אחד" : `${draft.starter.length} מעקבים`}</span>}>
+        <p className="hint clinic-quiet">
+          השאלונים והמסמכים שמבקשים מכל משפחה. בלחיצה אחת בכרטיס הם נפתחים כמעקבים, כל אחד עם תאריך יעד.
+          שבוע לפני שיחת המשוב, מה שעוד פתוח מופיע ב"מה דורש אותי".
+        </p>
+        {draft.starter.length === 0 && <p className="muted clinic-quiet">עוד אין מעקבים בערכה.</p>}
+        <ul className="clinic-list clinic-starter">
+          {draft.starter.map((t, i) => (
+            <li key={i}><div className="clinic-step" role="group" aria-label={`מעקב ${i + 1}${t.title.trim() === "" ? "" : `: ${t.title.trim()}`}`}>
+              <SelectField id={`settings-starter-${i}-kind`} label="סוג" value={t.kind} options={taskKinds} onChange={(kind) => setStarter(i, { kind })} />
+              <TextField id={`settings-starter-${i}-title`} label="מה לבקש" value={t.title} maxLength={200} className="grow" onChange={(title) => setStarter(i, { title })} />
+              <TextField id={`settings-starter-${i}-due`} label="תוך כמה ימים" value={t.due} maxLength={3} dir="ltr" inputMode="numeric" className="clinic-narrow"
+                onChange={(due) => setStarter(i, { due })} />
+              <button type="button" className="btn btn-small icon-btn clinic-step-remove" aria-label={`הסרת מעקב ${i + 1}`} onClick={() => set({ starter: draft.starter.filter((_, j) => j !== i) })}><CloseIcon /></button>
+            </div></li>
+          ))}
+        </ul>
+        {draft.starter.length < MAX_STARTER
+          ? <button type="button" className="btn btn-small clinic-add" onClick={() => set({ starter: [...draft.starter, { kind: "document", title: "", due: "14" }] })}><PlusIcon /> מעקב נוסף</button>
+          : <p className="hint">אפשר להגדיר עד {MAX_STARTER} מעקבים.</p>}
       </Section>
 
       <Section title="סוגי הפגישות">
@@ -376,7 +480,7 @@ function SettingsForm({ stored }: { stored: ClinicSettings }) {
             setResetting(false);
             notify("הגדרות הקליניקה חזרו לברירות המחדל");
           }}>
-          <p>כל הגדרות הקליניקה יחזרו למצב שבו התוכנה הגיעה: שעות היומן וימי העבודה, המשך של כל סוג פגישה, רשימת המקומות, נוסחי ההודעות, התבניות לסיכום ושלושת הספים.</p>
+          <p>כל הגדרות הקליניקה יחזרו למצב שבו התוכנה הגיעה: שעות היומן וימי העבודה, המשך של כל סוג פגישה, רשימת המקומות, נוסחי ההודעות, התבניות לסיכום, מסלול האבחון, ערכת הפתיחה ושלושת הספים.</p>
           <p>המחירים שקבעת יתאפסו, ומה שכתבת בנוסחים ובתבניות יוחלף. המטופלים, הפגישות והכספים לא משתנים.</p>
         </ConfirmDialog>
       )}

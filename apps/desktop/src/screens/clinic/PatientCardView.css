@@ -332,3 +332,24 @@
     flex-wrap: wrap;
   }
 }
+
+/* The pathway dialog (D-198). */
+.pathway-rows {
+  display: grid;
+  gap: 8px;
+}
+.pathway-what {
+  min-width: 140px;
+  gap: 2px;
+}
+.pathway-holiday {
+  flex-basis: 100%;
+}
+.pathway-holiday:empty {
+  display: none;
+}
+
+.pcard-plan {
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}

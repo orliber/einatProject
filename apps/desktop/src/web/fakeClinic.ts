@@ -46,6 +46,7 @@ import type { Role } from "../ipc/generated/Role";
 import type { SavedVisits } from "../ipc/generated/SavedVisits";
 import type { Scope } from "../ipc/generated/Scope";
 import type { SessionNote } from "../ipc/generated/SessionNote";
+import type { Slot } from "../ipc/generated/Slot";
 import type { TaskView } from "../ipc/generated/TaskView";
 import type { Today } from "../ipc/generated/Today";
 import type { UiError } from "../ipc/generated/UiError";
@@ -56,8 +57,10 @@ import type { VisitView } from "../ipc/generated/VisitView";
 import {
   addDays, CONTACT_ROLES, dayName, daysBetween, formatDate, formatMonth, formatTime, isIsoDate, MAX_AGOROT, moneyNumber, monthOf, monthRange,
   PATIENT_STATUSES, PAY_METHOD_LABEL, PAY_METHODS, TASK_KINDS, today as localToday, VISIT_KIND_LABEL, VISIT_KINDS, VISIT_STATUS_LABEL,
-  VISIT_STATUSES, weekRange,
+  VISIT_STATUSES, weekday, weekRange,
 } from "../screens/clinic/format";
+import { fakeInsights } from "./fakeInsights";
+import { previewHolidays } from "./previewHolidays";
 
 // ------------------------------------------------------------------ the link to cases
 
@@ -238,6 +241,22 @@ export function defaultClinicSettings(): ClinicSettings {
     report_days: 21,
     debt_days: 30,
     waiting_weeks: 6,
+    buffer_minutes: 15,
+    holidays: true,
+    pathway: [
+      { kind: "intake", gap_days: 0 },
+      { kind: "assessment", gap_days: 7 },
+      { kind: "assessment", gap_days: 7 },
+      { kind: "feedback", gap_days: 21 },
+    ],
+    package_fee: 0,
+    package_name: "חבילת אבחון",
+    starter_tasks: [
+      { kind: "questionnaire", title: "שאלון להורים", due_days: 7 },
+      { kind: "questionnaire", title: "שאלון למורה או לגננת", due_days: 14 },
+      { kind: "document", title: "דוח או סיכום מהמסגרת החינוכית", due_days: 14 },
+      { kind: "document", title: "אבחונים וסיכומים קודמים", due_days: 14 },
+    ],
   };
 }
 
@@ -415,7 +434,124 @@ export class FakeClinic {
         return { kind: "patient", data: this.linkCase(r.patient_id, r.case_id) };
       case "create_case":
         return { kind: "case", data: this.createCase(r.patient_id, this.today(r.today)) };
+      case "holidays": {
+        need(isIsoDate(r.from) && isIsoDate(r.to), "צריך לבחור תאריכים תקינים ליומן.");
+        need(r.to >= r.from && daysBetween(r.from, r.to) <= 400, "אפשר לבקש את החגים של עד שנה אחת בכל פעם.");
+        return { kind: "holidays", data: previewHolidays(r.from, r.to) };
+      }
+      case "free_slots":
+        return { kind: "slots", data: this.freeSlots(this.today(r.today), r.from, r.minutes, r.count, r.skip_visit, []) };
+      case "propose_pathway":
+        return { kind: "proposed", data: this.proposePathway(r.patient_id, this.today(r.today), r.from) };
+      case "save_pathway":
+        return { kind: "saved", data: this.savePathway(r.patient_id, r.visits, r.package, this.today(r.today)) };
+      case "starter_tasks":
+        return { kind: "tasks", data: this.starterTasks(r.patient_id, this.today(r.today)) };
+      case "insights": {
+        const today = this.today(r.today);
+        const data = fakeInsights(
+          { patients: this.patients, visits: this.visits, charges: this.charges, payments: this.payments, settings: this.settings },
+          r.from_month, r.to_month, today.date,
+        );
+        return { kind: "insights", data };
+      }
     }
+  }
+
+  // ---------------------------------------------------------------- free times, the pathway, the starter kit (D-197..D-199)
+
+  /** As the core's `free_slots`: working days that are not closed for a holiday, inside her
+   *  hours, clear of every visit that is not cancelled by the gap; at most three a day. */
+  private freeSlots(today: Today, from: string, minutes: number, count: number, skip: string | null, extra: Visit[]): Slot[] {
+    need(whole(minutes, 5, 720), "משך הפגישה צריך להיות בין 5 דקות ל-12 שעות.");
+    need(whole(count, 1, 12), "אפשר לבקש עד 12 שעות פנויות.");
+    need(clinicDate(from), "צריך לבחור תאריך תקין.");
+    const s = this.settings;
+    const closed = new Set(s.holidays ? previewHolidays(from > today.date ? from : today.date, addDays(from > today.date ? from : today.date, 120)).filter((h) => h.closed).map((h) => h.date) : []);
+    const visits = [...this.visits.filter((v) => v.id !== skip), ...extra];
+    const out: Slot[] = [];
+    const first = from > today.date ? from : today.date;
+    for (let i = 0; i < 120 && out.length < count; i++) {
+      const date = addDays(first, i);
+      if (!s.work_days.includes(weekday(date) ?? -1) || closed.has(date)) continue;
+      const busy = visits.filter((v) => v.date === date && v.status !== "cancelled")
+        .map((v) => [Math.max(0, v.start - s.buffer_minutes), v.start + v.minutes + s.buffer_minutes] as const);
+      const floor = date === today.date ? Math.max(s.day_start, today.minute) : s.day_start;
+      let start = Math.ceil(floor / 15) * 15;
+      let onDay = 0;
+      let last = -Infinity;
+      for (; start + minutes <= s.day_end && onDay < 3 && out.length < count; start += 15) {
+        if (start < last + minutes) continue;
+        if (busy.some(([b0, b1]) => start < b1 && b0 < start + minutes)) continue;
+        out.push({ date, start });
+        last = start;
+        onDay++;
+      }
+    }
+    return out;
+  }
+
+  private proposePathway(patientId: string, today: Today, from: string): Visit[] {
+    const p = this.patients.find((x) => x.id === patientId);
+    if (!p) refuse(NO_PATIENT, "not_found");
+    need(clinicDate(from), "צריך לבחור תאריך תקין להתחלה.");
+    const s = this.settings;
+    need(s.pathway.length > 0, "עוד אין מסלול אבחון. אפשר להגדיר אותו בהגדרות הקליניקה.");
+    const out: Visit[] = [];
+    let earliest = from;
+    s.pathway.forEach((step, i) => {
+      const d = s.defaults.find((x) => x.kind === step.kind);
+      const minutes = d?.minutes ?? 60;
+      const slot = this.freeSlots(today, earliest, minutes, 1, null, out)[0];
+      if (!slot) refuse("לא נמצאה שעה פנויה לכל שלבי המסלול בחודשים הקרובים. אפשר להתחיל מתאריך אחר, או לקבוע את הפגישות אחת אחת.");
+      out.push({
+        id: "", patient_id: p.id, kind: step.kind, title: "", date: slot.date, start: slot.start, minutes, place: s.places[0] ?? "",
+        status: "planned", status_note: "", fee: p.session_fee ?? d?.fee ?? 0, charge_missed: false, series_id: null, note: "",
+      });
+      const next = s.pathway[i + 1];
+      earliest = addDays(slot.date, Math.max(1, next?.gap_days ?? 0));
+    });
+    return out;
+  }
+
+  private savePathway(patientId: string, visits: Visit[], packaged: boolean, today: Today): SavedVisits {
+    need(visits.length > 0, "אין פגישות לשמור במסלול.");
+    need(visits.length <= 12, "יש יותר מדי פגישות במסלול אחד.");
+    if (!this.patients.some((x) => x.id === patientId)) refuse("המטופל שנבחר לא נמצא. ייתכן שהכרטיס נמחק.");
+    for (const v of visits) {
+      need(v.id === "" && v.patient_id === patientId, "במסלול יש פגישה שלא שייכת לכרטיס הזה. אפשר לפתוח את המסלול מחדש.");
+      need(v.kind !== "block", "במסלול האבחון אין זמנים שמורים, רק פגישות.");
+      need(v.date >= today.date, "אחת הפגישות במסלול נקבעה לתאריך שעבר. אפשר לבחור תאריך אחר.");
+    }
+    if (packaged) need(this.settings.package_fee > 0, "עוד אין מחיר לחבילת האבחון. אפשר לקבוע אותו בהגדרות הקליניקה.");
+    const saved: VisitView[] = [];
+    let overlapping = 0;
+    for (const v of visits) {
+      const one = this.saveVisit({ ...v, status: "planned", series_id: null, ...(packaged ? { fee: 0, charge_missed: false } : {}) }, null, "one");
+      saved.push(...one.visits);
+      overlapping += one.overlapping;
+    }
+    if (packaged) {
+      const first = visits.map((v) => v.date).sort()[0] ?? today.date;
+      this.saveCharge({ id: "", patient_id: patientId, date: first, amount: this.settings.package_fee, what: this.settings.package_name, voided: false, void_reason: "" });
+    }
+    return { visits: saved, overlapping, left_alone: 0 };
+  }
+
+  private starterTasks(patientId: string, today: Today): TaskView[] {
+    const p = this.patients.find((x) => x.id === patientId);
+    if (!p) refuse(NO_PATIENT, "not_found");
+    const key = (t: string) => cleanLine(t).toLowerCase();
+    const have = new Set(this.tasks.filter((t) => t.patient_id === patientId && t.done_on === null).map((t) => key(t.title)));
+    const made: ClinicTask[] = [];
+    for (const st of this.settings.starter_tasks) {
+      const title = cleanLine(st.title);
+      if (title === "" || have.has(key(title))) continue;
+      have.add(key(title));
+      made.push(this.saveTask({ id: "", patient_id: patientId, kind: st.kind, title, due: addDays(today.date, st.due_days), done_on: null, note: "" }));
+    }
+    need(made.length > 0, "כל המעקבים של ערכת הפתיחה כבר פתוחים בכרטיס הזה.");
+    return made.map((task) => ({ task, patient_name: p.name, overdue: false }));
   }
 
   // ---------------------------------------------------------------- small things
@@ -1332,6 +1468,24 @@ export class FakeClinic {
       atMost(t.text, TEMPLATE, "תבנית לסיכום");
     }
     need(whole(s.report_days, 0, 65_535) && whole(s.debt_days, 0, 65_535) && whole(s.waiting_weeks, 0, 65_535), "מספר הימים או השבועות לא תקין.");
+    s.package_name = cleanLine(s.package_name);
+    s.starter_tasks = s.starter_tasks.map((t) => ({ ...t, title: cleanLine(t.title) }));
+    need(whole(s.buffer_minutes, 0, 120), "הזמן הפנוי בין פגישות יכול להיות עד 120 דקות.");
+    need(whole(s.package_fee, 0, MAX_AGOROT), "מחיר הפגישה צריך להיות בין 0 ל-100,000 ₪.");
+    short(s.package_name, "שם החבילה");
+    need(s.package_fee === 0 || s.package_name !== "", "צריך לתת שם לחבילת האבחון, כדי שיופיע בחיוב.");
+    need(s.pathway.length <= 12, "אפשר להגדיר עד 12 שלבים במסלול האבחון.");
+    for (const step of s.pathway) {
+      need(step.kind !== "block" && step.kind !== "unknown", "כל שלב במסלול האבחון צריך להיות פגישה עם המשפחה או עם הילד.");
+      need(whole(step.gap_days, 0, 180), "הרווח בין שני שלבים במסלול יכול להיות עד 180 יום.");
+    }
+    need(s.starter_tasks.length <= 20, "אפשר להגדיר עד 20 מעקבים בערכת הפתיחה.");
+    for (const t of s.starter_tasks) {
+      need(t.title !== "", "לכל מעקב בערכת הפתיחה צריכה להיות כותרת.");
+      need(chars(t.title) <= SHORT, "כותרת של מעקב בערכת הפתיחה ארוכה מדי.");
+      need(whole(t.due_days, 0, 365), "מעקב בערכת הפתיחה יכול להיות עד שנה מהיום.");
+      need(TASK_KINDS.includes(t.kind), "צריך לבחור סוג לכל מעקב בערכת הפתיחה.");
+    }
     return s;
   }
 
@@ -1388,6 +1542,12 @@ export class FakeClinic {
           if (v.kind === "feedback" && ahead >= 0 && ahead <= FEEDBACK_SOON_DAYS && !this.reportFinished(p)) {
             add("feedback_soon", p, `שיחת המשוב נקבעה ליום ${when}, ו${reportWords(p)}.`, v.date, { visit: v.id });
           }
+          // Questionnaires and documents still open a week before the feedback (D-199): how many only.
+          const missing = this.tasks.filter((t) => t.patient_id === p.id && t.done_on === null && (t.kind === "questionnaire" || t.kind === "document")).length;
+          if (v.kind === "feedback" && ahead >= 0 && ahead <= FEEDBACK_SOON_DAYS && missing > 0) {
+            const what = missing === 1 ? "שאלון או מסמך אחד עדיין פתוח" : `${missing} שאלונים או מסמכים עדיין פתוחים`;
+            add("materials_missing", p, `שיחת המשוב נקבעה ליום ${when}, ו${what} במעקבים.`, v.date, { visit: v.id });
+          }
         }
         const age = daysBetween(v.date, today.date);
         if (v.status === "held" && NOTE_KINDS.includes(v.kind) && age >= 0 && age <= NO_NOTE_DAYS && !noted.has(v.id)) {
@@ -1432,7 +1592,7 @@ export class FakeClinic {
       }
     }
     // Oldest first; the rest of the key only makes the order the same on every read.
-    const rank: Record<Alert["kind"], number> = { unmarked: 0, no_note: 1, task_overdue: 2, feedback_soon: 3, report_due: 4, debt: 5, no_next_visit: 6, waiting: 7, unreadable: 8 };
+    const rank: Record<Alert["kind"], number> = { unmarked: 0, no_note: 1, task_overdue: 2, feedback_soon: 3, materials_missing: 4, report_due: 5, debt: 6, no_next_visit: 7, waiting: 8, unreadable: 9 };
     const text = (a: string | null, b: string | null) => ((a ?? "") < (b ?? "") ? -1 : (a ?? "") > (b ?? "") ? 1 : 0);
     return out.sort((a, b) => text(a.since, b.since) || rank[a.kind] - rank[b.kind] || text(a.patient_id, b.patient_id) || text(a.visit_id, b.visit_id) || text(a.task_id, b.task_id));
   }
