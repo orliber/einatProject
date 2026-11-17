@@ -18,13 +18,19 @@
 //! [`ClinicRequest::NoteToCase`], which copies the formal record of a session (never the
 //! personal note) into the case as a material, where the case's own filter applies.
 
+mod holidays;
 mod income_export;
+mod insights;
 mod logic;
+mod slots;
 #[cfg(test)]
 mod tests;
 
+pub use holidays::*;
 pub use income_export::*;
+pub use insights::*;
 pub use logic::*;
+pub use slots::*;
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
