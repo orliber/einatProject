@@ -57,14 +57,21 @@ pub(crate) async fn calendar_status(state: tauri::State<'_, AppState>) -> Res<Ca
 #[tauri::command]
 pub(crate) async fn calendar_turn_on(state: tauri::State<'_, AppState>) -> Res<CalendarStatus> {
     let keep_grant = with_core(&state, |c| c.calendar_turn_on_check()).await?;
-    let (http, token) = tauri::async_runtime::spawn_blocking(move || {
+    let dv_core::calendar_sync::Permission {
+        http,
+        token,
+        account_id,
+    } = tauri::async_runtime::spawn_blocking(move || {
         dv_core::calendar_sync::lasting_permission(&open_in_browser, keep_grant)
             .map_err(|e| e.to_ui())
     })
     .await
     .map_err(|_| internal("task"))??;
     let kept = token.clone();
-    let finished = with_core(&state, move |c| c.calendar_turn_on_finish(&kept)).await;
+    let finished = with_core(&state, move |c| {
+        c.calendar_turn_on_finish(&kept, &account_id)
+    })
+    .await;
     if let Err(e) = finished {
         let _ = tauri::async_runtime::spawn_blocking(move || {
             dv_core::calendar_sync::withdraw_unkept(&http, &token, keep_grant);

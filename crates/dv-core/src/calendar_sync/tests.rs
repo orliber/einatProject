@@ -13,6 +13,12 @@ const PASSWORD: &str = "סוס ירוק רץ בשדה 2026";
 const CAL: &str = "c_0a1b2c@group.calendar.google.com";
 const CHILD: &str = "נועה בדויה";
 const PARENT: &str = "דנה בדויה";
+/// The emergency stop is process-wide: the test that turns it on holds this for writing, the
+/// others for reading.
+static STOP_FOR_TESTS: std::sync::RwLock<()> = std::sync::RwLock::new(());
+
+/// Her Google account's id, as the sign-in gives it (invented).
+const ACCOUNT: &str = "acct-1";
 
 fn cfg() -> ClientConfig {
     ClientConfig {
@@ -157,7 +163,7 @@ fn turned_on() -> (tempfile::TempDir, Core) {
         !core.calendar_turn_on_check().unwrap(),
         "nothing holds the grant yet"
     );
-    core.calendar_turn_on_finish("1//lasting").unwrap();
+    core.calendar_turn_on_finish("1//lasting", ACCOUNT).unwrap();
     (dir, core)
 }
 
@@ -215,6 +221,9 @@ fn round(core: &mut Core, google: &FakeGoogle) {
 
 #[test]
 fn off_by_default_nothing_goes() {
+    let _calm = STOP_FOR_TESTS
+        .read()
+        .unwrap_or_else(PoisonError::into_inner);
     let (_dir, mut core) = vault();
     let pid = patient(&mut core);
     save(&mut core, visit(&pid, 1, 600));
@@ -227,6 +236,9 @@ fn off_by_default_nothing_goes() {
 
 #[test]
 fn only_the_time_and_one_word_reach_google() {
+    let _calm = STOP_FOR_TESTS
+        .read()
+        .unwrap_or_else(PoisonError::into_inner);
     let (_dir, mut core) = turned_on();
     let pid = patient(&mut core);
     let a = save(&mut core, visit(&pid, 1, 9 * 60));
@@ -284,6 +296,9 @@ fn only_the_time_and_one_word_reach_google() {
 
 #[test]
 fn the_copy_follows_moves_cancellations_and_deletions() {
+    let _calm = STOP_FOR_TESTS
+        .read()
+        .unwrap_or_else(PoisonError::into_inner);
     let (_dir, mut core) = turned_on();
     let pid = patient(&mut core);
     let google = FakeGoogle::default();
@@ -344,6 +359,9 @@ fn the_copy_follows_moves_cancellations_and_deletions() {
 
 #[test]
 fn a_change_asks_for_a_round_soon_and_rounds_never_overlap() {
+    let _calm = STOP_FOR_TESTS
+        .read()
+        .unwrap_or_else(PoisonError::into_inner);
     let (_dir, mut core) = turned_on();
     let first = core.take_calendar_sync().expect("due after turning on");
     assert!(core.take_calendar_sync().is_none(), "one at a time");
@@ -366,6 +384,9 @@ fn a_change_asks_for_a_round_soon_and_rounds_never_overlap() {
 
 #[test]
 fn a_lock_or_turning_off_stops_a_round_before_it_writes() {
+    let _calm = STOP_FOR_TESTS
+        .read()
+        .unwrap_or_else(PoisonError::into_inner);
     let (_dir, mut core) = turned_on();
     let pid = patient(&mut core);
     save(&mut core, visit(&pid, 1, 600));
@@ -390,6 +411,9 @@ fn a_lock_or_turning_off_stops_a_round_before_it_writes() {
 
 #[test]
 fn turning_off_deletes_the_calendar_and_withdraws_the_permission() {
+    let _calm = STOP_FOR_TESTS
+        .read()
+        .unwrap_or_else(PoisonError::into_inner);
     let (_dir, mut core) = turned_on();
     let pid = patient(&mut core);
     save(&mut core, visit(&pid, 1, 600));
@@ -412,7 +436,123 @@ fn turning_off_deletes_the_calendar_and_withdraws_the_permission() {
 }
 
 #[test]
+fn a_calendar_made_before_a_lock_is_used_again_and_deleted_at_turning_off() {
+    let _calm = STOP_FOR_TESTS
+        .read()
+        .unwrap_or_else(PoisonError::into_inner);
+    let (_dir, mut core) = turned_on();
+    let pid = patient(&mut core);
+    save(&mut core, visit(&pid, 1, 600));
+    let google = FakeGoogle::default();
+    // The round makes the calendar, then the vault locks before its outcome is written.
+    let job = core.calendar_sync_now().unwrap();
+    let done = job.run(&google, &cfg());
+    core.lock();
+    assert!(core.finish_calendar_sync(done).is_err());
+    core.unlock(PASSWORD).unwrap();
+    // The next round uses that calendar: not a second one.
+    round(&mut core, &google);
+    let made = |g: &FakeGoogle| {
+        g.seen
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(m, u, _)| *m == Method::Post && u.ends_with("/calendar/v3/calendars"))
+            .count()
+    };
+    assert_eq!(made(&google), 1);
+
+    // Turned off right after such a lock: the calendar is in the cleanup owed (kept in the
+    // vault, so also after a restart).
+    let (_dir2, mut core) = turned_on();
+    let google = FakeGoogle::default();
+    let job = core.calendar_sync_now().unwrap();
+    let done = job.run(&google, &cfg());
+    core.lock();
+    drop(done);
+    core.unlock(PASSWORD).unwrap();
+    let cleanup = core.calendar_turn_off().unwrap().unwrap();
+    assert_eq!(cleanup.calendars, vec![CAL.to_owned()]);
+    core.finish_calendar_cleanup(cleanup.run(&google, &cfg()))
+        .unwrap();
+    assert!(google.calendar.lock().unwrap().is_none());
+}
+
+#[test]
+fn a_sign_in_begun_meanwhile_keeps_the_grant_until_the_next_try() {
+    let _calm = STOP_FOR_TESTS
+        .read()
+        .unwrap_or_else(PoisonError::into_inner);
+    let (_dir, mut core) = turned_on();
+    let google = FakeGoogle::default();
+    round(&mut core, &google);
+    let cleanup = core.calendar_turn_off().unwrap().unwrap();
+    // She begins turning it on again before the cleanup reaches Google.
+    assert!(core.calendar_turn_on_check().is_ok());
+    assert_eq!(
+        core.finish_calendar_cleanup(cleanup.run(&google, &cfg()))
+            .unwrap(),
+        CalendarOff::Pending
+    );
+    assert!(google.calendar.lock().unwrap().is_none(), "deleted anyway");
+    assert_eq!(google.calls(Method::Post, "/revoke"), 0);
+    // The sign-in ended without a permission: the next try withdraws it.
+    core.lock();
+    core.unlock(PASSWORD).unwrap();
+    let again = core.take_calendar_cleanup().unwrap();
+    assert_eq!(
+        core.finish_calendar_cleanup(again.run(&google, &cfg()))
+            .unwrap(),
+        CalendarOff::Cleaned
+    );
+    assert_eq!(google.calls(Method::Post, "/revoke"), 1);
+}
+
+#[test]
+fn the_drive_copy_on_another_account_does_not_keep_the_calendars_grant() {
+    let _calm = STOP_FOR_TESTS
+        .read()
+        .unwrap_or_else(PoisonError::into_inner);
+    let (_dir, mut core) = turned_on();
+    let google = FakeGoogle::default();
+    round(&mut core, &google);
+    let vault_id = core.vault_ref().unwrap().vault_id().to_owned();
+    let v = core.vault_mut().unwrap();
+    v.set_secret("drive_backup_token", "1//drive").unwrap();
+    v.set_state(
+        "drive_backup_account",
+        &google_account_tag(&vault_id, "acct-2"),
+    )
+    .unwrap();
+    let cleanup = core.calendar_turn_off().unwrap().unwrap();
+    core.finish_calendar_cleanup(cleanup.run(&google, &cfg()))
+        .unwrap();
+    assert_eq!(
+        google.calls(Method::Post, "/revoke"),
+        1,
+        "another account is another grant"
+    );
+    // A cleanup owed on one account keeps its place from a permission of another.
+    let (_dir2, mut core) = turned_on();
+    let offline = FakeGoogle {
+        offline: true,
+        ..FakeGoogle::default()
+    };
+    let cleanup = core.calendar_turn_off().unwrap().unwrap();
+    core.finish_calendar_cleanup(cleanup.run(&offline, &cfg()))
+        .unwrap();
+    core.calendar_turn_on_check().unwrap();
+    assert!(core.calendar_turn_on_finish("1//other", "acct-2").is_err());
+    assert!(!core.calendar_on());
+    core.calendar_turn_on_finish("1//same", ACCOUNT).unwrap();
+    assert!(core.calendar_on());
+}
+
+#[test]
 fn a_cleanup_offline_stays_owed_and_is_tried_again() {
+    let _calm = STOP_FOR_TESTS
+        .read()
+        .unwrap_or_else(PoisonError::into_inner);
     let (_dir, mut core) = turned_on();
     let google = FakeGoogle::default();
     round(&mut core, &google);
@@ -446,6 +586,9 @@ fn a_cleanup_offline_stays_owed_and_is_tried_again() {
 
 #[test]
 fn the_drive_copy_keeps_the_grant_and_the_calendar_keeps_it_for_the_drive_copy() {
+    let _calm = STOP_FOR_TESTS
+        .read()
+        .unwrap_or_else(PoisonError::into_inner);
     let (_dir, mut core) = turned_on();
     assert!(
         core.drive_keeps_grant(),
@@ -474,6 +617,9 @@ fn the_drive_copy_keeps_the_grant_and_the_calendar_keeps_it_for_the_drive_copy()
 
 #[test]
 fn turning_the_drive_copy_off_leaves_the_grant_to_the_calendar() {
+    let _calm = STOP_FOR_TESTS
+        .read()
+        .unwrap_or_else(PoisonError::into_inner);
     let (_dir, mut core) = turned_on();
     core.vault_mut()
         .unwrap()
@@ -500,6 +646,9 @@ fn turning_the_drive_copy_off_leaves_the_grant_to_the_calendar() {
 
 #[test]
 fn a_withdrawn_permission_asks_to_connect_again() {
+    let _calm = STOP_FOR_TESTS
+        .read()
+        .unwrap_or_else(PoisonError::into_inner);
     let (_dir, mut core) = turned_on();
     let withdrawn = FakeGoogle {
         withdrawn: true,
@@ -516,7 +665,7 @@ fn a_withdrawn_permission_asks_to_connect_again() {
         core.calendar_turn_on_check().is_ok(),
         "connecting again is allowed"
     );
-    core.calendar_turn_on_finish("1//new").unwrap();
+    core.calendar_turn_on_finish("1//new", ACCOUNT).unwrap();
     assert_eq!(core.calendar_status().unwrap().problem, None);
     let cleanup = core.calendar_turn_off().unwrap().unwrap();
     assert_eq!(
@@ -532,6 +681,9 @@ fn a_withdrawn_permission_asks_to_connect_again() {
 
 #[test]
 fn the_emergency_stop_sends_nothing() {
+    let _only = STOP_FOR_TESTS
+        .write()
+        .unwrap_or_else(PoisonError::into_inner);
     let (_dir, mut core) = turned_on();
     let google = FakeGoogle::default();
     let job = core.calendar_sync_now().unwrap();
@@ -548,6 +700,9 @@ fn the_emergency_stop_sends_nothing() {
 
 #[test]
 fn a_restore_never_turns_it_on() {
+    let _calm = STOP_FOR_TESTS
+        .read()
+        .unwrap_or_else(PoisonError::into_inner);
     let (_dir, mut core) = turned_on();
     let google = FakeGoogle::default();
     round(&mut core, &google);
@@ -567,6 +722,9 @@ fn a_restore_never_turns_it_on() {
 
 #[test]
 fn the_rules_and_the_wire_agree_on_every_word() {
+    let _calm = STOP_FOR_TESTS
+        .read()
+        .unwrap_or_else(PoisonError::into_inner);
     assert_eq!(rules::CALENDAR_NAME, cal::CALENDAR_NAME);
     assert_eq!(rules::CALENDAR_TIME_ZONE, cal::TIME_ZONE);
     for title in [rules::TITLE_VISIT, rules::TITLE_BLOCK] {

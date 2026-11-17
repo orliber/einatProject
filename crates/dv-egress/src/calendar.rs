@@ -138,6 +138,10 @@ fn send(
     url: String,
     body: Option<&Value>,
 ) -> Result<Reply, GoogleError> {
+    // The emergency stop: not one more call, also in the middle of a round or a cleanup.
+    if crate::is_stopped() {
+        return Err(GoogleError::Cancelled);
+    }
     http.send(Request {
         method,
         url,
@@ -207,7 +211,8 @@ pub fn list_events(
     if !day_ok(from) || !day_ok(to) {
         return Err(protocol("dates"));
     }
-    // A day of slack on each side: the bounds are in UTC, the events in Israel's time.
+    // The bounds are Israel's midnights at their widest (+03:00 in summer, +02:00 in winter),
+    // so no event of the stretch is missed; events that begin outside it are left out below.
     let url = reqwest::Url::parse_with_params(
         &format!("{}/events", calendar_url(calendar)?),
         &[
@@ -215,8 +220,8 @@ pub fn list_events(
             ("singleEvents", "true"),
             ("maxResults", MAX_EVENTS),
             ("timeZone", TIME_ZONE),
-            ("timeMin", &format!("{from}T00:00:00Z")),
-            ("timeMax", &format!("{to}T23:59:59Z")),
+            ("timeMin", &format!("{from}T00:00:00+03:00")),
+            ("timeMax", &format!("{to}T23:59:59+02:00")),
             ("fields", "items(id,status,summary,start,end),nextPageToken"),
         ],
     )
@@ -253,6 +258,13 @@ pub fn list_events(
                 };
                 event_ok(&e).then_some(e)
             })();
+            // One that begins outside the stretch is not this round's to change or delete.
+            if event.as_ref().is_some_and(|e| {
+                let day = e.start.get(..10).unwrap_or_default();
+                day < from || day > to
+            }) {
+                return None;
+            }
             Some(Remote {
                 id: id.to_owned(),
                 cancelled,
@@ -274,7 +286,8 @@ fn event_body(e: &Event) -> Value {
     })
 }
 
-/// Add an event that was never in the calendar.
+/// Add an event that was not in the listed stretch. One with its id may be there from before
+/// (outside the stretch, or deleted long ago): Google answers 409, and it is replaced instead.
 pub fn insert_event(
     http: &dyn Http,
     s: &Session,
@@ -286,6 +299,9 @@ pub fn insert_event(
     }
     let url = format!("{}/events", calendar_url(calendar)?);
     let Reply { status, body, .. } = send(http, s, Method::Post, url, Some(&event_body(e)))?;
+    if status == 409 {
+        return put_event(http, s, calendar, e);
+    }
     json(status, &body).map(|_| ())
 }
 
@@ -474,6 +490,13 @@ mod tests {
         }
     }
 
+    /// No test here turns the emergency stop on meanwhile.
+    fn calm() -> std::sync::RwLockReadGuard<'static, ()> {
+        crate::STOP_FOR_TESTS
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
     fn ev(n: u8, start: &str, end: &str) -> Event {
         Event {
             id: format!("dv{:032x}", n),
@@ -491,6 +514,7 @@ mod tests {
 
     #[test]
     fn ids_and_times_have_one_shape() {
+        let _calm = calm();
         assert!(event_id_ok(&format!("dv{:032x}", 7)));
         assert!(!event_id_ok("dv123"));
         assert!(!event_id_ok(&format!("xx{:032x}", 7)));
@@ -505,7 +529,48 @@ mod tests {
     }
 
     #[test]
+    fn an_event_from_before_the_stretch_is_replaced_not_stuck_and_old_ones_stay() {
+        let _calm = calm();
+        let fake = FakeCalendar::default();
+        *fake.exists.lock().unwrap() = true;
+        // Synced long ago (before the stretch), and another old one no longer wanted.
+        let old = ev(1, "2026-10-01T09:00:00", "2026-10-01T10:00:00");
+        let gone = ev(2, "2026-10-02T09:00:00", "2026-10-02T10:00:00");
+        for e in [&old, &gone] {
+            fake.events
+                .lock()
+                .unwrap()
+                .insert(e.id.clone(), (false, event_body(e)));
+        }
+        // The first visit moved into the stretch: the 409 of the insert becomes a PUT.
+        let moved = ev(1, "2026-11-20T09:00:00", "2026-11-20T10:00:00");
+        let done = sync(&fake, std::slice::from_ref(&moved));
+        assert_eq!((done.added, done.removed), (1, 0));
+        let events = fake.events.lock().unwrap();
+        assert_eq!(
+            events[&moved.id].1["start"]["dateTime"],
+            "2026-11-20T09:00:00"
+        );
+        assert!(!events[&gone.id].0, "outside the stretch: left alone");
+    }
+
+    #[test]
+    fn the_emergency_stop_stops_every_call() {
+        // The stop is process-wide: checked here on a request that would otherwise go.
+        let fake = FakeCalendar::default();
+        let _only = crate::STOP_FOR_TESTS
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        crate::set_stopped(true);
+        let r = calendar_exists(&fake, &Session::for_tests("t"), CAL);
+        crate::set_stopped(false);
+        assert!(matches!(r, Err(GoogleError::Cancelled)));
+        assert!(fake.seen.lock().unwrap().is_empty());
+    }
+
+    #[test]
     fn a_put_goes_only_to_one_event() {
+        let _calm = calm();
         let ok = |u: &str| crate::google::put_allowed(&reqwest::Url::parse(u).unwrap());
         let id = format!("dv{:032x}", 1);
         assert!(ok(&format!("{API}/calendars/{CAL}/events/{id}")));
@@ -526,6 +591,7 @@ mod tests {
 
     #[test]
     fn the_calendar_follows_the_visits_and_says_nothing_more() {
+        let _calm = calm();
         let fake = FakeCalendar::default();
         let s = Session::for_tests("t");
         assert!(!calendar_exists(&fake, &s, CAL).unwrap());
@@ -591,6 +657,7 @@ mod tests {
 
     #[test]
     fn her_own_events_in_that_calendar_are_left_alone() {
+        let _calm = calm();
         let fake = FakeCalendar::default();
         fake.events.lock().unwrap().insert(
             "abcdefghijklmnopqrstuv0123".to_owned(),
@@ -602,6 +669,7 @@ mod tests {
 
     #[test]
     fn a_second_page_is_an_error_not_an_empty_calendar() {
+        let _calm = calm();
         let fake = FakeCalendar {
             paged: true,
             ..FakeCalendar::default()
@@ -612,6 +680,7 @@ mod tests {
 
     #[test]
     fn nothing_is_written_once_it_is_no_longer_wanted() {
+        let _calm = calm();
         let fake = FakeCalendar::default();
         let s = Session::for_tests("t");
         let a = ev(1, "2026-11-18T09:00:00", "2026-11-18T10:30:00");
@@ -622,6 +691,7 @@ mod tests {
 
     #[test]
     fn an_event_off_the_rules_is_never_sent() {
+        let _calm = calm();
         let fake = FakeCalendar::default();
         let s = Session::for_tests("t");
         let mut a = ev(1, "2026-11-18T09:00:00", "2026-11-18T10:30:00");

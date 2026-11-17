@@ -28,12 +28,14 @@ use dv_domain::clinic::{self as rules, CalendarDetail};
 use dv_egress::calendar::{self as cal, Event};
 use dv_egress::google::{self, ClientConfig, GoogleError, Http};
 use dv_vault::crypto::{hex, hmac_sha256, Key32};
+use dv_vault::recovery::google_account_tag;
 use dv_vault::{AuditEvent, Vault, VaultError};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use zeroize::Zeroizing;
 
 use crate::dates::{iso, today, unix_now};
+use crate::drive_backup::{shares_grant, UNKNOWN_ACCOUNT};
 use crate::jobs::Cancel;
 use crate::{Core, CoreError};
 
@@ -49,6 +51,11 @@ const CLEANUP_CALENDARS_KEY: &str = "calendar_cleanup_calendars";
 const CLEANUP_RESULT_KEY: &str = "calendar_cleanup_result";
 /// The id of the app's calendar in her account.
 const CALENDAR_KEY: &str = "calendar_id";
+/// The account (its tag, as the Google slot makes it) the permission and the cleanup owed
+/// belong to: the grant at Google is one per account, shared with the Drive copy only on the
+/// same account.
+const ACCOUNT_KEY: &str = "calendar_account";
+const CLEANUP_ACCOUNT_KEY: &str = "calendar_cleanup_account";
 /// When the last round finished well (unix seconds).
 const LAST_KEY: &str = "calendar_last_at";
 /// Why the last round did not, or empty.
@@ -349,6 +356,10 @@ pub struct CalendarCleanup {
     generation: Arc<AtomicU64>,
     at: u64,
     revoke: bool,
+    /// The Drive copy's generation when this was planned: when it moved (she began turning
+    /// it on meanwhile), the grant is not withdrawn now, and the next try decides again.
+    drive_generation: Arc<AtomicU64>,
+    drive_at: u64,
     fresh: Arc<Mutex<Option<(u64, String)>>>,
     _running: Running,
 }
@@ -399,12 +410,19 @@ impl CalendarCleanup {
                     let deleted = calendars
                         .iter()
                         .all(|id| cal::delete_calendar(http, &s, id).is_ok());
-                    // Turned on again meanwhile: the new permission is the same grant.
-                    let moved = self.generation.load(Ordering::Acquire) != self.at;
+                    // A Google sign-in, or either copy turning on, since this was planned: the
+                    // grant may be the one she is giving now. Not withdrawn now: the next try
+                    // decides again.
+                    let hold = self.generation.load(Ordering::Acquire) != self.at
+                        || self.drive_generation.load(Ordering::Acquire) != self.drive_at
+                        || crate::google::signing_in()
+                        || dv_egress::is_stopped();
                     if !deleted {
                         CalendarOff::Pending
-                    } else if !self.revoke || moved {
+                    } else if !self.revoke {
                         CalendarOff::Cleaned
+                    } else if hold {
+                        CalendarOff::Pending
                     } else {
                         match google::revoke_token(http, &self.token) {
                             Ok(()) => CalendarOff::Cleaned,
@@ -428,9 +446,9 @@ impl CalendarCleanup {
     }
 }
 
-/// Move the permission (if any) into the cleanup owed, with the app's calendar. `true` when
-/// there was one.
-fn to_cleanup(v: &mut Vault) -> Result<bool, VaultError> {
+/// Move the permission (if any) into the cleanup owed, with the app's calendar (and `fresh`,
+/// one a round made whose outcome was not written yet). `true` when there was one.
+fn to_cleanup(v: &mut Vault, fresh: Option<String>) -> Result<bool, VaultError> {
     let read = v.secret(TOKEN_SECRET);
     // Also when it could not be read: the permission must not stay.
     let had = !matches!(read, Ok(None));
@@ -439,8 +457,10 @@ fn to_cleanup(v: &mut Vault) -> Result<bool, VaultError> {
         v.delete_secret(TOKEN_SECRET)?;
     }
     let mut calendars = calendars_of(&v.setting(CLEANUP_CALENDARS_KEY)?.unwrap_or_default());
-    if let Some(id) = v
+    for id in v
         .setting(CALENDAR_KEY)?
+        .into_iter()
+        .chain(fresh)
         .filter(|id| cal::calendar_id_ok(id))
     {
         if !calendars.contains(&id) {
@@ -448,10 +468,16 @@ fn to_cleanup(v: &mut Vault) -> Result<bool, VaultError> {
         }
     }
     if let Some(token) = &token {
+        let account = v
+            .setting(ACCOUNT_KEY)?
+            .filter(|a| !a.is_empty())
+            .unwrap_or_else(|| UNKNOWN_ACCOUNT.to_owned());
         v.set_secret(CLEANUP_SECRET, token)?;
         v.set_state(CLEANUP_CALENDARS_KEY, &calendars.join(" "))?;
+        v.set_state(CLEANUP_ACCOUNT_KEY, &account)?;
         v.set_state(CLEANUP_RESULT_KEY, "")?;
     }
+    v.set_state(ACCOUNT_KEY, "")?;
     v.set_state(CALENDAR_KEY, "")?;
     v.set_state(LAST_KEY, "")?;
     v.set_state(PROBLEM_KEY, "")?;
@@ -464,7 +490,7 @@ fn to_cleanup(v: &mut Vault) -> Result<bool, VaultError> {
 /// Inside a restore (a failure here undoes it): a backup taken while the copy was on carries
 /// its permission, and a restore must never turn it on. The permission becomes a cleanup.
 pub(crate) fn forget_on_restore(v: &mut Vault) -> Result<(), VaultError> {
-    if to_cleanup(v)? {
+    if to_cleanup(v, None)? {
         v.record(
             AuditEvent::CalendarSyncOff,
             None,
@@ -497,6 +523,26 @@ impl Core {
     #[must_use]
     pub fn calendar_holds_grant(&self) -> bool {
         self.calendar_on() || self.calendar_secret(CLEANUP_SECRET).is_some()
+    }
+
+    fn calendar_account(&self, key: &str) -> String {
+        self.vault
+            .as_ref()
+            .and_then(|v| v.setting(key).ok().flatten())
+            .filter(|a| !a.is_empty())
+            .unwrap_or_else(|| UNKNOWN_ACCOUNT.to_owned())
+    }
+
+    /// As [`Core::calendar_holds_grant`], on the account `tag` (the grant is one per account).
+    pub(crate) fn calendar_holds_grant_on(&self, tag: &str) -> bool {
+        (self.calendar_on() && shares_grant(&self.calendar_account(ACCOUNT_KEY), tag))
+            || (self.calendar_secret(CLEANUP_SECRET).is_some()
+                && shares_grant(&self.calendar_account(CLEANUP_ACCOUNT_KEY), tag))
+    }
+
+    /// The copy's generation, for the Drive copy's cleanup to notice a turning on.
+    pub(crate) fn calendar_generation(&self) -> Arc<AtomicU64> {
+        Arc::clone(&self.calendar.generation)
     }
 
     fn calendar_moved(&self) -> u64 {
@@ -551,16 +597,32 @@ impl Core {
         if self.calendar_on() && self.calendar_problem() != Some(CalendarProblem::Reconnect) {
             return Err(refused("הסנכרון עם יומן גוגל כבר דלוק."));
         }
+        // A cleanup on its way leaves the grant alone: it may be the one she is giving now.
+        self.calendar_moved();
         Ok(self.drive_keeps_grant())
     }
 
     /// Turning it on, step 3 (under the lock), after her browser sign-in gave a lasting
-    /// permission: keep it sealed in the vault. The first round goes at once.
-    pub fn calendar_turn_on_finish(&mut self, token: &str) -> Result<(), CoreError> {
+    /// permission of the Google account `account_id`: keep it sealed in the vault. The first
+    /// round goes at once. Not while a cleanup is owed on another account (its place is taken
+    /// until it is done).
+    pub fn calendar_turn_on_finish(
+        &mut self,
+        token: &str,
+        account_id: &str,
+    ) -> Result<(), CoreError> {
         if token.is_empty() {
             return Err(CoreError::Internal("an empty permission".to_owned()));
         }
-        self.vault_ref()?;
+        let tag = google_account_tag(self.vault_ref()?.vault_id(), account_id);
+        if self.calendar_secret(CLEANUP_SECRET).is_some()
+            && !shares_grant(&self.calendar_account(CLEANUP_ACCOUNT_KEY), &tag)
+        {
+            return Err(refused(
+                "עוד לא הושלמה המחיקה של היומן \"פגישות\" מחשבון הגוגל הקודם. התוכנה מנסה שוב \
+                 מעצמה בזמן שהכספת פתוחה, ואחרי שזה יושלם אפשר להדליק.",
+            ));
+        }
         let reconnect = self.calendar_problem() == Some(CalendarProblem::Reconnect);
         if self.calendar_on() && !reconnect {
             // Two turn-ons at once: the one kept stays (the same grant at Google).
@@ -574,6 +636,7 @@ impl Core {
         self.calendar_moved();
         let v = self.vault_mut()?;
         v.set_secret(TOKEN_SECRET, token)?;
+        v.set_state(ACCOUNT_KEY, &tag)?;
         if let Some(key) = key {
             v.set_secret(KEY_SECRET, &hex(key.as_bytes()))?;
         }
@@ -592,8 +655,15 @@ impl Core {
     /// only as the cleanup owed, returned to run with the core free.
     pub fn calendar_turn_off(&mut self) -> Result<Option<CalendarCleanup>, CoreError> {
         let was_on = self.calendar_on();
+        let fresh = self
+            .calendar
+            .fresh
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_ref()
+            .map(|(_, id)| id.clone());
         let v = self.vault_mut()?;
-        if to_cleanup(v)? {
+        if to_cleanup(v, fresh)? {
             v.record(AuditEvent::CalendarSyncOff, None, &serde_json::json!({}))?;
         }
         if was_on {
@@ -607,6 +677,7 @@ impl Core {
         let token = self.calendar_secret(CLEANUP_SECRET)?;
         let v = self.vault.as_ref()?;
         let calendars = calendars_of(&v.setting(CLEANUP_CALENDARS_KEY).ok().flatten()?);
+        let account = self.calendar_account(CLEANUP_ACCOUNT_KEY);
         Some(CalendarCleanup {
             session: self.session,
             token,
@@ -614,7 +685,11 @@ impl Core {
             generation: Arc::clone(&self.calendar.generation),
             at: self.calendar.generation.load(Ordering::Acquire),
             // The grant is one per account: withdrawn only when nothing else rests on it.
-            revoke: !self.calendar_on() && !self.drive_holds_grant(),
+            revoke: (!self.calendar_on()
+                || !shares_grant(&self.calendar_account(ACCOUNT_KEY), &account))
+                && !self.drive_holds_grant_on(&account),
+            drive_generation: self.drive_generation(),
+            drive_at: self.drive_generation().load(Ordering::Acquire),
             fresh: Arc::clone(&self.calendar.fresh),
             _running: Running::new(&self.calendar.running),
         })
@@ -727,10 +802,22 @@ impl Core {
         let now = iso(today());
         let (from, to) = rules::sync_window(&now)
             .ok_or_else(|| CoreError::Internal("sync window".to_owned()))?;
+        let at = self.calendar.generation.load(Ordering::Acquire);
+        // A calendar an earlier round made, whose outcome was not written (the vault locked
+        // first): used, not made again.
+        let fresh = self
+            .calendar
+            .fresh
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_ref()
+            .filter(|(made_at, _)| *made_at == at)
+            .map(|(_, id)| id.clone());
         let v = self.vault_ref()?;
         let calendar = v
             .setting(CALENDAR_KEY)?
-            .filter(|id| cal::calendar_id_ok(id));
+            .filter(|id| cal::calendar_id_ok(id))
+            .or(fresh);
         let visits = crate::clinic::visits_between(v, &from, &to)?;
         let wanted = rules::wanted_events(&visits, &from, &to, CalendarDetail::TimesOnly)
             .into_iter()
@@ -747,7 +834,7 @@ impl Core {
             session: self.session,
             cancel: self.cancel.clone(),
             generation: Arc::clone(&self.calendar.generation),
-            at: self.calendar.generation.load(Ordering::Acquire),
+            at,
             token,
             calendar,
             from,
@@ -804,16 +891,33 @@ impl Core {
     }
 }
 
+/// The lasting permission a sign-in gave, and the Google account it is of.
+pub struct Permission {
+    pub http: google::GoogleHttp,
+    pub token: Zeroizing<String>,
+    pub account_id: String,
+}
+
+impl std::fmt::Debug for Permission {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Permission").finish_non_exhaustive()
+    }
+}
+
 /// Sign in for the copy (outside the core's lock) and come back with the lasting permission.
 /// A permission that cannot be used is withdrawn at once, unless the grant is held
 /// (`keep_grant`, see [`Core::calendar_turn_on_check`]).
 pub fn lasting_permission(
     open: &dyn Fn(&str) -> Result<(), CoreError>,
     keep_grant: bool,
-) -> Result<(google::GoogleHttp, Zeroizing<String>), CoreError> {
+) -> Result<Permission, CoreError> {
     let (http, mut session) = crate::google::sign_in_calendar(open, keep_grant)?;
     match session.take_refresh_token() {
-        Some(token) => Ok((http, token)),
+        Some(token) => Ok(Permission {
+            http,
+            token,
+            account_id: session.account_id.clone(),
+        }),
         None => {
             if !keep_grant {
                 google::revoke(&http, session);
