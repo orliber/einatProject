@@ -40,6 +40,10 @@ const SETTINGS_ID: &str = "settings";
 const TALLY: &str = "tally";
 const TALLY_ID: &str = "tally";
 const CREATED: &str = "created";
+/// The longest stretch of holidays one request may ask for, in days after the first.
+const HOLIDAY_RANGE_DAYS: i64 = 400;
+/// How far ahead the visits are read when a pathway is proposed, in days.
+const PATHWAY_LOOK_DAYS: i64 = 730;
 const CHANGED: &str = "changed";
 const VOIDED: &str = "voided";
 
@@ -657,7 +661,287 @@ impl Core {
             ClinicRequest::CreateCase { patient_id, today } => {
                 self.clinic_create_case(&patient_id, &today)
             }
+            ClinicRequest::Holidays { from, to } => self.clinic_holidays(&from, &to),
+            ClinicRequest::FreeSlots {
+                today,
+                from,
+                minutes,
+                count,
+                skip_visit,
+            } => self.clinic_free_slots(&today, &from, minutes, count, skip_visit.as_deref()),
+            ClinicRequest::ProposePathway {
+                patient_id,
+                today,
+                from,
+            } => self.clinic_propose_pathway(&patient_id, &today, &from),
+            ClinicRequest::SavePathway {
+                patient_id,
+                visits,
+                package,
+                today,
+            } => self.clinic_save_pathway(&patient_id, visits, package, &today),
+            ClinicRequest::StarterTasks { patient_id, today } => {
+                self.clinic_starter_tasks(&patient_id, &today)
+            }
+            ClinicRequest::Insights {
+                today,
+                from_month,
+                to_month,
+            } => self.clinic_insights(&today, &from_month, &to_month),
         }
+    }
+
+    // -------------------------------------------------------------- planning (D-196..D-200)
+
+    /// Israel's holidays of a stretch (D-196). Nothing is read from the vault, but a locked
+    /// vault still says so first, like every other request of the clinic.
+    fn clinic_holidays(&mut self, from: &str, to: &str) -> Result<ClinicReply, CoreError> {
+        self.vault_ref()?;
+        let (Some(first), Some(last)) = (rules::day_number(from), rules::day_number(to)) else {
+            return refuse("צריך לבחור תאריכים תקינים ליומן.");
+        };
+        if last < first || last - first > HOLIDAY_RANGE_DAYS {
+            return refuse("אפשר לבקש את החגים של עד שנה אחת בכל פעם.");
+        }
+        Ok(ClinicReply::Holidays(rules::holidays_between(from, to)))
+    }
+
+    /// The visits from the later of `from` and today, as far ahead as a search looks.
+    fn visits_ahead(
+        &mut self,
+        today: &Today,
+        from: &str,
+        days: i64,
+    ) -> Result<Vec<Visit>, CoreError> {
+        let start = if from > today.date.as_str() {
+            from
+        } else {
+            today.date.as_str()
+        };
+        let Some(end) = rules::add_days(start, days) else {
+            return refuse("צריך לבחור תאריך תקין.");
+        };
+        between(self.vault_ref()?, start, &end)
+    }
+
+    fn clinic_free_slots(
+        &mut self,
+        today: &Today,
+        from: &str,
+        minutes: u16,
+        count: u8,
+        skip_visit: Option<&str>,
+    ) -> Result<ClinicReply, CoreError> {
+        check_today(today)?;
+        if rules::day_number(from).is_none() {
+            return refuse("צריך לבחור תאריך תקין.");
+        }
+        let visits = self.visits_ahead(today, from, rules::SLOT_SEARCH_DAYS)?;
+        let settings = settings(self.vault_ref()?);
+        let slots = rules::free_slots(&visits, &settings, today, from, minutes, count, skip_visit)
+            .map_err(refusal)?;
+        Ok(ClinicReply::Slots(slots))
+    }
+
+    fn clinic_propose_pathway(
+        &mut self,
+        patient_id: &str,
+        today: &Today,
+        from: &str,
+    ) -> Result<ClinicReply, CoreError> {
+        check_today(today)?;
+        if rules::day_number(from).is_none() {
+            return refuse("צריך לבחור תאריך תקין להתחלה.");
+        }
+        let v = self.vault_ref()?;
+        let child = patient(v, patient_id)?;
+        let settings = settings(v);
+        // Every step may look as far ahead as one search does.
+        let steps = i64::try_from(settings.pathway.len()).unwrap_or(i64::MAX);
+        let span = rules::SLOT_SEARCH_DAYS.saturating_mul(steps.max(1));
+        let visits = self.visits_ahead(today, from, span.min(PATHWAY_LOOK_DAYS))?;
+        let proposed =
+            rules::propose_pathway(&visits, &settings, &child, today, from).map_err(refusal)?;
+        Ok(ClinicReply::Proposed(proposed))
+    }
+
+    /// The pathway's visits, and with `package` the one charge of the package, in one
+    /// transaction (D-198). Only new planned visits of this patient, not before today.
+    fn clinic_save_pathway(
+        &mut self,
+        patient_id: &str,
+        visits: Vec<Visit>,
+        package: bool,
+        today: &Today,
+    ) -> Result<ClinicReply, CoreError> {
+        check_today(today)?;
+        if visits.is_empty() {
+            return refuse("אין פגישות לשמור במסלול.");
+        }
+        if visits.len() > rules::MAX_PATHWAY_STEPS {
+            return refuse("יש יותר מדי פגישות במסלול אחד.");
+        }
+        let v = self.vault_ref()?;
+        patient_exists(v, patient_id)?;
+        let settings = settings(v);
+        let mut rows = Vec::with_capacity(visits.len());
+        for visit in visits {
+            let mut visit = rules::normalize_visit(visit);
+            if !visit.id.is_empty() || visit.patient_id.as_deref() != Some(patient_id) {
+                return refuse("במסלול יש פגישה שלא שייכת לכרטיס הזה. אפשר לפתוח את המסלול מחדש.");
+            }
+            if visit.kind == VisitKind::Block {
+                return refuse("במסלול האבחון אין זמנים שמורים, רק פגישות.");
+            }
+            if visit.date < today.date {
+                return refuse("אחת הפגישות במסלול נקבעה לתאריך שעבר. אפשר לבחור תאריך אחר.");
+            }
+            visit.status = VisitStatus::Planned;
+            visit.series_id = None;
+            if package {
+                visit.fee = 0;
+                visit.charge_missed = false;
+            }
+            rules::validate_visit(&visit).map_err(refusal)?;
+            rows.push(visit);
+        }
+        let charge = if package {
+            if settings.package_fee <= 0 {
+                return refuse("עוד אין מחיר לחבילת האבחון. אפשר לקבוע אותו בהגדרות הקליניקה.");
+            }
+            let first = rows
+                .iter()
+                .map(|visit| visit.date.clone())
+                .min()
+                .unwrap_or_else(|| today.date.clone());
+            let charge = Charge {
+                id: String::new(),
+                patient_id: patient_id.to_owned(),
+                date: first,
+                amount: settings.package_fee,
+                what: settings.package_name.clone(),
+                voided: false,
+                void_reason: String::new(),
+            };
+            rules::validate_charge(&charge).map_err(refusal)?;
+            Some(charge)
+        } else {
+            None
+        };
+        let put = |row: &dyn Fn() -> Result<String, CoreError>, patient: &str, day: i64| {
+            Ok::<_, CoreError>((None, Some(patient.to_owned()), day, row()?))
+        };
+        let visit_rows = rows
+            .iter()
+            .map(|visit| put(&|| to_json(visit), patient_id, day_of(visit)))
+            .collect::<Result<Vec<_>, _>>()?;
+        let charge_rows = charge
+            .iter()
+            .map(|charge| put(&|| to_json(charge), patient_id, day_of(charge)))
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut groups: Vec<(&str, &[dv_vault::ClinicPut])> = vec![(Visit::KIND, &visit_rows)];
+        if !charge_rows.is_empty() {
+            groups.push((Charge::KIND, &charge_rows));
+        }
+        let ids = self
+            .vault_mut()?
+            .clinic_put_groups(&groups, Some(CREATED))?;
+        let ids: Vec<String> = ids.into_iter().next().unwrap_or_default();
+        // A family on the waiting list that gets a visit is in the process now.
+        let v = self.vault_mut()?;
+        if let Some(mut active) = rules::activated(&patient(v, patient_id)?) {
+            write_patient(v, &mut active)?;
+        }
+        let book = Book::load(self.vault_ref()?)?;
+        let written: Vec<Visit> = book
+            .visits
+            .iter()
+            .filter(|visit| ids.contains(&visit.id))
+            .cloned()
+            .collect();
+        let views = book.views(&written);
+        let overlapping = count(views.iter().filter(|view| view.overlaps).count());
+        Ok(ClinicReply::Saved(SavedVisits {
+            visits: views,
+            overlapping,
+            left_alone: 0,
+        }))
+    }
+
+    /// The starter follow-ups of a family (D-199), in one transaction.
+    fn clinic_starter_tasks(
+        &mut self,
+        patient_id: &str,
+        today: &Today,
+    ) -> Result<ClinicReply, CoreError> {
+        check_today(today)?;
+        let v = self.vault_ref()?;
+        let child = patient(v, patient_id)?;
+        let settings = settings(v);
+        let tasks: Vec<ClinicTask> = all(v)?;
+        let new = rules::starter_tasks(&settings, patient_id, &tasks, &today.date);
+        if new.is_empty() {
+            return refuse("כל המעקבים של ערכת הפתיחה כבר פתוחים בכרטיס הזה.");
+        }
+        let mut rows = Vec::with_capacity(new.len());
+        for task in &new {
+            rules::validate_task(task).map_err(refusal)?;
+            rules::task_known(task).map_err(refusal)?;
+            rows.push((
+                None,
+                Some(patient_id.to_owned()),
+                day_of(task),
+                to_json(task)?,
+            ));
+        }
+        let ids = self
+            .vault_mut()?
+            .clinic_put_many(ClinicTask::KIND, &rows, None)?;
+        let written: Vec<ClinicTask> = new
+            .into_iter()
+            .zip(ids)
+            .map(|(task, id)| ClinicTask { id, ..task })
+            .collect();
+        let names = HashMap::from([(child.id.clone(), child.name.clone())]);
+        Ok(ClinicReply::Tasks(rules::task_views(
+            &written,
+            &names,
+            &today.date,
+        )))
+    }
+
+    /// The picture of the clinic over months (D-200): counts and sums only.
+    fn clinic_insights(
+        &mut self,
+        today: &Today,
+        from_month: &str,
+        to_month: &str,
+    ) -> Result<ClinicReply, CoreError> {
+        check_today(today)?;
+        let v = self.vault_ref()?;
+        let book = Book::load(v)?;
+        // The report's progress plays no part in the picture: no case is read.
+        let reports = HashMap::new();
+        let records = rules::ClinicRecords {
+            patients: &book.patients,
+            visits: &book.visits,
+            notes: &book.notes,
+            charges: &book.charges,
+            payments: &book.payments,
+            tasks: &book.tasks,
+            reports: &reports,
+        };
+        let insights = rules::insights(
+            &records,
+            &book.settings,
+            from_month,
+            to_month,
+            &today.date,
+            &tally(v).0,
+            &erased_cards(v).0,
+        )
+        .map_err(refusal)?;
+        Ok(ClinicReply::Insights(Box::new(insights)))
     }
 
     /// Every case, at work or in the recycle bin, by id. Read once for a request.

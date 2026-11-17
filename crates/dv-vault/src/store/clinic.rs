@@ -253,6 +253,38 @@ impl Vault {
         Ok(ids)
     }
 
+    /// Records of several kinds in ONE transaction (D-198: the visits of an assessment
+    /// pathway and the charge of its package): all written or none. Each group follows the
+    /// rules of [`Vault::clinic_put_many`]; the settings record and the tally are not
+    /// written from here.
+    pub fn clinic_put_groups(
+        &mut self,
+        groups: &[(&str, &[ClinicPut])],
+        history: Option<&str>,
+    ) -> Result<Vec<Vec<String>>, VaultError> {
+        check_action(history)?;
+        for (kind, _) in groups {
+            check_kind(kind)?;
+            if *kind == TALLY || *kind == "settings" {
+                return Err(VaultError::Refused(
+                    "the clinic tally and the settings are not written in a group".to_owned(),
+                ));
+            }
+        }
+        let key = &self.keys.settings;
+        let tx = self.main.unchecked_transaction()?;
+        let mut all = Vec::with_capacity(groups.len());
+        for (kind, rows) in groups {
+            let mut ids = Vec::with_capacity(rows.len());
+            for row in *rows {
+                ids.push(put_row(&tx, key, kind, row, history)?);
+            }
+            all.push(ids);
+        }
+        tx.commit()?;
+        Ok(all)
+    }
+
     /// A session note's formal record goes into a case as a material, and the note is saved
     /// with the material's id, in ONE transaction (D-177): either both are written or
     /// neither, so asking again after a failure never adds the material twice. `input_id` is

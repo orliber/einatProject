@@ -351,6 +351,36 @@ pub struct NoteTemplate {
     pub text: String,
 }
 
+/// One step of the assessment pathway (D-198): a visit of this kind, at least `gap_days`
+/// after the step before (the first step: from the day she starts from).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(default)]
+#[ts(export)]
+pub struct PathwayStep {
+    pub kind: VisitKind,
+    pub gap_days: u16,
+}
+
+impl Default for PathwayStep {
+    fn default() -> Self {
+        Self {
+            kind: VisitKind::Assessment,
+            gap_days: 7,
+        }
+    }
+}
+
+/// A follow-up opened for a new family with one click (D-199): its kind, its title, and how
+/// many days from the day she opens it it is due.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS, Default)]
+#[serde(default)]
+#[ts(export)]
+pub struct StarterTask {
+    pub kind: TaskKind,
+    pub title: String,
+    pub due_days: u16,
+}
+
 /// How the clinic works. No personal data.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(default)]
@@ -374,6 +404,19 @@ pub struct ClinicSettings {
     pub debt_days: u16,
     /// Weeks on the waiting list before a family is pointed out.
     pub waiting_weeks: u16,
+    /// Minutes kept free before and after a visit when a free time is looked for (D-197).
+    pub buffer_minutes: u16,
+    /// Show Israel's holidays in the calendar, and skip the days the clinic is closed for
+    /// one when a free time is looked for (D-196).
+    pub holidays: bool,
+    /// The assessment pathway she schedules with one click (D-198).
+    pub pathway: Vec<PathwayStep>,
+    /// The price of a whole assessment charged as one package (D-198); 0: no package.
+    pub package_fee: Agorot,
+    /// The line of the package's charge, e.g. "חבילת אבחון".
+    pub package_name: String,
+    /// The follow-ups a new family starts with (D-199): questionnaires and documents.
+    pub starter_tasks: Vec<StarterTask>,
 }
 
 /// The placeholders of a message text, as she types them.
@@ -394,6 +437,11 @@ impl Default for ClinicSettings {
             kind,
             minutes,
             fee: 0,
+        };
+        let s = |kind, title: &str, due_days| StarterTask {
+            kind,
+            title: title.to_owned(),
+            due_days,
         };
         let t = |name: &str, text: &str| NoteTemplate {
             name: name.to_owned(),
@@ -439,6 +487,34 @@ impl Default for ClinicSettings {
             report_days: 21,
             debt_days: 30,
             waiting_weeks: 6,
+            buffer_minutes: 15,
+            holidays: true,
+            pathway: vec![
+                PathwayStep {
+                    kind: VisitKind::Intake,
+                    gap_days: 0,
+                },
+                PathwayStep {
+                    kind: VisitKind::Assessment,
+                    gap_days: 7,
+                },
+                PathwayStep {
+                    kind: VisitKind::Assessment,
+                    gap_days: 7,
+                },
+                PathwayStep {
+                    kind: VisitKind::Feedback,
+                    gap_days: 21,
+                },
+            ],
+            package_fee: 0,
+            package_name: "חבילת אבחון".to_owned(),
+            starter_tasks: vec![
+                s(TaskKind::Questionnaire, "שאלון להורים", 7),
+                s(TaskKind::Questionnaire, "שאלון למורה או לגננת", 14),
+                s(TaskKind::Document, "דוח או סיכום מהמסגרת החינוכית", 14),
+                s(TaskKind::Document, "אבחונים וסיכומים קודמים", 14),
+            ],
         }
     }
 }
@@ -540,6 +616,9 @@ pub enum AlertKind {
     TaskOverdue,
     /// The feedback meeting is within a week and the report is not finished.
     FeedbackSoon,
+    /// The feedback meeting is within a week and questionnaires or documents of the family
+    /// are still open (D-199).
+    MaterialsMissing,
     /// Rows of the clinic that could not be read (D-178). They are left as they are, shown
     /// nowhere and counted in no total; the text says how many. On the overview only.
     Unreadable,
@@ -910,6 +989,47 @@ pub enum ClinicRequest {
         patient_id: String,
         today: Today,
     },
+    /// Israel's holidays from `from` to `to`, both included (D-196).
+    Holidays {
+        from: String,
+        to: String,
+    },
+    /// Free times of `minutes` from `from` on (D-197), at most `count`. `skip_visit`: the
+    /// visit being moved, whose own time is not in the way.
+    FreeSlots {
+        today: Today,
+        from: String,
+        minutes: u16,
+        count: u8,
+        skip_visit: Option<String>,
+    },
+    /// The visits of the assessment pathway, each at the first free time after the step
+    /// before (D-198). Nothing is saved: she looks, changes, and then saves.
+    ProposePathway {
+        patient_id: String,
+        today: Today,
+        from: String,
+    },
+    /// Saves the pathway's visits in one go. With `package`, each visit is free and one
+    /// charge of the package's price is written with them, all or nothing (D-198).
+    SavePathway {
+        patient_id: String,
+        visits: Vec<Visit>,
+        package: bool,
+        today: Today,
+    },
+    /// Opens the starter follow-ups for the patient (D-199); one with the same title that
+    /// is still open is not opened twice.
+    StarterTasks {
+        patient_id: String,
+        today: Today,
+    },
+    /// The picture of the clinic over the months `from_month` to `to_month` (D-200).
+    Insights {
+        today: Today,
+        from_month: String,
+        to_month: String,
+    },
 }
 
 /// The answer to each [`ClinicRequest`].
@@ -935,5 +1055,9 @@ pub enum ClinicReply {
     Text(String),
     Cases(Vec<CaseChoice>),
     Case(CaseLink),
+    Holidays(Vec<Holiday>),
+    Slots(Vec<Slot>),
+    Proposed(Vec<Visit>),
+    Insights(Box<Insights>),
     Done,
 }

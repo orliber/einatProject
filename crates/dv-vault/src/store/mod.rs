@@ -37,7 +37,7 @@ pub use backup::{
     drill_backup, peek_backup, BackupCheck, BackupInfo, BackupJob, BackupPeek, BackupWritten,
     WrittenBackup, BACKUP_EXTENSION,
 };
-pub use clinic::{StoredClinicHistory, StoredClinicRecord};
+pub use clinic::{ClinicPut, StoredClinicHistory, StoredClinicRecord};
 pub use slots::NewSlot;
 pub use style::{StoredStyleProfile, StoredStyleSource};
 
