@@ -4444,6 +4444,23 @@ fn a_pathway_for_a_card_that_cannot_be_moved_on_writes_nothing() {
         },
     );
     assert!(text.contains("הקשר לילד"), "{text}");
+    // The same for one visit, and for a series.
+    let one = a_visit(&yoav, VisitKind::Intake, "2026-11-18", 600);
+    let request = try_save_visit(&mut core, one.clone());
+    let text = refused(&mut core, request);
+    assert!(text.contains("הקשר לילד"), "{text}");
+    let text = refused(
+        &mut core,
+        ClinicRequest::SaveVisit {
+            visit: one,
+            repeat: Some(Repeat {
+                every_weeks: 1,
+                count: 4,
+            }),
+            scope: Scope::One,
+        },
+    );
+    assert!(text.contains("הקשר לילד"), "{text}");
     let mine = card(&mut core, &yoav.id);
     assert_eq!(
         (mine.visits.len(), mine.charges.len(), mine.patient.status),

@@ -5,6 +5,11 @@
 .clinic-free-open {
   align-self: flex-start;
 }
+/* Says it cannot be used yet, and can still hold the focus (FreeTimes.tsx). */
+.clinic-free-open[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 .clinic-free {
   display: flex;
   flex-direction: column;

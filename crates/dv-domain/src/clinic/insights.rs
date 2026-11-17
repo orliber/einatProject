@@ -83,9 +83,10 @@ pub struct Insights {
     pub by_weekday: Vec<WeekdayCount>,
     /// Held visits by kind, erased cards included; kinds with none are left out.
     pub by_kind: Vec<KindCount>,
-    /// Minutes of held visits, and the minutes of her working hours on working days that
-    /// were not closed for a holiday, from the first day of the stretch up to today (or the
-    /// stretch's end, the earlier). Cards that still exist only.
+    /// Minutes of held visits, and the minutes of her working hours on working days (without
+    /// the days closed for a holiday when she has the holidays on, as free times count them),
+    /// from the first day of the stretch up to today (or the stretch's end, the earlier).
+    /// Cards that still exist only.
     pub held_minutes: u32,
     pub work_minutes: u32,
     /// `held_minutes` per thousand of `work_minutes`; 0 when there are no working minutes.
@@ -93,7 +94,8 @@ pub struct Insights {
     /// Cards opened in the stretch (by `created_on`), erased ones included.
     pub new_patients: u32,
     pub referrals: Vec<ReferralCount>,
-    /// Feedback meetings held in the stretch: assessments brought to an end.
+    /// Feedback meetings held in the stretch: assessments brought to an end. Erased cards
+    /// included, as in `by_kind`.
     pub assessments_done: u32,
     /// Medians in days, over the patients whose feedback was held in the stretch: from the
     /// first held intake (or the first held visit, when there was no intake) to the feedback;
@@ -138,7 +140,8 @@ const DEBT_BUCKETS: [(u32, &str); 4] = [
 /// * a visit counts when it has a patient (a block never does) and is held, cancelled or
 ///   missed on a date of the stretch. The counts, the money and `months` are the income
 ///   year's ([`income_year`] with [`income_with_erased`]), so they read as that screen does;
-///   `by_kind` and `by_method` add the same erased months to the cards that still exist;
+///   `by_kind`, `by_method` and `assessments_done` add the same erased months to the cards
+///   that still exist;
 /// * `by_method` lists the methods in the screens' order, and a method of a later version
 ///   last, as the diary does, so the methods add up to `received`;
 /// * a rate or the occupancy is per thousand, rounded to the nearest (a half up);

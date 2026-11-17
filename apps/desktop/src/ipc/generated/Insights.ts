@@ -32,9 +32,10 @@ by_weekday: Array<WeekdayCount>,
  */
 by_kind: Array<KindCount>, 
 /**
- * Minutes of held visits, and the minutes of her working hours on working days that
- * were not closed for a holiday, from the first day of the stretch up to today (or the
- * stretch's end, the earlier). Cards that still exist only.
+ * Minutes of held visits, and the minutes of her working hours on working days (without
+ * the days closed for a holiday when she has the holidays on, as free times count them),
+ * from the first day of the stretch up to today (or the stretch's end, the earlier).
+ * Cards that still exist only.
  */
 held_minutes: number, work_minutes: number, 
 /**
@@ -46,7 +47,8 @@ occupancy: number,
  */
 new_patients: number, referrals: Array<ReferralCount>, 
 /**
- * Feedback meetings held in the stretch: assessments brought to an end.
+ * Feedback meetings held in the stretch: assessments brought to an end. Erased cards
+ * included, as in `by_kind`.
  */
 assessments_done: number, 
 /**

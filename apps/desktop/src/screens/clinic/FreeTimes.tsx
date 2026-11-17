@@ -42,8 +42,10 @@ export function FreeTimes({ from, minutes, skip, today, onPick }: {
   });
   if (!open) {
     return (
-      <button ref={opener} type="button" className="link-btn clinic-free-open" disabled={!usable}
-        onClick={() => { focusNext.current = "group"; setOpen(true); }}>
+      // Not `disabled`: focus comes back here after "להסתיר" even while the length is not a
+      // number, and a disabled button cannot take it.
+      <button ref={opener} type="button" className="link-btn clinic-free-open" aria-disabled={!usable}
+        onClick={() => { if (!usable) return; focusNext.current = "group"; setOpen(true); }}>
         להציע שעות פנויות
       </button>
     );

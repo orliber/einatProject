@@ -221,6 +221,10 @@ pub fn validate_pathway(settings: &ClinicSettings) -> Result<(), DomainError> {
     Ok(())
 }
 
+/// What a pathway step says when it finds no room.
+const NO_ROOM_FOR_PATHWAY: &str = "לא נמצאה שעה פנויה לכל שלבי המסלול בחודשים הקרובים. אפשר \
+     להתחיל מתאריך אחר, או לקבוע את הפגישות אחת אחת.";
+
 /// The visits of the assessment pathway for this patient (D-198): each step at the first
 /// free time at least its gap after the step before (the first, from `from`), with the
 /// kind's length, the patient's fee (or the kind's), and her first place. Nothing is
@@ -246,10 +250,7 @@ pub fn propose_pathway(
         let minutes = kind_default(settings, step.kind).map_or(60, |d| d.minutes);
         let taken: Vec<&Visit> = visits.iter().chain(proposed.iter()).collect();
         let Some(slot) = first_free(&taken, settings, today, &earliest, minutes) else {
-            return refuse(
-                "לא נמצאה שעה פנויה לכל שלבי המסלול בחודשים הקרובים. אפשר להתחיל מתאריך \
-                 אחר, או לקבוע את הפגישות אחת אחת.",
-            );
+            return refuse(NO_ROOM_FOR_PATHWAY);
         };
         let visit = Visit {
             id: String::new(),
@@ -268,12 +269,14 @@ pub fn propose_pathway(
             note: String::new(),
         };
         proposed.push(visit);
-        // The next step: its gap after this one.
-        let gap = settings
-            .pathway
-            .get(proposed.len())
-            .map_or(0, |next| i64::from(next.gap_days));
-        earliest = add_days(&slot.date, gap.max(1)).unwrap_or(slot.date);
+        // The next step: its gap after this one, at least the next day; past the last date
+        // the clinic keeps, there is no room for it.
+        if let Some(next) = settings.pathway.get(proposed.len()) {
+            let Some(day) = add_days(&slot.date, i64::from(next.gap_days).max(1)) else {
+                return refuse(NO_ROOM_FOR_PATHWAY);
+            };
+            earliest = day;
+        }
     }
     Ok(proposed)
 }

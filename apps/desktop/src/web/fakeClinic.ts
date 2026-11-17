@@ -450,7 +450,7 @@ export class FakeClinic {
       case "insights": {
         const today = this.today(r.today);
         const data = fakeInsights(
-          { patients: this.patients, visits: this.visits, charges: this.charges, payments: this.payments, settings: this.settings },
+          { patients: this.patients, visits: this.visits, charges: this.charges, payments: this.payments, settings: this.settings, tally: this.tally, erasedCards: this.erasedCards },
           r.from_month, r.to_month, today.date,
         );
         return { kind: "insights", data };
@@ -546,8 +546,7 @@ export class FakeClinic {
       short(charge.what, "על מה החיוב");
     }
     // The waiting family's card is checked before the first write too.
-    const card = this.patient(patientId);
-    if (card.status === "waiting") patientKnown(card);
+    this.canActivate(patientId);
     const written = rows.map((v): Visit => ({ ...v, id: this.newId("visit") }));
     for (const w of written) {
       this.visits.push(w);
@@ -1182,6 +1181,13 @@ export class FakeClinic {
     return { visits, overlapping: visits.filter((v) => v.overlaps).length, left_alone: leftAlone };
   }
 
+  /** Whether `activate` would refuse the card (a value of a later version, D-178): asked
+   *  before anything is written, as the core does. */
+  private canActivate(patientId: string | null) {
+    const patient = patientId === null ? null : this.patient(patientId);
+    if (patient?.status === "waiting") patientKnown(patient);
+  }
+
   /** A family on the waiting list that gets a visit is in the process now. */
   private activate(patientId: string | null) {
     const patient = patientId === null ? null : this.patient(patientId);
@@ -1208,6 +1214,7 @@ export class FakeClinic {
         need(dates.every(clinicDate), "הסדרה נמשכת רחוק מדי. כדאי לקצר אותה.");
         series = this.newId("series");
       }
+      this.canActivate(v.patient_id);
       const written = dates.map((date): Visit => ({ ...v, id: this.newId("visit"), date, series_id: series }));
       for (const w of written) {
         this.visits.push(w);
@@ -1265,6 +1272,7 @@ export class FakeClinic {
       }
     }
     // All of them, or none: every check passed before the first one is written.
+    this.canActivate(v.patient_id);
     for (const { visit, next } of changed) {
       Object.assign(visit, next);
       this.keepVisit(visit, "changed");

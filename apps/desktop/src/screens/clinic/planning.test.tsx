@@ -109,6 +109,12 @@ describe("free times and holidays", () => {
     expect(within(dialog).getByLabelText("תאריך")).toHaveValue(date);
     // The keyboard stays with the free times, not thrown back to the top of the form.
     expect(document.activeElement).toBe(within(dialog).getByRole("group", { name: "שעות פנויות ביומן" }));
+    // Hidden while the length is not a number: the focus goes back to the button that opens them.
+    await user.clear(within(dialog).getByLabelText("משך (דקות)"));
+    await user.click(within(dialog).getByRole("button", { name: "להסתיר" }));
+    const opener = within(dialog).getByRole("button", { name: "להציע שעות פנויות" });
+    expect(document.activeElement).toBe(opener);
+    expect(opener).toHaveAttribute("aria-disabled", "true");
   });
 
   it("names the holidays in the calendar's days", async () => {

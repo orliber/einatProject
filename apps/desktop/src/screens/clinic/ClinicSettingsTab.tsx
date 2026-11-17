@@ -106,10 +106,10 @@ export function fromDraft(d: SettingsDraft): { settings: ClinicSettings } | { pr
   if (buffer === null) return { problem: "הזמן הפנוי בין פגישות צריך להיות מספר של דקות, למשל 15, או 0." };
   const pathway = [];
   for (const [i, step] of d.pathway.entries()) {
-    const gap = wholeNumber(step.gap);
+    // The first step is on the day she starts from (D-198): it has no gap, and no box for one.
+    const gap = i === 0 ? 0 : wholeNumber(step.gap);
     if (gap === null) return { problem: `הרווח בשלב ${i + 1} של מסלול האבחון צריך להיות מספר של ימים, למשל 7.` };
-    // The first step is on the day she starts from (D-198): it has no gap.
-    pathway.push({ kind: step.kind, gap_days: i === 0 ? 0 : gap });
+    pathway.push({ kind: step.kind, gap_days: gap });
   }
   const packageFee = d.packageFee.trim() === "" ? 0 : parseMoney(d.packageFee);
   if (packageFee === null) return { problem: "המחיר של חבילת האבחון צריך להיות סכום בשקלים, למשל 4500, עד 100,000. ריק: בלי חבילה." };

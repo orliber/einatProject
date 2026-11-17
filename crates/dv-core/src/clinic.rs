@@ -40,6 +40,8 @@ const SETTINGS_ID: &str = "settings";
 const TALLY: &str = "tally";
 const TALLY_ID: &str = "tally";
 const CREATED: &str = "created";
+/// The last date the clinic keeps (`rules::date_of_day`).
+const LAST_DATE: &str = "2200-12-31";
 /// The longest stretch of holidays one request may ask for, in days after the first.
 const HOLIDAY_RANGE_DAYS: i64 = 400;
 /// The furthest the visits are read when a pathway is proposed, in days: what the longest
@@ -719,9 +721,11 @@ impl Core {
         } else {
             today.date.as_str()
         };
-        let Some(end) = rules::add_days(start, days) else {
+        if rules::day_number(start).is_none() {
             return refuse("צריך לבחור תאריך תקין.");
-        };
+        }
+        // Past the last date the clinic keeps, there is nothing more to read.
+        let end = rules::add_days(start, days).unwrap_or_else(|| LAST_DATE.to_owned());
         between(self.vault_ref()?, start, &end)
     }
 
@@ -1482,6 +1486,15 @@ impl Core {
         for row in &rows {
             rules::validate_visit(row).map_err(refusal)?;
         }
+        // A family on the waiting list that gets a visit is in the process now. The card is
+        // checked before anything is written, so that a refusal leaves nothing behind.
+        let activated = match &visit.patient_id {
+            Some(patient_id) => rules::activated(&patient(self.vault_ref()?, patient_id)?),
+            None => None,
+        };
+        if let Some(active) = &activated {
+            rules::patient_known(active).map_err(refusal)?;
+        }
         let to_put = rows
             .iter()
             .map(|row| {
@@ -1500,12 +1513,8 @@ impl Core {
         if ids.is_empty() {
             ids.push(visit.id.clone());
         }
-        // A family on the waiting list that gets a visit is in the process now.
-        if let Some(patient_id) = &visit.patient_id {
-            let v = self.vault_mut()?;
-            if let Some(mut active) = rules::activated(&patient(v, patient_id)?) {
-                write_patient(v, &mut active)?;
-            }
+        if let Some(mut active) = activated {
+            write_patient(self.vault_mut()?, &mut active)?;
         }
         let book = Book::load(self.vault_ref()?)?;
         let written: Vec<Visit> = book

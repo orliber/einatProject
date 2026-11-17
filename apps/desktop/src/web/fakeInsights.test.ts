@@ -111,6 +111,30 @@ describe("visits", () => {
     const none = records({ settings: { ...defaultClinicSettings(), work_days: [] } });
     expect(fakeInsights(none, "2026-11", "2026-11", TODAY)).toMatchObject({ work_minutes: 0, occupancy: 0 });
   });
+
+  it("leaves out the days closed for a holiday only while the holidays are on, as the core does", () => {
+    // September 2026: Rosh Hashana's Sunday and Yom Kippur's Monday; 22 days from Sunday to Thursday.
+    const on = records();
+    const off = records({ settings: { ...on.settings, holidays: false } });
+    expect(fakeInsights(on, "2026-09", "2026-09", TODAY).work_minutes).toBe(20 * 360);
+    expect(fakeInsights(off, "2026-09", "2026-09", TODAY).work_minutes).toBe(22 * 360);
+  });
+
+  it("counts what erased cards counted for, as the yearly summary does", () => {
+    const p = patient({ created_on: "2026-03-02" });
+    const input = records({
+      patients: [p],
+      visits: [visit(p.id, "2026-03-10", { kind: "feedback" })],
+      tally: new Map([["2026-03", { held: [{ kind: "feedback", count: 1 }, { kind: "intake", count: 2 }], cancelled: 1, no_show: 0, charged: 50_000, received: [{ method: "cash", amount: 20_000 }] }]]),
+      erasedCards: new Map([["2026-03", 2]]),
+    });
+    const out = fakeInsights(input, "2026-03", "2026-03", TODAY);
+    expect([out.held, out.cancelled, out.charged, out.received, out.new_patients, out.assessments_done]).toEqual([4, 1, 50_000, 20_000, 3, 2]);
+    expect(out.by_kind).toEqual([{ kind: "intake", count: 2 }, { kind: "feedback", count: 2 }]);
+    expect(out.by_method).toEqual([{ method: "cash", amount: 20_000 }]);
+    // The days of the week know only the cards that still exist.
+    expect(out.by_weekday.reduce((sum, d) => sum + d.held, 0)).toBe(1);
+  });
 });
 
 describe("the assessment pathway", () => {

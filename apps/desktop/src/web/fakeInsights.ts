@@ -1,8 +1,9 @@
 // Browser preview and tests only: "תמונת מצב" (D-200) over the preview's records, by the rules
 // of the core (crates/dv-domain/src/clinic/insights.rs). Counts, sums, rates and medians only:
-// no name and no id leaves this function. Simplified where the preview has less than the
-// vault: there are no tallies of erased cards (D-179), and no day is closed for a holiday.
-// The refusals are the core's own sentences, thrown as the preview's clinic throws them.
+// no name and no id leaves this function. What erased cards counted for (D-179) is added as
+// the core adds it, and the days closed for a holiday are the preview's short list
+// (previewHolidays.ts). The refusals are the core's own sentences, thrown as the preview's
+// clinic throws them.
 import type { Charge } from "../ipc/generated/Charge";
 import type { ClinicSettings } from "../ipc/generated/ClinicSettings";
 import type { DebtBucket } from "../ipc/generated/DebtBucket";
@@ -19,6 +20,7 @@ import type { Visit } from "../ipc/generated/Visit";
 import type { VisitKind } from "../ipc/generated/VisitKind";
 import type { WeekdayCount } from "../ipc/generated/WeekdayCount";
 import { dayNumber, fromDayNumber, isIsoDate, monthRange, PAY_METHODS, VISIT_KINDS, weekday } from "../screens/clinic/format";
+import { previewHolidays } from "./previewHolidays";
 
 /** All the clinic's records, as the preview's clinic holds them. */
 export interface InsightsInput {
@@ -27,6 +29,19 @@ export interface InsightsInput {
   charges: Charge[];
   payments: Payment[];
   settings: ClinicSettings;
+  /** What erased cards counted for, by month `YYYY-MM` (the core's `ErasedTally`). */
+  tally?: ReadonlyMap<string, ErasedTallyMonth>;
+  /** Erased cards, by the month they were opened (the core's `ErasedCards`). */
+  erasedCards?: ReadonlyMap<string, number>;
+}
+
+/** One month of the erased cards' tally (the core's `ErasedMonth`): numbers only. */
+export interface ErasedTallyMonth {
+  held: KindCount[];
+  cancelled: number;
+  no_show: number;
+  charged: number;
+  received: { method: PayMethod; amount: number }[];
 }
 
 /** The longest stretch the screen may ask for, in months. */
@@ -151,6 +166,9 @@ export function fakeInsights(input: InsightsInput, fromMonth: string, toMonth: s
   const visits = sums.held + sums.cancelled + sums.no_show;
 
   const live = liveVisits(input.visits, stretch);
+  const erased = erasedIn(input, stretch);
+  const erasedHeld = erased.flatMap((e) => e.held);
+  for (const k of live.kinds) k.count += erasedHeld.filter((e) => e.kind === k.kind).reduce((sum, e) => sum + e.count, 0);
   const seen = heldByPatient(input.visits);
   const feedback = toFeedback(seen, stretch);
   const waiting = waitingNow(input.patients, now);
@@ -168,9 +186,9 @@ export function fakeInsights(input: InsightsInput, fromMonth: string, toMonth: s
     held_minutes: live.heldMinutes,
     work_minutes: workMinutes,
     occupancy: perThousand(live.heldMinutes, workMinutes),
-    new_patients: opened(input.patients, stretch),
+    new_patients: opened(input, stretch),
     referrals: referrals(input.patients, stretch),
-    assessments_done: live.feedbacks,
+    assessments_done: live.feedbacks + erasedHeld.filter((e) => e.kind === "feedback").reduce((sum, e) => sum + e.count, 0),
     intake_to_feedback_days: feedback.fromIntake,
     assessment_to_feedback_days: feedback.fromAssessment,
     waited_days: waited(input.patients, seen, stretch),
@@ -178,7 +196,7 @@ export function fakeInsights(input: InsightsInput, fromMonth: string, toMonth: s
     waiting_now_days: waiting.days,
     charged: agorot(sums.charged),
     received: agorot(sums.received),
-    by_method: byMethod(input.payments, stretch),
+    by_method: byMethod(input.payments, erased, stretch),
     debt: debt(input, now),
     months,
     before: {
@@ -186,7 +204,7 @@ export function fakeInsights(input: InsightsInput, fromMonth: string, toMonth: s
       to_month: monthText(before.last),
       held: beforeSums.held,
       received: agorot(beforeSums.received),
-      new_patients: opened(input.patients, before),
+      new_patients: opened(input, before),
     },
   };
 }
@@ -227,6 +245,16 @@ function incomeMonths(input: InsightsInput, first: number, last: number): Map<nu
   for (const p of input.payments.filter((x) => !x.voided)) {
     const row = rowOf(p.date);
     if (row) row.received += p.amount;
+  }
+  // What the erased cards counted for, as the income year adds it (D-179).
+  for (const [month, e] of input.tally ?? []) {
+    const row = rowOf(`${month}-01`);
+    if (!row) continue;
+    row.held += e.held.reduce((sum, k) => sum + k.count, 0);
+    row.cancelled += e.cancelled;
+    row.no_show += e.no_show;
+    row.charged += e.charged;
+    row.received += e.received.reduce((sum, m) => sum + m.amount, 0);
   }
   for (const row of rows.values()) {
     agorot(row.charged);
@@ -346,16 +374,19 @@ function waitingNow(patients: Patient[], now: number) {
   return { count: waiting.length, days: median(waits) };
 }
 
-/** Her working minutes on her working days, from the first day of the stretch to its last or
- *  to today, the earlier. (The preview closes no day for a holiday.) */
+/** Her working minutes on her working days (without the days closed for a holiday when she
+ *  has the holidays on, as free times count them), from the first day of the stretch to its
+ *  last or to today, the earlier. */
 function workMinutesOf(settings: ClinicSettings, fromMonth: string, toMonth: string, now: number): number {
   const first = dayNumber(monthRange(fromMonth).from);
   const last = dayNumber(monthRange(toMonth).to);
   if (first === null || last === null) return 0;
+  const closed = new Set(settings.holidays ? previewHolidays(monthRange(fromMonth).from, monthRange(toMonth).to).filter((h) => h.closed).map((h) => h.date) : []);
   const perDay = Math.max(0, settings.day_end - settings.day_start);
   let minutes = 0;
   for (let day = first; day <= Math.min(last, now); day += 1) {
-    if (settings.work_days.includes(weekday(fromDayNumber(day)) ?? -1)) minutes += perDay;
+    const date = fromDayNumber(day);
+    if (settings.work_days.includes(weekday(date) ?? -1) && !closed.has(date)) minutes += perDay;
   }
   return minutes;
 }
@@ -363,7 +394,14 @@ function workMinutesOf(settings: ClinicSettings, fromMonth: string, toMonth: str
 // ------------------------------------------------------------------ patients
 
 /** Cards opened in `months`. */
-const opened = (patients: Patient[], months: Months) => patients.filter((p) => months.hasDate(p.created_on)).length;
+/** Cards opened in `months`: those that still exist, and the erased ones (D-179). */
+const opened = (input: InsightsInput, months: Months) =>
+  input.patients.filter((p) => months.hasDate(p.created_on)).length
+  + [...(input.erasedCards ?? [])].filter(([month]) => months.holds(monthIndex(month))).reduce((sum, [, cards]) => sum + cards, 0);
+
+/** The months of the erased cards' tally that fall in `months`. */
+const erasedIn = (input: InsightsInput, months: Months): ErasedTallyMonth[] =>
+  [...(input.tally ?? [])].filter(([month]) => months.holds(monthIndex(month))).map(([, e]) => e);
 
 /** Where the new patients of the stretch came from: grouped without regard to case or spaces,
  *  shown as the card opened first wrote it; the most first; past the first eight, "אחרים". */
@@ -389,13 +427,16 @@ function referrals(patients: Patient[], stretch: Months): ReferralCount[] {
 
 /** Received in the stretch by method, in the screens' order and a method of a later version
  *  last; methods with nothing left out. */
-function byMethod(payments: Payment[], stretch: Months): MethodTotal[] {
+function byMethod(payments: Payment[], erased: ErasedTallyMonth[], stretch: Months): MethodTotal[] {
   const methods: PayMethod[] = [...PAY_METHODS, "unknown"];
   const totals = new Map<PayMethod, number>(methods.map((m) => [m, 0]));
+  const add = (method: PayMethod, amount: number) => {
+    if (totals.has(method)) totals.set(method, (totals.get(method) ?? 0) + amount);
+  };
   for (const p of payments) {
-    if (p.voided || !stretch.hasDate(p.date) || !totals.has(p.method)) continue;
-    totals.set(p.method, (totals.get(p.method) ?? 0) + p.amount);
+    if (!p.voided && stretch.hasDate(p.date)) add(p.method, p.amount);
   }
+  for (const e of erased) for (const m of e.received) add(m.method, m.amount);
   return methods.map((method) => ({ method, amount: agorot(totals.get(method) ?? 0) })).filter((m) => m.amount > 0);
 }
 
