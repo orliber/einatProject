@@ -331,7 +331,7 @@ function SettingsForm({ stored }: { stored: ClinicSettings }) {
           {draft.starter.map((t, i) => (
             <li key={i}><div className="clinic-step" role="group" aria-label={`מעקב ${i + 1}${t.title.trim() === "" ? "" : `: ${t.title.trim()}`}`}>
               <SelectField id={`settings-starter-${i}-kind`} label="סוג" value={t.kind} options={taskKinds} onChange={(kind) => setStarter(i, { kind })} />
-              <TextField id={`settings-starter-${i}-title`} label="מה לבקש" value={t.title} maxLength={200} className="grow" onChange={(title) => setStarter(i, { title })} />
+              <TextField id={`settings-starter-${i}-title`} label="מה לבקש" value={t.title} maxLength={200} className="grow fit-l" onChange={(title) => setStarter(i, { title })} />
               <TextField id={`settings-starter-${i}-due`} label="תוך כמה ימים" value={t.due} maxLength={3} dir="ltr" inputMode="numeric" className="clinic-narrow"
                 onChange={(due) => setStarter(i, { due })} />
               <button type="button" className="btn btn-small icon-btn clinic-step-remove" aria-label={`הסרת מעקב ${i + 1}`} onClick={() => set({ starter: draft.starter.filter((_, j) => j !== i) })}><CloseIcon /></button>

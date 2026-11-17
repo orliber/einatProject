@@ -67,6 +67,12 @@
   --radius-md: 10px;
   --radius-lg: 14px;
   --radius-xl: 18px;
+  /* How wide a field may grow, by what is typed in it (Einat, 2026-11-17: a box as wide as the
+     window for a five-letter name is heavy on the eye). A narrower width set for a field wins. */
+  --field-s: 200px; /* a phone number, a code */
+  --field-m: 360px; /* a name, a place, a choice from a list */
+  --field-l: 560px; /* a sentence: a title, a line of the report */
+  --field-text: 720px; /* a few lines of text */
   --shadow-paper: 0 1px 2px rgba(21, 32, 31, 0.04);
   --shadow-1: 0 1px 3px rgba(21, 32, 31, 0.1);
   --shadow-2: 0 12px 32px rgba(21, 32, 31, 0.16);

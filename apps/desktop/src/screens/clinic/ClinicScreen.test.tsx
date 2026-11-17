@@ -578,6 +578,44 @@ describe("the visit dialog", () => {
     expect(await within(todays()).findAllByText("חופפת לפגישה אחרת")).toHaveLength(2);
   });
 
+  it("the patient's list opens only while she looks for one, and the keys walk it (Einat, 17.11.2026)", async () => {
+    const { user } = await openClinic();
+    await within(todays()).findByRole("button", { name: "תמר" });
+    await user.click(screen.getByRole("button", { name: "פגישה חדשה" }));
+    const dialog = await screen.findByRole("dialog", { name: "פגישה חדשה" });
+    const field = within(dialog).getByLabelText("מטופל");
+    const list = () => within(dialog).queryByRole("list", { name: "מטופלים לבחירה" });
+    // The field has the focus, and the form under it stays in view.
+    await waitFor(() => expect(field).toHaveFocus());
+    expect(list()).toBeNull();
+    // A click on the field shows the families in progress; Escape closes the list, not the window.
+    await user.click(field);
+    expect(await within(dialog).findByRole("button", { name: "איתי" })).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    expect(list()).toBeNull();
+    expect(screen.getByRole("dialog", { name: "פגישה חדשה" })).toBeInTheDocument();
+    expect(field).toHaveFocus();
+    // The down arrow opens it and walks it; up from the first name is back in the field.
+    await user.keyboard("{ArrowDown}");
+    await waitFor(() => expect(list()).not.toBeNull());
+    await user.keyboard("{ArrowDown}");
+    const [first] = within(within(dialog).getByRole("list", { name: "מטופלים לבחירה" })).getAllByRole("button");
+    expect(first).toHaveFocus();
+    await user.keyboard("{ArrowUp}");
+    expect(field).toHaveFocus();
+    // Typing narrows it; a name chosen closes it.
+    await user.type(field, "אית");
+    await user.click(await within(dialog).findByRole("button", { name: "איתי" }));
+    expect(within(dialog).getByRole("group", { name: "מטופל" })).toHaveTextContent("איתי");
+    expect(list()).toBeNull();
+    // Leaving the field closes the list too.
+    await user.click(within(dialog).getByRole("button", { name: "החלפה" }));
+    await user.type(within(dialog).getByLabelText("מטופל"), "מא");
+    expect(await within(dialog).findByRole("button", { name: "מאיה" })).toBeInTheDocument();
+    await user.click(within(dialog).getByLabelText("כותרת (לא חובה)"));
+    expect(list()).toBeNull();
+  });
+
   it("time she keeps for herself has no patient and no fee, and can repeat", async () => {
     const { user, requests, notes } = await openClinic();
     await within(todays()).findByRole("button", { name: "תמר" });

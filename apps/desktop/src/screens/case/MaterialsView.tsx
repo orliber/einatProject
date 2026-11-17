@@ -604,7 +604,7 @@ function WriteDialog(props: { caseId: string; kind: InputKind; input?: CaseInput
           <label htmlFor="w-title">כותרת</label>
           <input id="w-title" className="input" value={title} onChange={(e) => setTitle(e.target.value)} />
         </div>
-        <div className="field">
+        <div className="field fit-full">
           <label htmlFor="w-text">הטקסט</label>
           <LocalText id="w-text" ref={box} className="textarea serif write-area" rows={14} initial={props.input?.content ?? ""} autoFocus
             onText={setContent} onLive={holdLive} onEditedChange={setChanged} onEmptyChange={setEmpty} />

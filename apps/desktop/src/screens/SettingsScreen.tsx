@@ -229,7 +229,7 @@ export function SettingsScreen({ pane: initial }: { pane?: SettingsPane | undefi
             <>
               <section className="card setting" aria-labelledby="s-report">
                 <h2 id="s-report">פרטי הדוח</h2>
-                <div className="field">
+                <div className="field fit-l">
                   <label htmlFor="r-title">כותרת</label>
                   <input id="r-title" className="input" value={report.title} onChange={(e) => setReport({ ...report, title: e.target.value })} />
                 </div>
@@ -238,7 +238,7 @@ export function SettingsScreen({ pane: initial }: { pane?: SettingsPane | undefi
                     {["David", "Arial", "Narkisim", "Frank Ruehl", "Times New Roman"].map((f) => <option key={f} value={f}>{f}</option>)}
                   </select>
                 </Row>
-                <div className="field">
+                <div className="field fit-l">
                   <label htmlFor="r-conf">שורת חיסיון בראש כל עמוד</label>
                   <input id="r-conf" className="input" value={report.confidentiality} onChange={(e) => setReport({ ...report, confidentiality: e.target.value })} />
                 </div>
