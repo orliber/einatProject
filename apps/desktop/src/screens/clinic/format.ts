@@ -289,6 +289,7 @@ export const ALERT_KIND_LABEL: Record<AlertKind, string> = {
   no_next_visit: "אין פגישה הבאה",
   task_overdue: "משימה שמועדה עבר",
   feedback_soon: "שיחת משוב קרובה",
+  materials_missing: "חסרים שאלונים או מסמכים",
   unreadable: "רישום שלא נקרא",
 };
 

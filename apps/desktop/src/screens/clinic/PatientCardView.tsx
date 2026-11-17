@@ -28,7 +28,7 @@ import type { VisitStatus } from "../../ipc/generated/VisitStatus";
 import type { VisitView } from "../../ipc/generated/VisitView";
 import {
   clinicKeys, useCaseChoices, useCreateCase, useLinkCase, useOptimistic, usePatientCard, useReloadClinic, useSaveCharge, useSavePatient,
-  useSavePayment, useSaveTask, useToday, useVoidCharge, useVoidPayment,
+  useSavePayment, useSaveTask, useStarterTasks, useToday, useVoidCharge, useVoidPayment,
 } from "./clinicData";
 import {
   CONTACT_ROLE_LABEL, formatDate, optionsWith, parseMoney, PATIENT_STATUS_LABEL, PAY_METHOD_LABEL, PAY_METHODS, TASK_KIND_LABEL, TASK_KINDS,
@@ -39,6 +39,7 @@ import {
   AlertList, ConfirmDialog, EmptyState, Field, Money, MoneyField, moneyText, Pager, PatientName, ReadError, RecordHistory, Section, SelectField,
   TextAreaField, TextField, useDiscreet, usePaged, useShownName, VisitRow,
 } from "./parts";
+import { PathwayDialog } from "./PathwayDialog";
 import { PatientDialog } from "./PatientDialog";
 import { VisitDialog } from "./VisitDialog";
 import "./PatientCardView.css";
@@ -50,6 +51,7 @@ type Open =
   | { kind: "edit" }
   | { kind: "close" }
   | { kind: "erase" }
+  | { kind: "pathway" }
   | null;
 
 /** When the protected clipboard lets go of a copy (the app says how long). */
@@ -104,7 +106,20 @@ function CardBody({ card, today, back, onBack }: { card: PatientCard; today: str
   const shown = useShownName();
   const save = useSavePatient();
   const [open, setOpen] = useState<Open>(null);
+  const starter = useStarterTasks();
   const key = clinicKeys.card(p.id, today);
+
+  /** The starter kit (D-199): the questionnaires and documents every family is asked for. */
+  async function openStarter() {
+    try {
+      const made = await starter.mutateAsync(p.id);
+      notify(made.length === 1 ? "נפתח מעקב אחד מערכת הפתיחה" : `נפתחו ${made.length} מעקבים מערכת הפתיחה`);
+    } catch (e) {
+      // The app already heard of the failure; the sentence says what happened (the kit is
+      // already open, or the card is gone).
+      notify(asUiError(e).message);
+    }
+  }
 
   // What happened in a visit shows on its row at once; the vault's refusal puts it back.
   const mark = useOptimistic<PatientCard, { visit: Visit; status: VisitStatus }>(
@@ -239,7 +254,14 @@ function CardBody({ card, today, back, onBack }: { card: PatientCard; today: str
         )}
       </header>
 
-      <Section title="מסלול האבחון">
+      <Section title="מסלול האבחון" aside={p.status === "closed" ? undefined : (
+        <div className="row pcard-plan">
+          <button type="button" className="btn btn-small" disabled={starter.isPending} onClick={() => void openStarter()}
+            title="פותח את השאלונים והמסמכים שמבקשים מכל משפחה, כמעקבים עם תאריך יעד">ערכת פתיחה</button>
+          <button type="button" className="btn btn-small btn-primary" onClick={() => setOpen({ kind: "pathway" })}
+            title="קובע את כל פגישות האבחון בשעות הפנויות הראשונות, ומראה אותן לפני השמירה">לקבוע את כל המסלול</button>
+        </div>
+      )}>
         <ProcessSteps steps={card.process} />
       </Section>
 
@@ -286,6 +308,7 @@ function CardBody({ card, today, back, onBack }: { card: PatientCard; today: str
           : <NoteDialog patientId={p.id} onClose={() => setOpen(null)} />
       )}
       {open?.kind === "edit" && <PatientDialog patient={p} onClose={() => setOpen(null)} />}
+      {open?.kind === "pathway" && <PathwayDialog patientId={p.id} patientName={p.name} onClose={() => setOpen(null)} />}
       {open?.kind === "close" && (
         <ConfirmDialog title="סגירת הכרטיס" action="לסגור את הכרטיס" onClose={() => setOpen(null)}
           onConfirm={async () => {
@@ -742,7 +765,7 @@ function PaymentDialog({ patientId, today, due, onClose }: { patientId: string; 
           <Field id="payment-date" label="תאריך"><DateField id="payment-date" value={form.date} onChange={(date) => set({ date })} /></Field>
         </div>
         <div className="clinic-form-row">
-          <TextField id="payment-receipt" label="מספר קבלה" value={form.receipt} maxLength={200} dir="ltr" className="grow"
+          <TextField id="payment-receipt" label="מספר קבלה" value={form.receipt} maxLength={200} dir="ltr" className="grow fit-s"
             hint="המספר של הקבלה שהופקה בתוכנת החשבוניות. אפשר להשלים אחר כך." onChange={(receipt) => set({ receipt })} />
           <TextField id="payment-payer" label="מי שילם (לא חובה)" value={form.payer} maxLength={200} className="grow"
             hint="כשלא ההורים שילמו: קופה, מוסד." onChange={(payer) => set({ payer })} />
@@ -862,7 +885,7 @@ function TaskDialog({ patientId, task, onClose }: { patientId: string; task?: Cl
       </>}>
       <div className="stack clinic-form">
         <TextField id="task-title" label="מה צריך לעשות" value={form.title} maxLength={200} autoFocus={!task} placeholder="למשל: לשלוח שאלון לגננת"
-          onChange={(title) => set({ title })} />
+          onChange={(title) => set({ title })} className="fit-l" />
         <div className="clinic-form-row">
           <SelectField<TaskKind> id="task-kind" label="סוג" value={form.kind} onChange={(kind) => set({ kind })}
             options={optionsWith(TASK_KINDS, TASK_KIND_LABEL, form.kind)} />

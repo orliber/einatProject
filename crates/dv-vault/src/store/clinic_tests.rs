@@ -243,6 +243,41 @@ fn put_many_is_all_or_nothing() {
 }
 
 #[test]
+fn a_group_of_kinds_is_all_or_nothing() {
+    let (_d, mut v) = new_vault();
+    let visits = vec![
+        (None, Some("p1".to_owned()), 1, "{}".to_owned()),
+        (None, Some("p1".to_owned()), 8, "{}".to_owned()),
+    ];
+    let ghost = vec![(
+        Some("ghost".to_owned()),
+        Some("p1".to_owned()),
+        1,
+        "{}".to_owned(),
+    )];
+    // The charge fails, so the visits written before it in the same group go too.
+    let r = v.clinic_put_groups(&[("visit", &visits), ("charge", &ghost)], Some("created"));
+    assert!(matches!(r, Err(VaultError::NotFound)));
+    assert!(v.clinic_kind("visit").unwrap().is_empty());
+    assert!(v.clinic_history_counts().unwrap().is_empty());
+    let charge = vec![(None, Some("p1".to_owned()), 1, "{}".to_owned())];
+    let ids = v
+        .clinic_put_groups(&[("visit", &visits), ("charge", &charge)], Some("created"))
+        .unwrap();
+    assert_eq!((ids[0].len(), ids[1].len()), (2, 1));
+    assert_eq!(v.clinic_kind("visit").unwrap().len(), 2);
+    assert_eq!(v.clinic_kind("charge").unwrap().len(), 1);
+    assert_eq!(v.clinic_history_counts().unwrap().len(), 3);
+    // Never the settings or the tally.
+    for kind in ["settings", "tally"] {
+        assert!(matches!(
+            v.clinic_put_groups(&[(kind, &charge)], None),
+            Err(VaultError::Refused(_))
+        ));
+    }
+}
+
+#[test]
 fn history_is_written_with_the_record_ordered_and_counted() {
     let (_d, mut v) = new_vault();
     let id = v

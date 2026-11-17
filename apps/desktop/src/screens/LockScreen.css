@@ -56,6 +56,10 @@
 .lock-input {
   min-height: 50px;
 }
+/* The password box is as wide as the button under it, whatever the card's width. */
+.lock-form .field > .input {
+  max-width: none;
+}
 .lock-wait {
   margin: 0;
   padding: var(--space-2) var(--space-3);

@@ -450,3 +450,25 @@ button.cal-day-name:hover {
   border-inline-start: 3px dashed var(--line-strong);
   color: var(--ink-muted);
 }
+
+/* Israel's holidays (D-196): the name in the day's head; a day the clinic is closed is shaded. */
+.cal-holiday {
+  font-size: var(--text-xs, 12px);
+  color: var(--ink-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+.cal-holiday-closed {
+  color: var(--warn-ink);
+  font-weight: 600;
+}
+.cal-month-holiday {
+  display: block;
+  margin-block-end: 2px;
+}
+.cal-day-closed .cal-day-body,
+.cal-month-closed {
+  background: repeating-linear-gradient(135deg, var(--surface-alt), var(--surface-alt) 6px, var(--sand) 6px, var(--sand) 12px);
+}

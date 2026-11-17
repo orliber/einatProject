@@ -473,6 +473,14 @@ pub fn normalize_settings(mut settings: ClinicSettings) -> ClinicSettings {
     for template in &mut settings.note_templates {
         template.name = clean_line(&template.name);
     }
+    settings.package_name = clean_line(&settings.package_name);
+    // The first step is on the day she starts from (D-198): it has no gap.
+    if let Some(first) = settings.pathway.first_mut() {
+        first.gap_days = 0;
+    }
+    for task in &mut settings.starter_tasks {
+        task.title = clean_line(&task.title);
+    }
     settings
 }
 
@@ -674,6 +682,19 @@ pub fn validate_settings(settings: &ClinicSettings) -> Result<(), DomainError> {
         at_most(template.name.trim(), SHORT_MAX, "שם התבנית")?;
         at_most(&template.text, TEMPLATE_MAX, "תבנית לסיכום")?;
     }
+    if settings.buffer_minutes > super::MAX_BUFFER {
+        return refuse(format!(
+            "הזמן הפנוי בין פגישות יכול להיות עד {} דקות.",
+            super::MAX_BUFFER
+        ));
+    }
+    fee_ok(settings.package_fee)?;
+    at_most(&settings.package_name, SHORT_MAX, "שם החבילה")?;
+    if settings.package_fee > 0 && blank(&settings.package_name) {
+        return refuse("צריך לתת שם לחבילת האבחון, כדי שיופיע בחיוב.");
+    }
+    super::validate_pathway(settings)?;
+    super::validate_starter_tasks(settings)?;
     Ok(())
 }
 
@@ -1332,11 +1353,12 @@ fn kind_rank(kind: AlertKind) -> u8 {
         AlertKind::NoNote => 1,
         AlertKind::TaskOverdue => 2,
         AlertKind::FeedbackSoon => 3,
-        AlertKind::ReportDue => 4,
-        AlertKind::Debt => 5,
-        AlertKind::NoNextVisit => 6,
-        AlertKind::Waiting => 7,
-        AlertKind::Unreadable => 8,
+        AlertKind::MaterialsMissing => 4,
+        AlertKind::ReportDue => 5,
+        AlertKind::Debt => 6,
+        AlertKind::NoNextVisit => 7,
+        AlertKind::Waiting => 8,
+        AlertKind::Unreadable => 9,
     }
 }
 
@@ -1495,6 +1517,30 @@ impl<'a> Of<'a> {
                                 "שיחת המשוב נקבעה ליום {when}, ו{}.",
                                 report_words(self.report)
                             ),
+                        ));
+                    }
+                    // Questionnaires and documents still open a week before the feedback
+                    // (D-199). Only how many: a task's title is hers, and may name someone.
+                    let missing = self
+                        .tasks
+                        .iter()
+                        .filter(|t| {
+                            t.done_on.is_none()
+                                && matches!(t.kind, TaskKind::Questionnaire | TaskKind::Document)
+                        })
+                        .count();
+                    let near = visit.kind == VisitKind::Feedback
+                        && (0..=FEEDBACK_SOON_DAYS).contains(&(day - now));
+                    if near && missing > 0 {
+                        let what = if missing == 1 {
+                            "שאלון או מסמך אחד עדיין פתוח".to_owned()
+                        } else {
+                            format!("{missing} שאלונים או מסמכים עדיין פתוחים")
+                        };
+                        alerts.push(self.visit_alert(
+                            AlertKind::MaterialsMissing,
+                            visit,
+                            format!("שיחת המשוב נקבעה ליום {when}, ו{what} במעקבים."),
                         ));
                     }
                 }

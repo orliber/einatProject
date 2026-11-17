@@ -1,6 +1,6 @@
 # ניהול קליניקה (בטא) – מפרט
 
-> החלטות: D-170 עד D-179, ו-D-194 (ייצוא לרואה החשבון), ב-`DECISIONS.md`. המסך מסומן "בטא" בכל מקום שבו הוא מופיע.
+> החלטות: D-170 עד D-179, D-194 (ייצוא לרואה החשבון) ו-D-196 עד D-200 (תכנון ותמונת מצב), ב-`DECISIONS.md`. המסך מסומן "בטא" בכל מקום שבו הוא מופיע.
 
 ## מה זה ולמי
 עינת מנהלת קליניקה של אבחונים התפתחותיים. היום היומן, סיכומי הפגישות, התשלומים והמעקבים נמצאים מחוץ לתוכנה. המודול מביא אותם פנימה, לתוך הכספת המוצפנת, ומחבר אותם לתיק האבחון ולדוח.
@@ -240,6 +240,34 @@ shown as voided and not counted), by date, then visits by time, then charges, th
 Income year: twelve months of held / cancelled / no-show counts, charged, received; new patients
 (by `created_on`); held visits by kind. Both include what erased cards counted for (D-179).
 
+Planning (D-196..D-199, `clinic/holidays.rs`, `clinic/slots.rs`): `holidays_between(from, to)` and
+`closed_day(date)` compute Israel's holidays from the Hebrew calendar (one day per festival;
+`closed` for the festival days and Yom Ha'atzmaut). `free_slots(visits, settings, today, from,
+minutes, count, skip_visit)`: up to `SLOT_SEARCH_DAYS` (120) ahead from the later of `from` and
+today (today, not before her minute), on `work_days` not closed (when `settings.holidays`),
+within `day_start..day_end`, starts on the quarter hour, clear of every visit that is not
+cancelled by `buffer_minutes` (0–120) on each side, at most `SLOTS_PER_DAY` (3) non-overlapping
+a day, `count` 1–12. `propose_pathway`: the first `settings.pathway` step at the first free time
+from `from` (its gap is unused; `normalize_settings` keeps it 0), each later step (≤ 12, not a
+block, gap 0–180) on or after the previous step's date + its gap (at least the next day), the
+kind's minutes, the patient's fee (or the kind's), the first place; never saved by itself. The
+core reads the visits for Σ(max(gap, 1) + 120) days, as far as the last step can reach.
+`SavePathway` takes only new planned visits of that patient, not before today (≤ 12), and with
+`package` (needs `package_fee` > 0) sets each fee to 0 and adds one charge (`package_name`,
+dated the first visit) in the same transaction (`Vault::clinic_put_groups`, `created` history for
+each); every check, the waiting card's activation included, runs before that transaction. `starter_tasks(settings, patient_id, open, today)`: one task per
+`settings.starter_tasks` (≤ 20, title ≤ 200, due 0–365 days), skipping a title (case and spaces
+ignored) already open for the patient; refused when none is left, or when the kit is empty. Alert `MaterialsMissing`: a
+planned Feedback within `FEEDBACK_SOON_DAYS` while Questionnaire/Document tasks of the patient
+are open; the text gives their number only.
+
+Insights (D-200, `clinic/insights.rs`): `insights(records, settings, from_month, to_month,
+today, tally, cards)` over whole months (≤ 24). Totals (held, cancelled, no-show, by kind,
+charged, received, new patients, by method, finished assessments) come from `income_year` +
+`income_with_erased`, so they equal the yearly summary; weekday, occupancy (working days as
+`free_slots` counts them, holidays closed only when `settings.holidays`), cycle times, referrals
+and debt ageing are of existing cards only. No field carries a name, an id or her text.
+
 Messages: placeholders `{הורה} {ילד} {יום} {תאריך} {שעה} {מקום} {סכום} {שמי}`; a missing parent
 name becomes "רב" ("שלום רב"); the date is `15.11.2026`, the time `09:30`, the day `ראשון`.
 
@@ -308,6 +336,13 @@ In כספים, "ייצוא לרואה החשבון" (beside the month and beside
 a month or a whole year and calls `ipc.exportIncome(period)` (not through `clinic`: the file goes
 from the core to the disk, and the window gets only its path, said in a toast). The browser
 preview answers with a path and the core's file name, and writes and downloads nothing.
+
+## תכנון ותמונת מצב (D-196 עד D-200)
+- **חגי ישראל ביומן.** מחושבים במחשב מהלוח העברי, בלי רשת. ימי חג מסומנים ומוצללים, ולא מוצעות בהם שעות; ערבי חג, חול המועד, חנוכה, פורים וימי הזיכרון מופיעים בשמם. אפשר לכבות בהגדרות.
+- **שעות פנויות.** בחלון פגישה, "להציע שעות פנויות" מראה את השעות הראשונות שמתאימות לאורך הפגישה: בימי העבודה, בשעות היומן, בלי ימי חג, ובמרחק שעינת קבעה מכל פגישה אחרת.
+- **מסלול אבחון.** בכרטיס וברשימת ההמתנה, "לקבוע את כל המסלול" מציע את כל פגישות האבחון (לפי השלבים שבהגדרות) בשעות הפנויות הראשונות: השלב הראשון מהיום שבוחרים, וכל שלב אחריו לפחות כמה ימים אחרי השלב שלפניו. עינת רואה ומשנה, ורק אז שומרת, הכל יחד. עם מחיר חבילה בהגדרות אפשר לחייב את האבחון כחבילה: חיוב אחד, והפגישות בלי מחיר.
+- **ערכת פתיחה.** בלחיצה אחת בכרטיס נפתחים השאלונים והמסמכים שמבקשים מכל משפחה, כמעקבים עם תאריך יעד. שבוע לפני שיחת המשוב, מה שעוד פתוח מופיע ב"מה דורש אותי" (כמה, לא מה).
+- **תמונת מצב.** לשונית עם המגמות של טווח חודשים: פגישות, ביטולים ואי-הגעות, תפוסה, משך האבחון, הפניות, כסף וחובות לפי ותק. מספרים בלבד, בלי שמות.
 
 ## מה לא נכנס לבטא (ולמה)
 - תזכורות אוטומטיות ב-SMS או ב-WhatsApp: שירות בתשלום ויציאה לרשת.

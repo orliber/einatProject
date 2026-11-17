@@ -1,0 +1,470 @@
+/* "תמונת מצב" (D-200): the row that picks the months, four tiles, two small column charts,
+   rows of bars, and figures as text. Colours only from styles/tokens.css, so both themes hold.
+   Marks are thin and quiet: one hue (--primary) for a measure, --warn-dot for visits that
+   were cancelled or missed, a 2px gap between touching parts, hairline axes. */
+.insights,
+.insights-body {
+  gap: var(--space-4);
+}
+.insights .num {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- the months picked ---------- */
+.insights-head {
+  gap: var(--space-3);
+}
+.insights-title {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+.insights-title h2 {
+  font-size: var(--text-2xl);
+}
+.insights-period {
+  font-size: var(--text-md);
+}
+.insights-picker {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: var(--space-3) var(--space-5);
+}
+.insights-months {
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+.insights-month .select {
+  min-width: 170px;
+}
+.insights-months-hint {
+  padding-bottom: var(--space-3);
+}
+/* Another stretch is being read: the last picture stays, quieter, in place. */
+.insights-stale {
+  opacity: 0.55;
+  transition: opacity var(--dur-enter) var(--ease-out);
+}
+
+/* ---------- the four tiles ---------- */
+.insights-tiles {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+.insights-tile {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-4);
+  min-width: 0;
+}
+.insights-tile-label {
+  font-size: var(--text-sm);
+  color: var(--ink-muted);
+}
+.insights-tile-value {
+  font-size: var(--text-3xl);
+  font-weight: 700;
+  line-height: 1.2;
+}
+/* A large figure keeps its own digit widths; tabular digits are for columns. */
+.insights-tile-value .num,
+.insights-tile-value .clinic-money {
+  font-variant-numeric: normal;
+}
+.insights-tile-value .insights-none {
+  font-size: var(--text-md);
+  font-weight: 600;
+}
+.insights-tile-foot {
+  font-size: var(--text-sm);
+  color: var(--ink-muted);
+  line-height: 1.5;
+}
+.insights-change {
+  color: var(--ink-muted);
+}
+.insights-change-up {
+  color: var(--ok);
+}
+.insights-change [aria-hidden="true"] {
+  margin-inline-end: var(--space-1);
+  font-size: var(--text-xs);
+}
+.insights-none {
+  color: var(--ink-muted);
+}
+
+/* ---------- sections side by side ---------- */
+.insights-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4);
+  align-items: start;
+}
+
+/* ---------- the months as columns ---------- */
+.insights-charts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-5);
+}
+.insights-chart {
+  margin: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.insights-chart-title {
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+.insights-chart-empty {
+  padding: var(--space-5) 0;
+}
+.insights-plot {
+  --plot-h: 140px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--space-2);
+  /* Room above the highest column for its value. */
+  padding-top: var(--space-5);
+}
+/* The axis at the start of the line (the right, in Hebrew): its top and 0, on the hairlines. */
+.insights-y {
+  position: relative;
+  height: var(--plot-h);
+  min-width: 3.5em;
+  font-size: var(--text-xs);
+  color: var(--ink-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.insights-y-top,
+.insights-y-zero {
+  position: absolute;
+  inset-inline-end: 0;
+}
+.insights-y-top {
+  top: 0;
+  transform: translateY(-50%);
+}
+.insights-y-zero {
+  bottom: 0;
+  transform: translateY(50%);
+}
+.insights-area {
+  position: relative;
+  min-width: 0;
+}
+/* Three hairlines: the top, the middle, and the baseline (one step stronger). */
+.insights-grid {
+  position: absolute;
+  inset-inline: 0;
+  top: 0;
+  height: var(--plot-h);
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line-strong);
+  background: linear-gradient(var(--line), var(--line)) center / 100% 1px no-repeat;
+  pointer-events: none;
+}
+.insights-cols {
+  position: relative;
+  display: flex;
+  gap: 2px;
+}
+.insights-col {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+}
+/* The whole height of the month is its hover target, not only the painted column. */
+.insights-col-plot {
+  position: relative;
+  height: var(--plot-h);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+.insights-col-bar {
+  position: relative;
+  width: min(24px, 70%);
+  min-height: 2px;
+  border-radius: 4px 4px 0 0;
+  background: var(--primary);
+  transition: background-color var(--dur-hover) var(--ease-out);
+}
+.insights-col:hover .insights-col-bar {
+  background: var(--primary-hover);
+}
+/* The value of the highest month, on its cap; at either end of the chart it keeps inside. */
+.insights-peak {
+  position: absolute;
+  bottom: calc(100% + 2px);
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--ink-soft);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.insights-peak-start,
+.insights-peak-end {
+  left: auto;
+  transform: none;
+}
+.insights-peak-start {
+  inset-inline-start: 0;
+}
+.insights-peak-end {
+  inset-inline-end: 0;
+}
+.insights-col-label {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: 2.6em;
+  padding-top: var(--space-1);
+  font-size: var(--text-xs);
+  color: var(--ink-muted);
+  white-space: nowrap;
+}
+.insights-col-year {
+  color: var(--ink-soft);
+  font-weight: 600;
+}
+/* On hover: the figure first, the month under it. */
+.insights-tip {
+  display: none;
+  position: absolute;
+  top: 0;
+  left: 50%;
+  z-index: 2;
+  transform: translate(-50%, calc(-100% - var(--space-2)));
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+  font-size: var(--text-xs);
+  color: var(--ink-muted);
+  white-space: nowrap;
+  pointer-events: none;
+}
+.insights-tip strong {
+  font-size: var(--text-sm);
+  color: var(--ink);
+}
+.insights-col:hover .insights-tip {
+  display: flex;
+}
+.insights-table {
+  overflow-x: auto;
+}
+
+/* ---------- rows of bars (by kind, by method, referrals, debts) ---------- */
+.insights-rank {
+  display: grid;
+  grid-template-columns: minmax(7rem, 2fr) minmax(60px, 3fr) auto;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-2);
+  border-top: 1px solid var(--line);
+}
+.insights-rank:first-child {
+  border-top: 0;
+}
+.insights-rank-name {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.insights-rank-figure {
+  text-align: end;
+  white-space: nowrap;
+}
+/* A bar grows from the start of the line (the right, in Hebrew); its far end is rounded. */
+.insights-hbar {
+  display: block;
+  height: 10px;
+  border-start-end-radius: 4px;
+  border-end-end-radius: 4px;
+  background: var(--primary);
+}
+/* The oldest debts, when there are any: the warning colours, and its icon beside the words. */
+.insights-rank-warn {
+  border: 1px solid var(--warn-line);
+  border-radius: var(--radius-sm);
+  background: var(--warn-soft);
+  color: var(--warn-ink);
+  font-weight: 600;
+}
+.insights-rank-warn + .insights-rank {
+  border-top: 0;
+}
+.insights-rank-warn .insights-hbar {
+  background: var(--warn-dot);
+}
+.insights-rank-warn .clinic-money {
+  color: var(--warn-ink);
+}
+.insights-debt-total {
+  font-weight: 600;
+}
+
+/* ---------- cancellations and no-shows ---------- */
+.insights-rates {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-5);
+}
+.insights-rates dt {
+  font-size: var(--text-sm);
+  color: var(--ink-muted);
+}
+.insights-rates dd {
+  margin: 0;
+}
+.insights-rate {
+  font-size: var(--text-2xl);
+  font-weight: 700;
+}
+.insights-weekdays {
+  gap: var(--space-2);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--line);
+}
+.insights-weekdays-head {
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+.insights-weekdays-head h3 {
+  font-size: var(--text-md);
+}
+.insights-legend {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--ink-muted);
+}
+.insights-legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+.insights-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  background: var(--primary);
+}
+.insights-swatch-missed {
+  background: var(--warn-dot);
+}
+.insights-day {
+  display: grid;
+  grid-template-columns: 4.5rem minmax(60px, 1fr) auto;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-1) 0;
+}
+.insights-day-name {
+  color: var(--ink-soft);
+}
+.insights-day-text {
+  font-size: var(--text-sm);
+  color: var(--ink-muted);
+  white-space: nowrap;
+}
+/* One bar a day, its parts apart by a 2px gap of the surface. */
+.insights-stack {
+  display: flex;
+  gap: 2px;
+  height: 10px;
+}
+.insights-seg {
+  flex-basis: 0;
+  min-width: 2px;
+  background: var(--primary);
+}
+.insights-seg:last-child {
+  border-start-end-radius: 4px;
+  border-end-end-radius: 4px;
+}
+.insights-seg-missed {
+  background: var(--warn-dot);
+}
+
+/* ---------- the assessment pathway ---------- */
+.insights-facts {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+}
+.insights-fact {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+  border-top: 1px solid var(--line);
+}
+.insights-fact:first-child {
+  border-top: 0;
+}
+.insights-fact dt {
+  color: var(--ink-soft);
+}
+.insights-fact dd {
+  margin: 0;
+  text-align: end;
+  font-weight: 600;
+}
+.insights-fact dd .muted {
+  font-weight: 400;
+}
+
+.insights-foot {
+  text-align: center;
+}
+
+/* A narrow window, or a large text size: one column, two tiles a row. */
+@container page (max-width: 1000px) {
+  .insights-columns,
+  .insights-charts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .insights-tiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .insights-fact {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .insights-fact dd {
+    text-align: start;
+  }
+  .insights-day-text {
+    white-space: normal;
+  }
+}

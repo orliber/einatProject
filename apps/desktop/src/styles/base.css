@@ -196,6 +196,42 @@ select.select {
   resize: vertical;
   line-height: 1.6;
 }
+/* A field is as wide as what is typed in it, not as the window (tokens.css, --field-*). The box
+   still narrows with a narrow window; `.fit-s`, `.fit-l` and `.fit-full` on the field choose
+   another measure. */
+.field > .input,
+.field > .select {
+  max-width: var(--field-m);
+}
+.field > .textarea {
+  max-width: var(--field-text);
+}
+.field.fit-s > .input,
+.field.fit-s > .select {
+  max-width: var(--field-s);
+}
+.field.fit-l > .input,
+.field.fit-l > .select {
+  max-width: var(--field-l);
+}
+.field.fit-full > .input,
+.field.fit-full > .select,
+.field.fit-full > .textarea {
+  max-width: none;
+}
+/* A field that grows along a row stops at its own measure, so the next one stays beside it. */
+.field.grow {
+  max-width: var(--field-m);
+}
+.field.grow.fit-s {
+  max-width: var(--field-s);
+}
+.field.grow.fit-l {
+  max-width: var(--field-l);
+}
+.field.grow.fit-full {
+  max-width: none;
+}
 .hint {
   margin: 0;
   font-size: var(--text-sm);

@@ -37,6 +37,15 @@ ignore = [
   { id = "RUSTSEC-2026-0368", reason = "zip 7.2 under candle-core only; extract() never called; our crates on zip 9 (review-by 2027-01-18)" },
   { id = "RUSTSEC-2026-0369", reason = "zip 7.2 under candle-core only; extract() never called; our crates on zip 9 (review-by 2027-01-18)" },
   { id = "RUSTSEC-2026-0429", reason = "zip 7.2 under candle-core only; extract() never called; our crates on zip 9 (review-by 2027-01-18)" },
+  # zip, four more (2026-11-17), again only zip 7.2 under candle-core 0.9 (`cargo tree -i
+  # zip@7.2.0 -e features`: no feature on). 0545 needs `aes-crypto` and a password read;
+  # 0546 is extract(); 0547 needs `legacy-zip`; 0548 is ZipStreamReader. candle-core builds
+  # zip with default-features = false and only opens entries by name with ZipArchive, in
+  # memory, for .npz/.pth files dv-ner never loads (it reads safetensors with a fixed SHA-256).
+  { id = "RUSTSEC-2026-0545", reason = "zip 7.2 under candle-core only; no aes-crypto feature, no password reads; our crates on zip 9 (review-by 2027-01-18)" },
+  { id = "RUSTSEC-2026-0546", reason = "zip 7.2 under candle-core only; extract() never called; our crates on zip 9 (review-by 2027-01-18)" },
+  { id = "RUSTSEC-2026-0547", reason = "zip 7.2 under candle-core only; legacy-zip feature off; our crates on zip 9 (review-by 2027-01-18)" },
+  { id = "RUSTSEC-2026-0548", reason = "zip 7.2 under candle-core only; ZipStreamReader never used; our crates on zip 9 (review-by 2027-01-18)" },
 ]
 
 [licenses]

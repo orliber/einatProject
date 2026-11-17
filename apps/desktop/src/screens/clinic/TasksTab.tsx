@@ -28,7 +28,7 @@ import "./TasksTab.css";
 /** The kinds of "מה דורש אותי" in the order she would deal with them: rows that were not read
  *  first (every figure is without them, D-178), then what is quick to close, then what takes
  *  a decision. */
-const ALERT_ORDER: AlertKind[] = ["unreadable", "unmarked", "no_note", "task_overdue", "feedback_soon", "report_due", "debt", "no_next_visit", "waiting"];
+const ALERT_ORDER: AlertKind[] = ["unreadable", "unmarked", "no_note", "task_overdue", "feedback_soon", "materials_missing", "report_due", "debt", "no_next_visit", "waiting"];
 
 /** How many lines of a kind show before "להציג את כולן". */
 const ALERTS_SHOWN = 4;
@@ -257,6 +257,7 @@ function QuickAdd({ today }: { today: string }) {
   const [forChild, setForChild] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const sending = useRef(false); // one follow-up per press, also when two presses come before a render
   const titleBox = useRef<HTMLInputElement>(null);
 
   function setDate(iso: string) {
@@ -275,11 +276,13 @@ function QuickAdd({ today }: { today: string }) {
 
   async function submit(e: FormEvent) {
     e.preventDefault();
+    if (sending.current) return;
     if (title.trim() === "") {
       setError("צריך לכתוב מה המעקב.");
       titleBox.current?.focus();
       return;
     }
+    sending.current = true;
     setBusy(true);
     setError(null);
     try {
@@ -294,6 +297,7 @@ function QuickAdd({ today }: { today: string }) {
     } catch (err) {
       setError((err as { message?: string }).message ?? "המעקב לא נשמר. אפשר לנסות שוב.");
     } finally {
+      sending.current = false;
       setBusy(false);
     }
   }
@@ -301,7 +305,7 @@ function QuickAdd({ today }: { today: string }) {
   return (
     <form className="stack clinic-quick-add" aria-label="מעקב חדש" onSubmit={(e) => void submit(e)}>
       <div className="clinic-quick-line">
-        <div className="field grow">
+        <div className="field grow fit-l">
           <label htmlFor="task-new-title">מעקב חדש</label>
           <input id="task-new-title" ref={titleBox} className="input" value={title} maxLength={TITLE_MAX} autoComplete="off"
             placeholder="מה לא לשכוח?" onChange={(e) => setTitle(e.target.value)} />
@@ -436,7 +440,7 @@ function TaskDialog({ task, onClose }: { task: ClinicTask; onClose: () => void }
         <button type="button" className="btn btn-primary" disabled={busy || !dirty} onClick={() => void submit()}>שמירה</button>
       </>}>
       <div className="stack clinic-form">
-        <TextField id="task-edit-title" label="מה המעקב" value={title} maxLength={TITLE_MAX} autoFocus onChange={setTitle} />
+        <TextField id="task-edit-title" label="מה המעקב" value={title} maxLength={TITLE_MAX} autoFocus onChange={setTitle} className="fit-l" />
         <div className="clinic-form-row">
           <SelectField<TaskKind> id="task-edit-kind" label="סוג" value={kind} options={optionsWith(TASK_KINDS, TASK_KIND_LABEL, kind)} onChange={setKind}
             hint={kind === "unknown" ? "הסוג שנשמר לא מוכר לגרסה הזו של התוכנה. כדי לשמור צריך לבחור סוג מהרשימה." : undefined} />

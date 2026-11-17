@@ -59,6 +59,10 @@ describe("the pure pieces", () => {
     expect(problem({ reportDays: "" })).toContain("הדוח");
     expect(problem({ debtDays: "-3" })).toContain("חוב");
     expect(problem({ waitingWeeks: "1.5" })).toContain("רשימת ההמתנה");
+    // The first step of the pathway has no box for a gap: whatever its draft holds, it is 0.
+    const first = fromDraft({ ...d, pathway: d.pathway.map((p, i) => (i === 0 ? { ...p, gap: "" } : p)) });
+    expect("settings" in first && first.settings.pathway[0]?.gap_days).toBe(0);
+    expect(problem({ pathway: d.pathway.map((p, i) => (i === 1 ? { ...p, gap: "" } : p)) })).toContain("בשלב 2");
     // An empty fee is no fee; time she keeps for herself never has one.
     const free = fromDraft({ ...d, kinds: d.kinds.map((k) => ({ ...k, fee: k.kind === "block" ? "999" : "" })) });
     expect("settings" in free && free.settings.defaults.every((k) => k.fee === 0)).toBe(true);

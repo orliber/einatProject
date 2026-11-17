@@ -527,10 +527,14 @@ fn records_are_stored_clean() {
         "גן".to_owned(),
     ];
     s.note_templates[0].name = "  היכרות ".to_owned();
+    s.pathway[0].gap_days = 7;
+    s.pathway[1].gap_days = 0;
     let s = normalize_settings(s);
     assert_eq!(s.work_days, [0, 2, 4]);
     assert_eq!(s.places, ["הקליניקה", "גן"]);
     assert_eq!(s.note_templates[0].name, "היכרות");
+    // The first step is on the day she starts from: it keeps no gap. The others keep theirs.
+    assert_eq!((s.pathway[0].gap_days, s.pathway[1].gap_days), (0, 0));
     assert!(validate_settings(&s).is_ok());
 }
 
@@ -4863,4 +4867,257 @@ fn the_windows_default_settings_are_the_cores() {
         "{}",
         serde_json::to_string_pretty(&core).unwrap()
     );
+}
+
+// ------------------------------------------------------------------ free times, the pathway, the starter kit (D-197..D-199)
+
+/// November 2026 has no holiday, so these tests hold whatever the holidays say.
+fn at(date: &str, minute: u16) -> Today {
+    Today {
+        date: date.to_owned(),
+        minute,
+    }
+}
+
+fn starts(slots: &[Slot]) -> Vec<(&str, u16)> {
+    slots.iter().map(|s| (s.date.as_str(), s.start)).collect()
+}
+
+#[test]
+fn free_times_keep_clear_of_visits_by_the_gap_and_spread_over_the_day() {
+    let settings = ClinicSettings::default();
+    // 10:30–11:30 is taken; with 15 minutes on each side, 10:15–11:45 is not free.
+    let busy = visit(
+        "v1",
+        VisitKind::Assessment,
+        TODAY,
+        630,
+        VisitStatus::Planned,
+    );
+    let slots = free_slots(&[busy], &settings, &at(TODAY, 600), TODAY, 60, 4, None).unwrap();
+    assert_eq!(
+        starts(&slots),
+        vec![
+            (TODAY, 705),
+            (TODAY, 765),
+            (TODAY, 825),
+            ("2026-11-16", 480)
+        ]
+    );
+}
+
+#[test]
+fn free_times_skip_days_off_cancelled_visits_and_the_visit_being_moved() {
+    let settings = ClinicSettings::default();
+    // From a Friday: the next working day is Sunday, from the start of her day.
+    let slots = free_slots(&[], &settings, &at(TODAY, 600), "2026-11-20", 60, 1, None).unwrap();
+    assert_eq!(starts(&slots), vec![("2026-11-22", 480)]);
+    // A cancelled visit takes no time; the one being moved frees its own.
+    let cancelled = visit(
+        "c1",
+        VisitKind::Therapy,
+        "2026-11-22",
+        480,
+        VisitStatus::Cancelled,
+    );
+    let moving = visit(
+        "m1",
+        VisitKind::Therapy,
+        "2026-11-22",
+        480,
+        VisitStatus::Planned,
+    );
+    let slots = free_slots(
+        &[cancelled, moving.clone()],
+        &settings,
+        &at(TODAY, 600),
+        "2026-11-22",
+        60,
+        1,
+        Some("m1"),
+    )
+    .unwrap();
+    assert_eq!(starts(&slots), vec![("2026-11-22", 480)]);
+    let slots = free_slots(
+        &[moving],
+        &settings,
+        &at(TODAY, 600),
+        "2026-11-22",
+        60,
+        1,
+        None,
+    )
+    .unwrap();
+    assert_eq!(starts(&slots), vec![("2026-11-22", 555)]);
+    // Nothing earlier than today.
+    let slots = free_slots(&[], &settings, &at(TODAY, 1150), "2026-11-01", 60, 1, None).unwrap();
+    assert_eq!(starts(&slots), vec![("2026-11-16", 480)]);
+}
+
+#[test]
+fn a_free_time_search_is_refused_with_a_sentence_when_it_makes_no_sense() {
+    let settings = ClinicSettings::default();
+    for (minutes, count) in [(0, 3), (60, 0), (60, 13), (721, 3)] {
+        assert!(free_slots(&[], &settings, &today(), TODAY, minutes, count, None).is_err());
+    }
+    assert!(free_slots(&[], &settings, &today(), "2026-13-01", 60, 3, None).is_err());
+}
+
+#[test]
+fn the_pathway_is_proposed_step_by_step_at_the_first_free_times() {
+    let settings = ClinicSettings::default();
+    let child = patient("p1", "נועם");
+    // A Monday filled from morning to night: the intake moves to Tuesday.
+    let full_day = Visit {
+        minutes: 720,
+        ..visit(
+            "b1",
+            VisitKind::Block,
+            "2026-11-16",
+            480,
+            VisitStatus::Planned,
+        )
+    };
+    let proposed = propose_pathway(
+        &[full_day],
+        &settings,
+        &child,
+        &at(TODAY, 600),
+        "2026-11-16",
+    )
+    .unwrap();
+    let got: Vec<(VisitKind, &str, u16, u16)> = proposed
+        .iter()
+        .map(|v| (v.kind, v.date.as_str(), v.start, v.minutes))
+        .collect();
+    assert_eq!(
+        got,
+        vec![
+            (VisitKind::Intake, "2026-11-17", 480, 60),
+            (VisitKind::Assessment, "2026-11-24", 480, 90),
+            (VisitKind::Assessment, "2026-12-01", 480, 90),
+            (VisitKind::Feedback, "2026-12-22", 480, 60),
+        ]
+    );
+    for v in &proposed {
+        assert!(v.id.is_empty());
+        assert_eq!(v.patient_id.as_deref(), Some("p1"));
+        assert_eq!(v.status, VisitStatus::Planned);
+        assert_eq!(v.place, "הקליניקה");
+    }
+    // The patient's own fee is the fee of each visit.
+    let paying = Patient {
+        session_fee: Some(45_000),
+        ..child.clone()
+    };
+    let proposed = propose_pathway(&[], &settings, &paying, &at(TODAY, 600), "2026-11-16").unwrap();
+    assert!(proposed.iter().all(|v| v.fee == 45_000));
+    // No pathway: a sentence that says where to set one.
+    let none = ClinicSettings {
+        pathway: Vec::new(),
+        ..ClinicSettings::default()
+    };
+    assert!(matches!(
+        propose_pathway(&[], &none, &child, &today(), TODAY),
+        Err(DomainError::Invalid(text)) if text.contains("הגדרות הקליניקה")
+    ));
+    // At the end of the dates the clinic keeps, a later step has no room: refused, never
+    // put on the same day as the step before it.
+    assert!(matches!(
+        propose_pathway(&[], &settings, &child, &at(TODAY, 600), "2200-12-25"),
+        Err(DomainError::Invalid(text)) if text.contains("לא נמצאה שעה פנויה")
+    ));
+}
+
+#[test]
+fn the_starter_kit_opens_each_follow_up_once() {
+    let settings = ClinicSettings::default();
+    let mut open = task("t1", Some("p1"), None);
+    open.title = "  שאלון   להורים ".to_owned();
+    let mut done = task("t2", Some("p1"), None);
+    done.title = "שאלון למורה או לגננת".to_owned();
+    done.done_on = Some("2026-11-01".to_owned());
+    let mut other = task("t3", Some("p2"), None);
+    other.title = "אבחונים וסיכומים קודמים".to_owned();
+    let tasks = starter_tasks(&settings, "p1", &[open, done, other], TODAY);
+    let got: Vec<(&str, Option<&str>, TaskKind)> = tasks
+        .iter()
+        .map(|t| (t.title.as_str(), t.due.as_deref(), t.kind))
+        .collect();
+    assert_eq!(
+        got,
+        vec![
+            (
+                "שאלון למורה או לגננת",
+                Some("2026-11-29"),
+                TaskKind::Questionnaire
+            ),
+            (
+                "דוח או סיכום מהמסגרת החינוכית",
+                Some("2026-11-29"),
+                TaskKind::Document
+            ),
+            (
+                "אבחונים וסיכומים קודמים",
+                Some("2026-11-29"),
+                TaskKind::Document
+            ),
+        ]
+    );
+    assert!(tasks
+        .iter()
+        .all(|t| t.id.is_empty() && t.patient_id.as_deref() == Some("p1")));
+}
+
+#[test]
+fn open_questionnaires_a_week_before_the_feedback_are_pointed_out_by_count_only() {
+    let mut questionnaire = task("t1", Some("p1"), None);
+    questionnaire.kind = TaskKind::Questionnaire;
+    questionnaire.title = "שאלון למורה של נועם".to_owned();
+    let world = |tasks: Vec<ClinicTask>| World {
+        visits: vec![visit(
+            "f1",
+            VisitKind::Feedback,
+            "2026-11-20",
+            600,
+            VisitStatus::Planned,
+        )],
+        tasks,
+        ..World::default()
+    };
+    let fired = world(vec![questionnaire.clone()]).of_kind(AlertKind::MaterialsMissing);
+    assert_eq!(fired.len(), 1);
+    assert_eq!(
+        fired[0].text,
+        "שיחת המשוב נקבעה ליום 20.11.2026 בשעה 10:00, ושאלון או מסמך אחד עדיין פתוח במעקבים."
+    );
+    assert!(!fired[0].text.contains("נועם"));
+    let mut answered = questionnaire.clone();
+    answered.done_on = Some(TODAY.to_owned());
+    assert!(!world(vec![answered]).fires(AlertKind::MaterialsMissing));
+    let mut call = questionnaire;
+    call.kind = TaskKind::Call;
+    assert!(!world(vec![call]).fires(AlertKind::MaterialsMissing));
+}
+
+#[test]
+fn settings_of_the_pathway_and_the_kit_are_checked() {
+    let bad = |change: fn(&mut ClinicSettings)| {
+        let mut settings = ClinicSettings::default();
+        change(&mut settings);
+        validate_settings(&settings).is_err()
+    };
+    assert!(validate_settings(&ClinicSettings::default()).is_ok());
+    assert!(bad(|s| s.buffer_minutes = 121));
+    assert!(bad(|s| s.pathway.push(PathwayStep {
+        kind: VisitKind::Block,
+        gap_days: 1
+    })));
+    assert!(bad(|s| s.pathway[1].gap_days = 181));
+    assert!(bad(|s| {
+        s.package_fee = 300_000;
+        s.package_name = String::new();
+    }));
+    assert!(bad(|s| s.starter_tasks[0].title = "  ".to_owned()));
+    assert!(bad(|s| s.starter_tasks[0].due_days = 366));
 }

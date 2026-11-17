@@ -4202,3 +4202,348 @@ fn the_income_export_adds_the_erased_cards_and_is_never_made_with_a_row_missing(
         Err(CoreError::Locked)
     ));
 }
+
+// ------------------------------------------------------------------ free times, the pathway, the starter kit (D-197..D-199)
+
+fn at(date: &str, minute: u16) -> Today {
+    Today {
+        date: date.to_owned(),
+        minute,
+    }
+}
+
+fn proposed(core: &mut Core, patient: &Patient, from: &str) -> Vec<Visit> {
+    match ask(
+        core,
+        ClinicRequest::ProposePathway {
+            patient_id: patient.id.clone(),
+            today: at(TODAY, 600),
+            from: from.to_owned(),
+        },
+    ) {
+        ClinicReply::Proposed(visits) => visits,
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn free_times_go_around_the_visits_in_the_vault() {
+    let (_d, mut core) = open_clinic();
+    let noa = new_patient(&mut core, "נועה בדויה");
+    save_visit(
+        &mut core,
+        a_visit(&noa, VisitKind::Assessment, "2026-11-16", 480),
+    );
+    let slots = match ask(
+        &mut core,
+        ClinicRequest::FreeSlots {
+            today: at(TODAY, 600),
+            from: "2026-11-16".to_owned(),
+            minutes: 60,
+            count: 2,
+            skip_visit: None,
+        },
+    ) {
+        ClinicReply::Slots(slots) => slots,
+        other => panic!("{other:?}"),
+    };
+    let got: Vec<(&str, u16)> = slots.iter().map(|s| (s.date.as_str(), s.start)).collect();
+    // 8:00–9:00 is taken, and 15 minutes after it are kept free.
+    assert_eq!(got, vec![("2026-11-16", 555), ("2026-11-16", 615)]);
+}
+
+#[test]
+fn the_pathway_is_proposed_and_saved_with_its_package_in_one_go() {
+    let (_d, mut core) = open_clinic();
+    let mut waiting = child("יואב בדוי");
+    waiting.status = PatientStatus::Waiting;
+    waiting.waiting_since = Some("2026-10-01".to_owned());
+    let yoav = save_patient(&mut core, waiting);
+    // Saving with a package before it has a price is refused, and writes nothing.
+    let visits = proposed(&mut core, &yoav, "2026-11-16");
+    assert_eq!(visits.len(), 4);
+    assert!(card(&mut core, &yoav.id).visits.is_empty());
+    let text = refused(
+        &mut core,
+        ClinicRequest::SavePathway {
+            patient_id: yoav.id.clone(),
+            visits: visits.clone(),
+            package: true,
+            today: now(),
+        },
+    );
+    assert!(text.contains("הגדרות הקליניקה"), "{text}");
+    assert!(card(&mut core, &yoav.id).visits.is_empty());
+    let settings = ClinicSettings {
+        package_fee: 600_000,
+        ..ClinicSettings::default()
+    };
+    ask(&mut core, ClinicRequest::SaveSettings { settings });
+    let saved = match ask(
+        &mut core,
+        ClinicRequest::SavePathway {
+            patient_id: yoav.id.clone(),
+            visits,
+            package: true,
+            today: now(),
+        },
+    ) {
+        ClinicReply::Saved(saved) => saved,
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(saved.visits.len(), 4);
+    let mine = card(&mut core, &yoav.id);
+    assert_eq!(mine.patient.status, PatientStatus::Active);
+    assert_eq!(mine.visits.len(), 4);
+    assert!(mine.visits.iter().all(|v| v.visit.fee == 0));
+    assert_eq!(mine.charges.len(), 1);
+    assert_eq!(mine.charges[0].amount, 600_000);
+    assert_eq!(mine.charges[0].what, "חבילת אבחון");
+    assert_eq!(mine.charges[0].date, "2026-11-16");
+    assert_eq!(mine.balance.charged, 600_000);
+}
+
+#[test]
+fn a_pathway_takes_only_new_visits_of_its_own_card_from_today_on() {
+    let (_d, mut core) = open_clinic();
+    let yoav = new_patient(&mut core, "יואב בדוי");
+    let other = new_patient(&mut core, "מיכל בדויה");
+    let visits = proposed(&mut core, &yoav, "2026-11-16");
+    let save = |core: &mut Core, visits: Vec<Visit>| {
+        refused(
+            core,
+            ClinicRequest::SavePathway {
+                patient_id: yoav.id.clone(),
+                visits,
+                package: false,
+                today: now(),
+            },
+        )
+    };
+    let mut foreign = visits.clone();
+    foreign[1].patient_id = Some(other.id.clone());
+    save(&mut core, foreign);
+    let mut past = visits.clone();
+    past[0].date = "2026-11-01".to_owned();
+    save(&mut core, past);
+    let mut block = visits.clone();
+    block[2].kind = VisitKind::Block;
+    save(&mut core, block);
+    save(&mut core, Vec::new());
+    assert!(card(&mut core, &yoav.id).visits.is_empty());
+    assert!(card(&mut core, &other.id).visits.is_empty());
+}
+
+#[test]
+fn the_starter_kit_opens_its_follow_ups_once() {
+    let (_d, mut core) = open_clinic();
+    let yoav = new_patient(&mut core, "יואב בדוי");
+    let request = || ClinicRequest::StarterTasks {
+        patient_id: yoav.id.clone(),
+        today: now(),
+    };
+    let opened = match ask(&mut core, request()) {
+        ClinicReply::Tasks(tasks) => tasks,
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(opened.len(), 4);
+    assert!(opened
+        .iter()
+        .all(|t| !t.task.id.is_empty() && t.task.patient_id.as_deref() == Some(&yoav.id)));
+    assert_eq!(card(&mut core, &yoav.id).tasks.len(), 4);
+    let text = refused(&mut core, request());
+    assert!(text.contains("כבר פתוחים"), "{text}");
+    assert_eq!(card(&mut core, &yoav.id).tasks.len(), 4);
+    // With no follow-ups in the kit, she is sent to the settings, not told they are open.
+    let settings = ClinicSettings {
+        starter_tasks: Vec::new(),
+        ..ClinicSettings::default()
+    };
+    ask(&mut core, ClinicRequest::SaveSettings { settings });
+    let tamar = new_patient(&mut core, "תמר בדויה");
+    let text = refused(
+        &mut core,
+        ClinicRequest::StarterTasks {
+            patient_id: tamar.id.clone(),
+            today: now(),
+        },
+    );
+    assert!(text.contains("עוד אין ערכת פתיחה"), "{text}");
+    assert!(card(&mut core, &tamar.id).tasks.is_empty());
+}
+
+#[test]
+fn a_long_pathway_sees_the_visits_as_far_as_its_last_step() {
+    let (_d, mut core) = open_clinic();
+    let settings = ClinicSettings {
+        pathway: [
+            (VisitKind::Intake, 0),
+            (VisitKind::Assessment, 180),
+            (VisitKind::Assessment, 180),
+            (VisitKind::Feedback, 180),
+        ]
+        .into_iter()
+        .map(|(kind, gap_days)| rules::PathwayStep { kind, gap_days })
+        .collect(),
+        ..ClinicSettings::default()
+    };
+    ask(&mut core, ClinicRequest::SaveSettings { settings });
+    let yoav = new_patient(&mut core, "יואב בדוי");
+    let first = proposed(&mut core, &yoav, "2026-11-16");
+    let last = first.last().unwrap().clone();
+    // More than a year and a half ahead, further than four searches of 120 days.
+    assert!(
+        rules::day_number(&last.date).unwrap() - rules::day_number("2026-11-16").unwrap() > 480
+    );
+    // Time she keeps for herself at that hour: the feedback goes around it.
+    save_visit(
+        &mut core,
+        Visit {
+            kind: VisitKind::Block,
+            title: "כתיבת דוחות".to_owned(),
+            date: last.date.clone(),
+            start: last.start,
+            minutes: 60,
+            ..Visit::default()
+        },
+    );
+    let again = proposed(&mut core, &yoav, "2026-11-16");
+    let moved = again.last().unwrap();
+    assert_ne!((&moved.date, moved.start), (&last.date, last.start));
+}
+
+#[test]
+fn a_pathway_for_a_card_that_cannot_be_moved_on_writes_nothing() {
+    let (_d, mut core) = open_clinic();
+    let mut waiting = child("יואב בדוי");
+    waiting.status = PatientStatus::Waiting;
+    waiting.waiting_since = Some("2026-10-01".to_owned());
+    let yoav = save_patient(&mut core, waiting);
+    let settings = ClinicSettings {
+        package_fee: 600_000,
+        ..ClinicSettings::default()
+    };
+    ask(&mut core, ClinicRequest::SaveSettings { settings });
+    let visits = proposed(&mut core, &yoav, "2026-11-16");
+    // A role of a later version on the card (D-178): it reads, and this version may not write it.
+    let json = serde_json::to_string(&yoav)
+        .unwrap()
+        .replace(r#""role":"mother""#, r#""role":"grandmother""#);
+    assert!(json.contains("grandmother"));
+    core.vault_mut()
+        .unwrap()
+        .save_clinic_patient(Some(&yoav.id), &json)
+        .unwrap();
+    let text = refused(
+        &mut core,
+        ClinicRequest::SavePathway {
+            patient_id: yoav.id.clone(),
+            visits,
+            package: true,
+            today: now(),
+        },
+    );
+    assert!(text.contains("הקשר לילד"), "{text}");
+    // The same for one visit, and for a series.
+    let one = a_visit(&yoav, VisitKind::Intake, "2026-11-18", 600);
+    let request = try_save_visit(&mut core, one.clone());
+    let text = refused(&mut core, request);
+    assert!(text.contains("הקשר לילד"), "{text}");
+    let text = refused(
+        &mut core,
+        ClinicRequest::SaveVisit {
+            visit: one,
+            repeat: Some(Repeat {
+                every_weeks: 1,
+                count: 4,
+            }),
+            scope: Scope::One,
+        },
+    );
+    assert!(text.contains("הקשר לילד"), "{text}");
+    let mine = card(&mut core, &yoav.id);
+    assert_eq!(
+        (mine.visits.len(), mine.charges.len(), mine.patient.status),
+        (0, 0, PatientStatus::Waiting)
+    );
+}
+
+#[test]
+fn the_holidays_are_given_for_a_stretch_and_closed_days_get_no_free_time() {
+    let (_d, mut core) = open_clinic();
+    let holidays = match ask(
+        &mut core,
+        ClinicRequest::Holidays {
+            from: "2026-09-01".to_owned(),
+            to: "2026-09-30".to_owned(),
+        },
+    ) {
+        ClinicReply::Holidays(holidays) => holidays,
+        other => panic!("{other:?}"),
+    };
+    assert!(holidays
+        .iter()
+        .any(|h| h.date == "2026-09-21" && h.name == "יום כיפור" && h.closed));
+    refused(
+        &mut core,
+        ClinicRequest::Holidays {
+            from: "2026-01-01".to_owned(),
+            to: "2027-12-31".to_owned(),
+        },
+    );
+    // Yom Kippur 2026 is a Monday: the first free time from it is on Tuesday.
+    let slots = match ask(
+        &mut core,
+        ClinicRequest::FreeSlots {
+            today: at("2026-09-20", 1200),
+            from: "2026-09-21".to_owned(),
+            minutes: 60,
+            count: 1,
+            skip_visit: None,
+        },
+    ) {
+        ClinicReply::Slots(slots) => slots,
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(slots[0].date, "2026-09-22");
+}
+
+#[test]
+fn the_picture_counts_without_names() {
+    let (_d, mut core) = open_clinic();
+    let noa = new_patient(&mut core, "נועה בדויה");
+    let held = save_visit(
+        &mut core,
+        a_visit(&noa, VisitKind::Intake, "2026-11-02", 600),
+    );
+    mark(&mut core, &held, VisitStatus::Held);
+    let missed = save_visit(
+        &mut core,
+        a_visit(&noa, VisitKind::Assessment, "2026-11-09", 600),
+    );
+    mark(&mut core, &missed, VisitStatus::NoShow);
+    let picture = match ask(
+        &mut core,
+        ClinicRequest::Insights {
+            today: now(),
+            from_month: "2026-11".to_owned(),
+            to_month: "2026-11".to_owned(),
+        },
+    ) {
+        ClinicReply::Insights(picture) => picture,
+        other => panic!("{other:?}"),
+    };
+    assert_eq!((picture.held, picture.no_show), (1, 1));
+    assert_eq!(picture.no_show_rate, 500);
+    // Nothing on the screen can name anyone.
+    let json = serde_json::to_string(&picture).unwrap();
+    assert!(!json.contains("נועה"), "{json}");
+    refused(
+        &mut core,
+        ClinicRequest::Insights {
+            today: now(),
+            from_month: "2026-12".to_owned(),
+            to_month: "2026-11".to_owned(),
+        },
+    );
+}

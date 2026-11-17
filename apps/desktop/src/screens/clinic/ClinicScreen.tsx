@@ -7,6 +7,7 @@ import { useApp } from "../../App";
 import { TopBar } from "../../components/TopBar";
 import { CalendarTab } from "./CalendarTab";
 import { ClinicSettingsTab } from "./ClinicSettingsTab";
+import { InsightsTab } from "./InsightsTab";
 import { MoneyTab } from "./MoneyTab";
 import { ClinicNavContext, type ClinicNav } from "./parts";
 import { PatientCardView } from "./PatientCardView";
@@ -50,6 +51,7 @@ export function ClinicScreen({ tab = "today", patientId }: { tab?: ClinicTab | u
               : active === "waiting" ? <WaitingTab />
               : active === "tasks" ? <TasksTab />
               : active === "money" ? <MoneyTab />
+              : active === "insights" ? <InsightsTab />
               : <ClinicSettingsTab />}
           </div>
         </ClinicNavContext.Provider>

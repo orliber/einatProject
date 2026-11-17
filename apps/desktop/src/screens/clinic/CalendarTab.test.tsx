@@ -202,7 +202,7 @@ describe("the week", () => {
     expect(await within(dialog).findByLabelText("תאריך")).toHaveValue("18.11.2026");
     expect(within(dialog).getByLabelText("שעת התחלה")).toHaveValue("08:00");
     await user.type(within(dialog).getByLabelText("מטופל"), "אית");
-    await user.click(await within(dialog).findByRole("button", { name: "איתי" }));
+    await user.click(await within(dialog).findByRole("option", { name: "איתי" }));
     await user.click(within(dialog).getByRole("button", { name: "קביעת הפגישה" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(saves()[0]).toMatchObject({ visit: { id: "", date: "2026-11-18", start: 480 } });

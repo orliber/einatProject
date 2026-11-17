@@ -13,7 +13,7 @@
 }
 .patients-search {
   flex: 1 1 280px;
-  max-width: 420px;
+  max-width: var(--field-m);
 }
 .patients-search .input {
   width: 100%;

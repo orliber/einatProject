@@ -19,6 +19,7 @@ import type { Visit } from "../../ipc/generated/Visit";
 import type { VisitKind } from "../../ipc/generated/VisitKind";
 import type { VisitStatus } from "../../ipc/generated/VisitStatus";
 import type { VisitView } from "../../ipc/generated/VisitView";
+import { FreeTimes, HolidayLine } from "./FreeTimes";
 import { useClinicSettings, useDeleteVisit, usePatients, useReloadClinic, useSaveVisit, useToday } from "./clinicData";
 import {
   addDays, formatDate, formatDateLong, formatTime, leftAloneWords, optionsWith, parseMoney, parseTime, VISIT_KIND_LABEL, VISIT_KINDS,
@@ -113,6 +114,8 @@ export function VisitDialog(props: VisitDialogProps) {
   // What she typed herself is hers: a default never overwrites it.
   const [typed, setTyped] = useState({ minutes: false, fee: false });
   const [error, setError] = useState<string | null>(null);
+  // The date box keeps what she types; a free time picked on another day starts it afresh.
+  const [dateRev, setDateRev] = useState(0);
   const [busy, setBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   /** Set once the visit was saved and overlaps another: the dialog stays to say so. */
@@ -274,12 +277,20 @@ export function VisitDialog(props: VisitDialogProps) {
 
         <div className="clinic-form-row">
           <Field id="visit-date" label="תאריך">
-            <DateField id="visit-date" value={form.date} onChange={(date) => set({ date })} />
+            <DateField key={dateRev} id="visit-date" value={form.date} onChange={(date) => set({ date })} />
           </Field>
           <TimeField id="visit-start" label="שעת התחלה" value={form.start} onChange={(start) => set({ start })} />
           <TextField id="visit-minutes" label="משך (דקות)" value={form.minutes} dir="ltr" inputMode="numeric" className="clinic-narrow"
             onChange={(minutes) => { setTyped((t) => ({ ...t, minutes: true })); set({ minutes }); }} />
         </div>
+        <HolidayLine date={form.date} enabled={settings.holidays} />
+        {(!existing || existing.status === "planned") && (
+          <FreeTimes from={form.date === "" ? now.date : form.date} minutes={Number(form.minutes)} skip={existing?.id ?? null} today={now.date}
+            onPick={(slot) => {
+              if (slot.date !== form.date) setDateRev((n) => n + 1);
+              set({ date: slot.date, start: formatTime(slot.start) });
+            }} />
+        )}
 
         <div className="clinic-form-row">
           <TextField id="visit-place" label="מקום" value={form.place} maxLength={200} list="visit-places" className="grow" onChange={(place) => set({ place })} />

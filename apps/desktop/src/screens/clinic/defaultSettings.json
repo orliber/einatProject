@@ -1,4 +1,5 @@
 {
+  "buffer_minutes": 15,
   "day_end": 1200,
   "day_start": 480,
   "debt_days": 30,
@@ -49,6 +50,7 @@
       "minutes": 60
     }
   ],
+  "holidays": true,
   "note_templates": [
     {
       "name": "פגישת היכרות עם ההורים",
@@ -67,12 +69,54 @@
       "text": "מה נמסר להורים:\n\nתגובת ההורים ושאלות שעלו:\n\nהמלצות שסוכמו:\n\nמה נמסר או נשלח:\n"
     }
   ],
+  "package_fee": 0,
+  "package_name": "חבילת אבחון",
+  "pathway": [
+    {
+      "gap_days": 0,
+      "kind": "intake"
+    },
+    {
+      "gap_days": 7,
+      "kind": "assessment"
+    },
+    {
+      "gap_days": 7,
+      "kind": "assessment"
+    },
+    {
+      "gap_days": 21,
+      "kind": "feedback"
+    }
+  ],
   "payment_text": "שלום {הורה}, היתרה לתשלום היא {סכום} ₪. תודה רבה, {שמי}",
   "places": [
     "הקליניקה"
   ],
   "reminder_text": "שלום {הורה}, תזכורת לפגישה ביום {יום}, {תאריך}, בשעה {שעה}. להתראות, {שמי}",
   "report_days": 21,
+  "starter_tasks": [
+    {
+      "due_days": 7,
+      "kind": "questionnaire",
+      "title": "שאלון להורים"
+    },
+    {
+      "due_days": 14,
+      "kind": "questionnaire",
+      "title": "שאלון למורה או לגננת"
+    },
+    {
+      "due_days": 14,
+      "kind": "document",
+      "title": "דוח או סיכום מהמסגרת החינוכית"
+    },
+    {
+      "due_days": 14,
+      "kind": "document",
+      "title": "אבחונים וסיכומים קודמים"
+    }
+  ],
   "waiting_weeks": 6,
   "work_days": [
     0,

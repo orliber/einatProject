@@ -183,7 +183,7 @@ export function PatientDialog({ patient, waiting = false, onClose, onSaved }: Pa
           onChange={(reason) => set({ reason })} />
         <TextAreaField id="patient-notes" label="הערות" value={form.notes} rows={2} maxLength={4000} onChange={(notes) => set({ notes })} />
 
-        <MoneyField id="patient-fee" label="מחיר קבוע לפגישה (לא חובה)" value={form.fee} optional className="clinic-narrow"
+        <MoneyField id="patient-fee" label="מחיר קבוע לפגישה (לא חובה)" value={form.fee} optional
           hint="ריק: לפי המחיר של סוג הפגישה, מהגדרות הקליניקה." onChange={(fee) => set({ fee })} />
 
         <ErrorLine error={error} />

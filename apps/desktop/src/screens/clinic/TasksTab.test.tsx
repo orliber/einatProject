@@ -2,7 +2,7 @@
 // they are due, adding in one line (with the suggestions), ticking with a rollback, editing,
 // deleting, the folded list of what was done, the empty clinic, discreet mode and
 // accessibility. Every name is invented; the clock is held at a Sunday morning.
-import { configure, screen, waitFor, within } from "@testing-library/react";
+import { act, configure, screen, waitFor, within } from "@testing-library/react";
 import type { Alert } from "../../ipc/generated/Alert";
 import { a11yViolations } from "../../test/a11y";
 import { forgetDiscreet } from "./ClinicScreen";
@@ -64,6 +64,9 @@ describe("the pure pieces", () => {
     const alert = (kind: Alert["kind"], since: string): Alert => ({ kind, patient_id: null, patient_name: null, visit_id: null, task_id: null, text: "", since });
     const groups = alertGroups([alert("debt", "2026-10-01"), alert("no_note", "2026-10-05"), alert("debt", "2026-10-09"), alert("unmarked", "2026-11-01")]);
     expect(groups.map((g) => [g.kind, g.alerts.map((a) => a.since)])).toEqual([["unmarked", ["2026-11-01"]], ["no_note", ["2026-10-05"]], ["debt", ["2026-10-01", "2026-10-09"]]]);
+    // Missing questionnaires come right after the feedback meeting they are for, as the core ranks them.
+    const soon = alertGroups([alert("waiting", "2026-09-01"), alert("debt", "2026-10-01"), alert("materials_missing", "2026-11-10"), alert("feedback_soon", "2026-11-10")]);
+    expect(soon.map((g) => g.kind)).toEqual(["feedback_soon", "materials_missing", "debt", "waiting"]);
   });
 
   it("offers the six follow-ups of an assessment clinic", () => {
@@ -80,7 +83,7 @@ describe("the follow-ups tab", () => {
     // The number beside the heading is the number of alerts; each kind says how many it has.
     expect(within(needs()).getAllByText(String(alerts.length)).length).toBeGreaterThan(0);
     for (const g of alertGroups(alerts)) {
-      const label = { unmarked: "פגישה שלא סומנה", no_note: "פגישה בלי סיכום", debt: "חוב פתוח", waiting: "המתנה ארוכה", report_due: "דוח מתעכב", no_next_visit: "אין פגישה הבאה", task_overdue: "משימה שמועדה עבר", feedback_soon: "שיחת משוב קרובה", unreadable: "רישום שלא נקרא" }[g.kind];
+      const label = { unmarked: "פגישה שלא סומנה", no_note: "פגישה בלי סיכום", debt: "חוב פתוח", waiting: "המתנה ארוכה", report_due: "דוח מתעכב", no_next_visit: "אין פגישה הבאה", task_overdue: "משימה שמועדה עבר", feedback_soon: "שיחת משוב קרובה", materials_missing: "חסרים שאלונים או מסמכים", unreadable: "רישום שלא נקרא" }[g.kind];
       const box = within(needs()).getByRole("region", { name: `${label}: ${g.alerts.length}` });
       expect(within(box).getByRole("heading", { name: label })).toBeInTheDocument();
       expect(within(box).getAllByRole("listitem").length).toBe(Math.min(4, g.alerts.length));
@@ -130,9 +133,15 @@ describe("the follow-ups tab", () => {
 
     await user.click(within(form).getByRole("button", { name: "לשייך לילד או לילדה (לא חובה)" }));
     await user.type(within(form).getByLabelText("מטופל"), "תמ");
-    await user.click(await within(form).findByRole("button", { name: "תמר" }));
+    await within(form).findByRole("option", { name: "תמר" });
+    // Enter on the one name left chooses her, and does not send the line without her.
+    await user.keyboard("{Enter}");
+    expect(within(form).getByRole("group", { name: "מטופל" })).toHaveTextContent("תמר");
+    expect(within(form).getByRole("group", { name: "מטופל" })).toHaveFocus();
+    expect(requests().some((r) => r.op === "save_task")).toBe(false);
     expect(await a11yViolations(view.container)).toEqual([]);
-    await user.click(within(form).getByRole("button", { name: "הוספה" }));
+    // The next Enter adds it, with her.
+    await user.keyboard("{Enter}");
 
     await waitFor(() => expect(notes).toContain("המעקב נוסף"));
     const sent = requests().find((r) => r.op === "save_task");
@@ -292,6 +301,28 @@ describe("the follow-ups tab", () => {
     expect(await within(needs()).findByText("אין כרגע שום דבר שמחכה לטיפול בקליניקה.")).toBeInTheDocument();
     expect(within(mine()).getByRole("form", { name: "מעקב חדש" })).toBeInTheDocument();
     expect(await a11yViolations(view.container)).toEqual([]);
+  });
+
+  it("Enter on the chosen child adds the follow-up once, also when pressed again while it is saved", async () => {
+    const hold = holding("save_task");
+    const { user, requests } = await openOn(TASKS, hold.over);
+    await ready();
+    const form = within(mine()).getByRole("form", { name: "מעקב חדש" });
+    await user.type(within(form).getByLabelText("מעקב חדש"), "לדבר עם היועצת");
+    await user.click(within(form).getByRole("button", { name: "לשייך לילד או לילדה (לא חובה)" }));
+    await user.type(within(form).getByLabelText("מטופל"), "תמ");
+    await within(form).findByRole("option", { name: "תמר" });
+    await user.keyboard("{Enter}");
+    const picked = within(form).getByRole("group", { name: "מטופל" });
+    expect(picked).toHaveFocus();
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(within(form).getByRole("button", { name: /הוספה/ })).toBeDisabled());
+    expect(picked).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(requests().filter((r) => r.op === "save_task")).toHaveLength(1);
+    act(() => hold.release());
+    expect(await within(mine()).findAllByLabelText("לדבר עם היועצת")).toHaveLength(1);
+    expect(requests().filter((r) => r.op === "save_task")).toHaveLength(1);
   });
 
   it("shows the shape of the lists while they load", async () => {
