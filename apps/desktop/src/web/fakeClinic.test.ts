@@ -78,9 +78,10 @@ describe("the typed client", () => {
 
   it("has one function for every request the clinic takes", () => {
     expect(Object.keys(clinicApi).sort()).toEqual([
-      "calendar", "caseChoices", "createCase", "deleteNote", "deleteTask", "deleteVisit", "diary", "erasePatient", "history", "income", "linkCase",
-      "message", "noteToCase", "overview", "patientCard", "patients", "saveCharge", "saveNote", "savePatient", "savePayment", "saveSettings",
-      "saveTask", "saveVisit", "settings", "tasks", "voidCharge", "voidPayment",
+      "calendar", "caseChoices", "createCase", "deleteNote", "deleteTask", "deleteVisit", "diary", "erasePatient", "freeSlots", "history", "holidays",
+      "income", "insights", "linkCase", "message", "noteToCase", "overview", "patientCard", "patients", "proposePathway", "saveCharge", "saveNote",
+      "savePathway", "savePatient", "savePayment", "saveSettings", "saveTask", "saveVisit", "settings", "starterTasks", "tasks", "voidCharge",
+      "voidPayment",
     ]);
   });
 });

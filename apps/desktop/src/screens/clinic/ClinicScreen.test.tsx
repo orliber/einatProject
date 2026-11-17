@@ -64,10 +64,10 @@ const todays = () => screen.getByRole("region", { name: "הפגישות של ה�
 const rowOf = (name: string) => within(todays()).getByRole("button", { name }).closest("li") as HTMLElement;
 
 describe("the clinic's page", () => {
-  it("says it is a beta, shows the seven tabs, and passes the accessibility check", async () => {
+  it("says it is a beta, shows the eight tabs, and passes the accessibility check", async () => {
     const { view } = await openClinic();
     expect(screen.getByRole("note")).toHaveTextContent("ניהול הקליניקה בגרסת בטא. הכל נשמר מוצפן בכספת שבמחשב, ושום דבר מכאן לא נשלח לשום מקום.");
-    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["היום", "יומן", "מטופלים", "המתנה", "מעקבים", "כספים", "הגדרות הקליניקה"]);
+    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["היום", "יומן", "מטופלים", "המתנה", "מעקבים", "כספים", "תמונת מצב", "הגדרות הקליניקה"]);
     expect(tab("היום")).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("tabpanel")).toHaveAccessibleName("היום");
     // The bar marks the clinic as the part she is in (D-191), with its beta badge; the tabs
@@ -84,7 +84,7 @@ describe("the clinic's page", () => {
     const { user, went } = await openClinic();
     for (const [label, id] of [
       ["יומן", "calendar"], ["מטופלים", "patients"], ["המתנה", "waiting"],
-      ["מעקבים", "tasks"], ["כספים", "money"], ["הגדרות הקליניקה", "settings"],
+      ["מעקבים", "tasks"], ["כספים", "money"], ["תמונת מצב", "insights"], ["הגדרות הקליניקה", "settings"],
     ] as const) {
       await user.click(tab(label));
       expect(tab(label)).toHaveAttribute("aria-selected", "true");
