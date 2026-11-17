@@ -67,12 +67,15 @@ describe("the clinic's page", () => {
   it("says it is a beta, shows the seven tabs, and passes the accessibility check", async () => {
     const { view } = await openClinic();
     expect(screen.getByRole("note")).toHaveTextContent("ניהול הקליניקה בגרסת בטא. הכל נשמר מוצפן בכספת שבמחשב, ושום דבר מכאן לא נשלח לשום מקום.");
-    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["היום", "יומן", "מטופלים", "המתנה", "מעקבים", "כספים", "הגדרות"]);
+    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["היום", "יומן", "מטופלים", "המתנה", "מעקבים", "כספים", "הגדרות הקליניקה"]);
     expect(tab("היום")).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("tabpanel")).toHaveAccessibleName("היום");
-    // The bar marks the clinic as the page she is on, with its beta badge.
-    expect(screen.getByRole("button", { name: /קליניקה/ })).toHaveAttribute("aria-current", "page");
-    expect(screen.getByRole("button", { name: /קליניקה/ })).toHaveTextContent("בטא");
+    // The bar marks the clinic as the part she is in (D-191), with its beta badge; the tabs
+    // sit in the row under it.
+    const parts = screen.getByRole("navigation", { name: "ניווט ראשי" });
+    expect(within(parts).getByRole("button", { name: /ניהול הקליניקה/ })).toHaveAttribute("aria-current", "true");
+    expect(within(parts).getByRole("button", { name: /ניהול הקליניקה/ })).toHaveTextContent("בטא");
+    expect(within(parts).getByRole("button", { name: "כתיבת הדוחות" })).not.toHaveAttribute("aria-current");
     await within(todays()).findByRole("button", { name: "תמר" });
     expect(await a11yViolations(view.container)).toEqual([]);
   });
@@ -81,7 +84,7 @@ describe("the clinic's page", () => {
     const { user, went } = await openClinic();
     for (const [label, id] of [
       ["יומן", "calendar"], ["מטופלים", "patients"], ["המתנה", "waiting"],
-      ["מעקבים", "tasks"], ["כספים", "money"], ["הגדרות", "settings"],
+      ["מעקבים", "tasks"], ["כספים", "money"], ["הגדרות הקליניקה", "settings"],
     ] as const) {
       await user.click(tab(label));
       expect(tab(label)).toHaveAttribute("aria-selected", "true");
@@ -105,12 +108,12 @@ describe("the clinic's page", () => {
     await user.keyboard("{ArrowRight}");
     expect(tab("מטופלים")).toHaveAttribute("aria-selected", "true");
     await user.keyboard("{End}");
-    expect(tab("הגדרות")).toHaveFocus();
+    expect(tab("הגדרות הקליניקה")).toHaveFocus();
     // Past the last comes the first.
     await user.keyboard("{ArrowLeft}");
     expect(tab("היום")).toHaveAttribute("aria-selected", "true");
     await user.keyboard("{ArrowRight}");
-    expect(tab("הגדרות")).toHaveAttribute("aria-selected", "true");
+    expect(tab("הגדרות הקליניקה")).toHaveAttribute("aria-selected", "true");
     await user.keyboard("{Home}");
     expect(tab("היום")).toHaveFocus();
   });
@@ -268,13 +271,11 @@ describe("the front page", () => {
 });
 
 describe("discreet mode", () => {
-  it("shows initials in place of every name, and is remembered while the program is open", async () => {
+  it("shows initials in place of every name, and stays on until she turns it off (D-192)", async () => {
     const { user, view } = await openClinic();
     await within(todays()).findByRole("button", { name: "תמר" });
     const toggle = screen.getByRole("switch", { name: "מצב דיסקרטי" });
     expect(toggle).toHaveAttribute("aria-checked", "false");
-    const stored = () => JSON.stringify([{ ...window.localStorage }, { ...window.sessionStorage }]);
-    const before = stored();
     await user.click(toggle);
     expect(toggle).toHaveAttribute("aria-checked", "true");
     expect(within(todays()).getByRole("button", { name: "ת." })).toBeInTheDocument();
@@ -288,13 +289,16 @@ describe("discreet mode", () => {
     expect(dialog).not.toHaveTextContent("תמר");
     await user.click(within(dialog).getByRole("button", { name: "סגירה" }));
 
-    // Leaving the clinic and coming back keeps it; nothing was written to storage.
+    // Leaving the clinic and coming back keeps it. What is kept is one word, never a name.
     view.unmount();
-    expect(stored()).toBe(before);
+    expect(window.localStorage.getItem("dv.discreet")).toBe("on");
+    const kept = JSON.stringify([{ ...window.localStorage }, { ...window.sessionStorage }]);
+    for (const name of ["תמר", "איתי", "מאיה", "נועם", "יובל", "עומר"]) expect(kept).not.toContain(name);
     await openClinic();
     expect(screen.getByRole("switch", { name: "מצב דיסקרטי" })).toHaveAttribute("aria-checked", "true");
     await user.click(screen.getByRole("switch", { name: "מצב דיסקרטי" }));
     expect(await within(todays()).findByRole("button", { name: "תמר" })).toBeInTheDocument();
+    expect(window.localStorage.getItem("dv.discreet")).toBeNull();
   });
 });
 

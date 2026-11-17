@@ -32,10 +32,12 @@ impl Core {
             dv_style::EditModel::default()
         };
         let sample = self.is_sample(case_id)?;
-        // The vault and the session's notes side by side (two fields of the core).
+        // The case's notes (D-161), read from its sealed row the first time this session
+        // (D-193). The vault and the notes side by side (two fields of the core).
         self.vault_ref()?;
+        self.case_notes(case_id)?;
         let v = self.vault.as_ref().ok_or(CoreError::Locked)?;
-        let kept = &self.notes;
+        let kept = self.notes.get(case_id).ok_or(CoreError::Locked)?;
         let meta = v.case_meta(case_id)?;
         let identities = v.identities(case_id)?;
         let masks = v.masks(case_id)?;
@@ -304,12 +306,12 @@ impl Core {
                     guide_is_default: guide.is_default,
                     guide_learned_from: guide.learned_from,
                     case_guide: guide.case,
-                    notes: kept.section(case_id, &s.key),
+                    notes: kept.section(&s.key),
                 });
             }
         }
-        // Notes about a wording that is gone are dropped with it.
-        self.notes.prune(case_id, &on_page);
+        // Notes about a wording that is gone are dropped with it, in the vault too.
+        self.prune_notes(case_id, &on_page)?;
         Ok(CaseDetail {
             id: case_id.to_owned(),
             meta,

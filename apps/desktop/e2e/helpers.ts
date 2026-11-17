@@ -18,12 +18,12 @@ export async function unlock(page: Page, path = "/preview.html"): Promise<void> 
 /** Settings → privacy → "show me every request before sending" (off by default),
  *  for the journeys that read the review screen; then back to the cases. */
 export async function reviewEveryRequest(page: Page): Promise<void> {
-  await page.getByRole("navigation", { name: "ניווט ראשי" }).getByRole("button", { name: "הגדרות" }).click();
+  await page.getByRole("button", { name: "הגדרות", exact: true }).click();
   await page.getByRole("navigation", { name: "חלקי ההגדרות" }).getByRole("button", { name: "פרטיות" }).click();
   const box = page.getByRole("switch", { name: /להציג לי כל בקשה לפני שליחה/ });
   if ((await box.getAttribute("aria-checked")) !== "true") await box.click();
   await expect(box).toHaveAttribute("aria-checked", "true");
-  await page.getByRole("navigation", { name: "ניווט ראשי" }).getByRole("button", { name: "תיקים" }).click();
+  await page.getByRole("navigation", { name: "ניווט ראשי" }).getByRole("button", { name: "כתיבת הדוחות" }).click();
   await expect(page.getByRole("button", { name: "+ תיק חדש" })).toBeVisible();
 }
 

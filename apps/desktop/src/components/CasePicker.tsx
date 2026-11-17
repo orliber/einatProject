@@ -1,6 +1,7 @@
 // Picking a case by its place in the library (D-023): one group per folder, in tree order,
 // each headed by its full path ("אבחונים פרטיים › 2026"). Cases outside any folder come first.
 import { useQuery } from "@tanstack/react-query";
+import { useShownName } from "../discreet";
 import { ipc, type CaseSummary, type Folder } from "../ipc/client";
 
 export interface CaseGroup {
@@ -33,12 +34,13 @@ export function CasePicker(props: { id: string; value: string; onChange: (id: st
   const cases = useQuery({ queryKey: ["cases"], queryFn: ipc.listCases });
   const folders = useQuery({ queryKey: ["folders"], queryFn: ipc.folders });
   const groups = groupByFolder(cases.data ?? [], folders.data ?? []);
+  const shown = useShownName();
   return (
     <select id={props.id} className="select" value={props.value} onChange={(e) => props.onChange(e.target.value)}>
       {groups.map((g, gi) => (
         <optgroup key={`${gi}:${g.label}`} label={g.label}>
           {g.cases.map((c) => (
-            <option key={c.id} value={c.id}>{c.child_name ? `${c.child_name} · ` : ""}{c.meta.code}</option>
+            <option key={c.id} value={c.id}>{c.child_name ? `${shown(c.child_name)} · ` : ""}{c.meta.code}</option>
           ))}
         </optgroup>
       ))}

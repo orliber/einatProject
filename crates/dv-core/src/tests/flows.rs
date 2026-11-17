@@ -731,8 +731,8 @@ fn a_backup_restores_the_same_cases_settings_and_bin() {
 
     assert_eq!(other.list_cases().unwrap(), before_cases);
     for d in &before {
-        // What the session said about the drafts stays with the session (D-161).
-        assert_eq!(other.case_detail(&d.id).unwrap(), from_the_vault(d.clone()));
+        // What the answers said about the drafts goes with the backup (D-193).
+        assert_eq!(&other.case_detail(&d.id).unwrap(), d);
     }
     assert_eq!(other.chat(&case, "kindergarten").unwrap(), before_chat);
     assert_eq!(other.folders().unwrap(), before_folders);

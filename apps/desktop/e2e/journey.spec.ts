@@ -112,13 +112,13 @@ test("the export page lists what goes into the file and is accessible", async ({
 test("the report page opens a section's guide and her own section's points", async ({ page }) => {
   await unlock(page);
   // The preview's cases are in the old template: she marks the background as hers first.
-  await page.getByRole("navigation", { name: "ניווט ראשי" }).getByRole("button", { name: "הגדרות" }).click();
+  await page.getByRole("button", { name: "הגדרות", exact: true }).click();
   await page.getByRole("navigation", { name: "חלקי ההגדרות" }).getByRole("button", { name: "הדוח" }).click();
   const hers = page.getByRole("checkbox", { name: /^רקע/ });
   // The box follows the saved setting, so it turns on only after the save: click and wait.
   await hers.click();
   await expect(hers).toBeChecked();
-  await page.getByRole("navigation", { name: "ניווט ראשי" }).getByRole("button", { name: "תיקים" }).click();
+  await page.getByRole("navigation", { name: "ניווט ראשי" }).getByRole("button", { name: "כתיבת הדוחות" }).click();
   await createCase(page, CHILD);
   await stage(page, /כתיבה/).click();
   await expect(page.getByRole("article", { name: "הדוח, כמו בקובץ" })).toBeVisible();
@@ -189,7 +189,9 @@ test("a style report is read and learned by itself after one upload", async ({ p
 
 test("settings, consultation and writing style pages are accessible", async ({ page }) => {
   await unlock(page);
-  for (const name of ["הגדרות", "התייעצות", "הסגנון שלי"]) {
+  // The reports' pages are in the row under the bar (D-191); the settings, a button of the whole
+  // program, come last.
+  for (const name of ["התייעצות", "הסגנון שלי", "הגדרות"]) {
     await page.getByRole("button", { name, exact: true }).first().click();
     await expect(page.getByRole("button", { name, exact: true }).first()).toHaveAttribute("aria-current", "page");
     await expect(page.getByRole("heading", { level: 1 }).first()).toBeVisible();

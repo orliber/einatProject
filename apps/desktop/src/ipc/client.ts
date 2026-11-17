@@ -385,6 +385,11 @@ export const ipc = {
   sendConsult: (approvalId: string) => call("send_consult", { approvalId }),
 
   checkExport: (caseId: string) => call("check_export", { caseId }),
+  /** D-193: of the finish page's notes (by its keys), the ones she left as they are; kept with the case. */
+  leftNotes: (caseId: string, keys: string[]) => call("left_notes", { caseId, keys }),
+  /** D-193: "בסדר, להשאיר" (`left`) or "להחזיר". `draftId`: the paragraph the note is about, if any. */
+  setNoteLeft: (caseId: string, draftId: string | null, key: string, left: boolean) =>
+    call("set_note_left", { caseId, draftId, key, left }),
   /** With `parents`, the parents' version (round 55, D-095): built here, nothing is sent. */
   exportReport: (caseId: string, password: string | null, parents: ParentsOptions | null = null) =>
     call("export_report", { caseId, password, parents }),
@@ -412,6 +417,9 @@ export const ipc = {
 
   /** The clinic's one command (D-170); `ipc/clinic.ts` is its typed client. */
   clinic: (request: ClinicRequest) => call("clinic", { request }),
+  /** D-194: the payments of a month ("2026-11") or a year ("2026") as a file for the
+   *  accountant, with no names in it, saved beside the reports. Answers where it was saved. */
+  exportIncome: (period: string) => call("export_income", { period }),
 
   /** The system's print window (the macOS webview ignores `window.print()`). */
   printPage: () => run("print_page"),

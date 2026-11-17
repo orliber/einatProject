@@ -19,12 +19,13 @@ use std::sync::{LazyLock, Mutex};
 
 use dv_domain::clinic::{
     self as rules, CaseChoice, CaseLink, Charge, ClinicReply, ClinicRequest, ClinicSettings,
-    ClinicTask, ContactRole, ErasedCards, ErasedTally, HistoryEntry, MessageKind, MessageValues,
-    Overview, Patient, PatientCard, PatientRecords, PatientRow, PatientStatus, Payment, Repeat,
-    SavedVisits, Scope, SessionNote, Today, Visit, VisitKind, VisitStatus, VisitView,
+    ClinicTask, ContactRole, ErasedCards, ErasedTally, HistoryEntry, IncomeExport, MessageKind,
+    MessageValues, Overview, Patient, PatientCard, PatientRecords, PatientRow, PatientStatus,
+    Payment, Repeat, SavedVisits, Scope, SessionNote, Today, Visit, VisitKind, VisitStatus,
+    VisitView,
 };
 use dv_domain::{CaseMeta, DomainError, IdentityInput, InputKind, Role};
-use dv_vault::{AuditEvent, StoredClinicRecord, Vault};
+use dv_vault::{AuditEvent, StoredClinicRecord, Vault, VaultError};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
@@ -44,6 +45,9 @@ const VOIDED: &str = "voided";
 
 const NO_PATIENT: &str = "המטופל";
 const NO_CASE: &str = "התיק";
+/// An income export that would leave a row out is not made (D-194).
+const EXPORT_NOT_READ: &str = "תקבול או סיכום של כרטיסים שנמחקו בתקופה הזו לא נקרא מהכספת, \
+     ולכן הקובץ לרואה החשבון לא נוצר: הוא צריך להיות שלם. כדאי לשחזר מגיבוי, או לפנות לתמיכה.";
 
 // ------------------------------------------------------------------ small helpers
 
@@ -911,6 +915,40 @@ impl Core {
         let income =
             rules::income_with_erased(income, &tally(v).0, &erased_cards(v).0).map_err(refusal)?;
         Ok(ClinicReply::Income(income))
+    }
+
+    /// The income diary of a month (`2026-11`) or a year (`2026`) for the accountant, as a
+    /// CSV file (D-194): its name and its bytes, for the shell to write. Only the payments of
+    /// the period and the anonymous tally of the erased cards are read, never a card, so no
+    /// name can reach the file. A payment of the period, or the tally, that does not read
+    /// stops it: a file for the accountant is never made with a row missing. The log says
+    /// that the file was made and for which period, nothing more.
+    pub fn clinic_income_export(&mut self, period: &str) -> Result<IncomeExport, CoreError> {
+        // Locked is said before anything about the request itself.
+        self.vault_ref()?;
+        let period = rules::parse_income_period(period).map_err(refusal)?;
+        let (first, last) = period.bounds();
+        let (Some(first), Some(last)) = (rules::day_number(&first), rules::day_number(&last))
+        else {
+            return refuse("צריך לבחור חודש או שנה לייצוא.");
+        };
+        let v = self.vault_ref()?;
+        let not_read = || CoreError::Refused(EXPORT_NOT_READ.to_owned());
+        let rows = v
+            .clinic_range_strict(Payment::KIND, first, last)
+            .map_err(|e| match e {
+                VaultError::Authentication | VaultError::Corrupt(_) => not_read(),
+                other => CoreError::Vault(other),
+            })?;
+        let payments: Vec<Payment> = open_all(rows).map_err(|_| not_read())?;
+        let tally = tally_strict(v).map_err(|_| not_read())?;
+        let export = rules::income_export(period, &payments, &tally);
+        self.vault_mut()?.record(
+            AuditEvent::ClinicIncomeExported,
+            None,
+            &serde_json::json!({ "period": period.key() }),
+        )?;
+        Ok(export)
     }
 
     /// Every saved state of a visit, a note, a charge or a payment, oldest first, in her

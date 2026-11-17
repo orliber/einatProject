@@ -37,6 +37,10 @@ export const KEYS = {
   approveDraft: { ctrl: true, shift: true, code: "Enter" },
   changeWithAi: { ctrl: true, code: "KeyK" },
   versions: { ctrl: true, shift: true, code: "KeyH" },
+  // D-191, D-192: the two parts of the program, and discreet mode at once when someone walks in.
+  reportsPart: { ctrl: true, code: "Digit1" },
+  clinicPart: { ctrl: true, code: "Digit2" },
+  discreet: { ctrl: true, shift: true, code: "KeyD" },
 } satisfies Record<string, Combo>;
 
 /** The help sheet: what each key does, in her words. Shown in the order she meets them. */
@@ -45,6 +49,8 @@ export const SHEET: { group: string; items: [string, string][] }[] = [
     group: "בכל מקום",
     items: [
       [`${MOD}+L`, "נעילה מיידית של הכספת"],
+      [`${MOD}+Shift+D`, "מצב דיסקרטי: הדלקה וכיבוי (שמות בראשי תיבות)"],
+      [`${MOD}+1 / ${MOD}+2`, "לכתיבת הדוחות / לניהול הקליניקה"],
       [`F1 או ${MOD}+/`, "הדף הזה: קיצורי המקלדת"],
       [`${MOD} + / ${MOD} − / ${MOD} 0`, "הגדלה, הקטנה וגודל רגיל של הטקסט"],
       ["Tab / Shift+Tab", "מעבר בין כפתורים ושדות"],

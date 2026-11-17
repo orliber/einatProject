@@ -201,7 +201,9 @@ describe("main screens", () => {
     await user.click(await screen.findByRole("button", { name: "הגדרות" }));
     await screen.findByRole("heading", { level: 1 });
     expect(await a11yViolations(view.container)).toEqual([]);
-    await user.click(screen.getByRole("button", { name: "התייעצות" }));
+    // From the settings, the pages of a part are one step away: the part, then the page (D-191).
+    await user.click(screen.getByRole("button", { name: "כתיבת הדוחות" }));
+    await user.click(await screen.findByRole("button", { name: "התייעצות" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "התייעצות" })).toHaveAttribute("aria-current", "page"));
     expect(await a11yViolations(view.container)).toEqual([]);
   });
@@ -214,7 +216,7 @@ describe("main screens", () => {
     await user.type(box, "בהדרכת ד\"ר נועה בדויה");
     await user.click(within(box.closest("section") ?? document.body).getByRole("button", { name: "שמירה" }));
     await waitFor(async () => expect(((await core.handle("report_settings", {})) as { supervisor: string[] }).supervisor).toEqual(["בהדרכת ד\"ר נועה בדויה"]));
-    await user.click(screen.getByRole("button", { name: "תיקים" }));
+    await user.click(screen.getByRole("button", { name: "כתיבת הדוחות" }));
     const page = await openCase(user);
     const sign = page.querySelector(".a4-sign");
     expect(sign?.textContent).toMatch(/מומחית.*בהדרכת ד"ר נועה בדויה/);

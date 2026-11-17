@@ -24,6 +24,8 @@ import { isCombo, isTyping, KEYS, MOD } from "../shortcuts";
 import { useKept } from "../kept";
 import "./CaseScreen.css";
 import { useAi } from "../ai";
+import { useShownName } from "../discreet";
+import { clinicApi } from "../ipc/clinic";
 import { notSentMessage } from "../sending";
 import { useQuery } from "@tanstack/react-query";
 import { forgetRun, isRunning, runLine, runWholeReport, showingCase, stopRun, useRun } from "./case/reportRun";
@@ -134,8 +136,19 @@ function sectionState(s: CaseDetail["sections"][number]): SectionState {
   return "empty";
 }
 
+/** The clinic patient whose card is linked to the case, or `null`. */
+async function cardOfCase(caseId: string): Promise<string | null> {
+  const now = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const rows = await clinicApi.patients({ date: `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`, minute: now.getHours() * 60 + now.getMinutes() });
+  return rows.find((r) => r.patient.case_id === caseId)?.patient.id ?? null;
+}
+
 export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
   const { go, fail, lockNow, status, notify, showShortcuts } = useApp();
+  const shown = useShownName();
+  // The clinic card linked to this case, if any (D-195). Quiet: a failure only hides the link.
+  const clinicCard = useQuery({ queryKey: ["clinic", "card-of-case", caseId], queryFn: () => cardOfCase(caseId), staleTime: 60_000 });
   const ai = useAi();
   const [detail, setDetail] = useState<CaseDetail | null>(null);
   const detailRef = useRef<CaseDetail | null>(null);
@@ -456,6 +469,7 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
   const closingNames = closingEmpty.map((s) => s.title).join(", ");
   const pendingCount = pending.reduce((n, s) => n + s.paragraphs.filter((p) => p.status === "proposed").length, 0);
   const child = detail.identities.find((i) => i.role === "child")?.value ?? "";
+  const cardId = clinicCard.data ?? null;
   const age = ageOf(detail.meta.age, detail.meta.child_gender);
   const current = detail.sections.find((s) => s.key === view);
   // Three stages: materials, writing (the report page and each section), taking the report out.
@@ -510,6 +524,8 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
         ]
       : []),
     { label: "פרטים ושמות להסתרה", run: () => go({ name: "case", id: caseId, view: "details" }) },
+    // D-195: from the case to the child's card in the clinic, when the two are linked.
+    ...(cardId ? [{ label: "כרטיס המטופל בקליניקה", run: () => go({ name: "clinic", tab: "patients", patientId: cardId }) }] : []),
     { label: current ? `מה יצא מהמחשב בסעיף "${current.title}"` : "מה יצא מהמחשב בתיק הזה", run: () => setSentFor(current?.key ?? "") },
     { label: `כתיבת כל הדוח עם ${ai}`, run: writeAll },
     ...(showShortcuts ? [{ label: "קיצורי מקלדת (F1)", run: showShortcuts }] : []),
@@ -521,7 +537,7 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
       <header className="case-bar" ref={setBar}>
         <button type="button" className="case-back" onClick={() => go({ name: "cases" })}>→ תיקים</button>
         <button type="button" className="case-id" title="פרטים ושמות להסתרה" onClick={() => go({ name: "case", id: caseId, view: "details" })}>
-          <span className="case-child" title={child || detail.meta.code}>{child || detail.meta.code}</span>
+          <span className="case-child" title={child ? shown(child) : detail.meta.code}>{child ? shown(child) : detail.meta.code}</span>
           {age && <span className="case-age">{age}</span>}
           <span className={detail.meta.consent ? "chip chip-ok" : "chip chip-warn"}>{detail.meta.consent ? "✓ הסכמה" : "חסרה הסכמה"}</span>
           {detail.meta.follows && <span className="chip chip-sand">מעקב</span>}

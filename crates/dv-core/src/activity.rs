@@ -52,6 +52,12 @@ pub(crate) fn integrity_reason_he(reason: &str) -> String {
     he.to_owned()
 }
 
+/// The period of an income export (D-194) as she reads it: "נובמבר 2026", "שנת 2026".
+fn period_words(period: &str) -> String {
+    dv_domain::clinic::parse_income_period(period)
+        .map_or_else(|_| "התקופה שנבחרה".to_owned(), |p| p.title())
+}
+
 /// `(kind, text, warn)`, or `None` for an entry that only repeats another one.
 fn describe(
     event: &str,
@@ -312,6 +318,18 @@ fn describe(
             },
             true,
         ),
+        // The period only: the file itself holds no name (D-194).
+        "clinic_income_exported" => (
+            "security",
+            match text("period") {
+                "" => "יומן ההכנסות יוצא לקובץ לרואה החשבון, בלי שמות".to_owned(),
+                period => format!(
+                    "יומן ההכנסות של {} יוצא לקובץ לרואה החשבון, בלי שמות",
+                    period_words(period)
+                ),
+            },
+            false,
+        ),
         other => ("security", other.to_owned(), false),
     })
 }
@@ -452,6 +470,7 @@ mod tests {
             "clinic_patient_erased",
             "clinic_note_to_case",
             "clinic_unreadable",
+            "clinic_income_exported",
         ] {
             let (_, text, _) = describe(event, &Value::Null, structure.as_ref()).unwrap();
             assert!(!text.contains('_'), "{event} → {text}");
@@ -482,6 +501,27 @@ mod tests {
             ),
         ] {
             assert_eq!(describe("export", &meta, None).unwrap().1, said);
+        }
+        // An income export says for which period, and nothing more (D-194).
+        for (period, said) in [
+            (
+                "2026-11",
+                "יומן ההכנסות של נובמבר 2026 יוצא לקובץ לרואה החשבון, בלי שמות",
+            ),
+            (
+                "2026",
+                "יומן ההכנסות של שנת 2026 יוצא לקובץ לרואה החשבון, בלי שמות",
+            ),
+            (
+                "שם",
+                "יומן ההכנסות של התקופה שנבחרה יוצא לקובץ לרואה החשבון, בלי שמות",
+            ),
+        ] {
+            let meta = serde_json::json!({ "period": period });
+            assert_eq!(
+                describe("clinic_income_exported", &meta, None).unwrap(),
+                ("security", said.to_owned(), false)
+            );
         }
         let consult = serde_json::json!({ "consult": true, "ai": "Gemini" });
         let (_, text, _) = describe("send", &consult, None).unwrap();

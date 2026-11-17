@@ -660,6 +660,39 @@ fn a_record_whose_kind_or_patient_was_changed_in_the_file_does_not_open() {
     }
 }
 
+/// D-194: a file that leaves the vault (the income export) is made from every row of its
+/// stretch, or not at all; a screen's list goes on without the row.
+#[test]
+fn a_strict_range_is_every_row_of_the_stretch_or_an_error() {
+    let ids = |rows: Vec<crate::StoredClinicRecord>| -> Vec<String> {
+        rows.into_iter().map(|r| r.id).collect()
+    };
+    let (_d, mut v) = new_vault();
+    let early = put(&mut v, "payment", Some("p1"), 5, r#"{"a":1}"#);
+    let late = put(&mut v, "payment", Some("p1"), 20, r#"{"a":2}"#);
+    put(&mut v, "visit", Some("p1"), 6, "{}");
+    assert_eq!(
+        ids(v.clinic_range_strict("payment", 0, 10).unwrap()),
+        [early.as_str()]
+    );
+    assert_eq!(
+        ids(v.clinic_range_strict("payment", 0, 30).unwrap()),
+        [early.as_str(), late.as_str()]
+    );
+    set_column(&v, "clinic_records", "patient_id", "p2", &late);
+    // Outside the stretch, a row that does not open changes nothing.
+    assert_eq!(
+        ids(v.clinic_range_strict("payment", 0, 10).unwrap()),
+        [early.as_str()]
+    );
+    assert!(v.clinic_range_strict("payment", 0, 30).is_err());
+    assert!(v.clinic_range_strict("payment", 20, 20).is_err());
+    assert_eq!(
+        ids(v.clinic_range("payment", 0, 30).unwrap()),
+        [early.as_str()]
+    );
+}
+
 #[test]
 fn a_patient_column_set_where_there_was_none_does_not_open() {
     let (_d, mut v) = new_vault();

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useApp } from "../App";
+import { useShownName } from "../discreet";
 import { ipc, type ExportCheck } from "../ipc/client";
 import type { CaseApi } from "../screens/CaseScreen";
 import { Switch } from "./Switch";
@@ -26,6 +27,7 @@ export function shownFileName(name: string, pdf: boolean): string {
  *  them on here. It is made on this computer; nothing is sent for it. */
 export function ExportDialog({ api, onClose, letter }: { api: CaseApi; onClose: () => void; letter?: "parents" | "school" }) {
   const { fail, go } = useApp();
+  const shown = useShownName();
   const [check, setCheck] = useState<ExportCheck | null>(null);
   const [pdf, setPdf] = useState(false);
   const [parents, setParents] = useState(false);
@@ -87,7 +89,7 @@ export function ExportDialog({ api, onClose, letter }: { api: CaseApi; onClose: 
   }
 
   return (
-    <Dialog title={letter ? "הפקת מכתב Word" : pdf ? "הפקת דוח PDF" : "הפקת דוח Word"} subtitle={`${api.detail.meta.code}${child ? ` · ${child}` : ""} · רק פסקאות שאישרת נכנסות ל${letter ? "מכתב" : "דוח"}`} onClose={onClose}
+    <Dialog title={letter ? "הפקת מכתב Word" : pdf ? "הפקת דוח PDF" : "הפקת דוח Word"} subtitle={`${api.detail.meta.code}${child ? ` · ${shown(child)}` : ""} · רק פסקאות שאישרת נכנסות ל${letter ? "מכתב" : "דוח"}`} onClose={onClose}
       footer={
         <>
           <span className="grow" />

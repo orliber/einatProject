@@ -466,10 +466,11 @@ impl Core {
         };
         let practitioner = v.practitioner()?.names.first().cloned();
         let show = |t: &str| restore(t, &identities, practitioner.as_deref(), &masks);
-        // D-161: nothing the answer said is lost when the page drops this result. Kept for
-        // the session, by the stored wording each paragraph has now.
+        // D-161: nothing the answer said is lost when the page drops this result. Kept with
+        // the case (sealed, D-193), by the stored wording each paragraph has now.
+        let kept = self.case_notes(&case_id)?;
         for (draft_id, text, notes) in stored {
-            self.notes.keep_answer(&case_id, &draft_id, text, notes);
+            kept.keep_answer(&draft_id, text, notes);
         }
         let said = SectionNotes {
             questions: reply.questions.iter().map(|q| show(q)).collect(),
@@ -483,10 +484,11 @@ impl Core {
             unanswered: unanswered.iter().map(|l| show(l)).collect(),
         };
         if replaces.is_some() {
-            self.notes.keep_rewording(&case_id, &section_key, said);
+            kept.keep_rewording(&section_key, said);
         } else {
-            self.notes.keep_section(&case_id, &section_key, said);
+            kept.keep_section(&section_key, said);
         }
+        self.save_notes(&case_id)?;
         Ok(SectionResult {
             reply: show(&reply.reply),
             paragraphs: reply

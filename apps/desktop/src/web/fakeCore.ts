@@ -302,6 +302,8 @@ export class FakeCore {
   private pending = new Map<string, Pending>();
   /** Approvals dropped because their material changed, with the line said at the send. */
   private withdrawn = new Set<string>();
+  /** D-193: the finish page's notes she left as they are, by case (kept like the vault keeps them). */
+  private leftNotes = new Map<string, Set<string>>();
   private style = new FakeStyle();
   /** The clinic (beta, D-170) has its own stand-in; these are its few doors to the cases. */
   private clinic = new FakeClinic({
@@ -1031,6 +1033,13 @@ export class FakeCore {
       }
       case "export_security_pdf":
         return "C:\\Users\\demo\\Downloads\\שכבות ההגנה.pdf";
+      case "export_income": {
+        // As the shell answers (D-194): where the file was saved. The preview writes nothing
+        // and downloads nothing; the period is checked and the file named as the core does.
+        const file = this.clinic.exportIncome(String(a.period ?? ""));
+        this.logActivity("clinic_income_exported", "security", `יומן ההכנסות של ${file.title} יוצא לקובץ לרואה החשבון, בלי שמות`);
+        return `C:\\Users\\demo\\Downloads\\${file.fileName}`;
+      }
       case "readiness":
       case "confirm_readiness": {
         if (cmd === "confirm_readiness") this.ready[a.key as string] = a.done ? 1_790_000_000 : null;
@@ -1244,6 +1253,7 @@ export class FakeCore {
         if (c.deletedAt === null) fail("refused", "אפשר למחוק לצמיתות רק תיק שנמצא בסל המחזור.");
         if (!String(a.password ?? "")) fail("wrong_secret", "הסיסמה לא נכונה.");
         this.cases = this.cases.filter((x) => x.id !== c.id);
+        this.leftNotes.delete(c.id);
         return null;
       }
       case "folders":
@@ -1651,6 +1661,18 @@ export class FakeCore {
           parents_left_out: 0, parents_chart_rows: c.sheets.size > 0 ? 3 : 0,
           polish_notes: d.sections.reduce((n, s) => n + s.paragraphs.filter((p) => p.status === "approved").reduce((m, p) => m + p.polish.length, 0), 0),
         } satisfies ExportCheck;
+      }
+      case "left_notes": {
+        const left = this.leftNotes.get(this.find(a.caseId).id);
+        return (a.keys as string[]).filter((k) => left?.has(k) ?? false);
+      }
+      case "set_note_left": {
+        const c = this.find(a.caseId);
+        const left = this.leftNotes.get(c.id) ?? new Set<string>();
+        if (a.left) left.add(String(a.key));
+        else left.delete(String(a.key));
+        this.leftNotes.set(c.id, left);
+        return null;
       }
       case "letter":
         return [];

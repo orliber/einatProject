@@ -157,6 +157,60 @@ fn sealed_cells_cannot_be_moved_between_columns_rows_or_cases() {
     assert!(vault.identities(&b).is_err());
 }
 
+/// D-193: the notes beside a case's report are one sealed row of that case. They read back
+/// as written, a row re-filed under another case does not open, the case id is the only
+/// clear column, and they are erased with the case.
+#[test]
+fn a_cases_notes_are_sealed_for_it_and_erased_with_it() {
+    let (_dir, mut vault) = new_vault();
+    let (a, _) = case_with_input(&mut vault, "TEST-A");
+    let (b, _) = case_with_input(&mut vault, "TEST-B");
+    assert!(vault.case_notes(&a).unwrap().is_none());
+    let notes = r#"{"sections":{"background":{"questions":["מתי התחיל ללכת?"]}}}"#;
+    vault.set_case_notes(&a, Some(notes)).unwrap();
+    vault.set_case_notes(&b, Some("{}")).unwrap();
+    assert_eq!(
+        vault.case_notes(&a).unwrap().as_deref().map(String::as_str),
+        Some(notes)
+    );
+    let columns: Vec<String> = vault
+        .main
+        .prepare("SELECT name FROM pragma_table_info('case_notes')")
+        .unwrap()
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(columns, ["case_id", "data_enc"]);
+
+    // Case A's sealed notes given to case B do not open.
+    vault
+        .main
+        .execute(
+            "UPDATE case_notes SET data_enc = (SELECT data_enc FROM case_notes WHERE case_id = ?1)
+             WHERE case_id = ?2",
+            [&a, &b],
+        )
+        .unwrap();
+    assert!(matches!(
+        vault.case_notes(&b),
+        Err(VaultError::Authentication)
+    ));
+
+    // None at all: the row goes. Then the case goes, and its notes with it.
+    vault.set_case_notes(&b, None).unwrap();
+    assert!(vault.case_notes(&b).unwrap().is_none());
+    vault.delete_case(&a).unwrap();
+    let left: i64 = vault
+        .main
+        .query_row("SELECT COUNT(*) FROM case_notes", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(left, 0);
+    // A keyed hash, bound to the case.
+    assert_ne!(vault.note_mac(&a, "x"), vault.note_mac(&b, "x"));
+    assert_eq!(vault.note_mac(&a, "x").len(), 64);
+}
+
 /// A case key is wrapped for its own case id: case B given case A's wrapped key (and sealed
 /// metadata) does not open, so one case's key can never be used to read another's rows.
 #[test]
@@ -299,6 +353,7 @@ fn every_stored_blob_is_a_sealed_envelope() {
         .unwrap();
     vault.save_style_source(None, "{}").unwrap();
     vault.add_style_profile("draft", "{}").unwrap();
+    vault.set_case_notes(&case, Some("{}")).unwrap();
 
     let mut checked = 0;
     for conn in [&vault.main, &vault.identity] {

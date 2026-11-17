@@ -2,11 +2,13 @@
 // what was voided still there and struck through, what was changed marked, the month's
 // totals, and under it who still owes. "סיכום שנתי": the twelve months of a year as a table
 // with a plain bar beside each. The page says, always, that the program is not registered
-// with the tax authority (D-172). Nothing here is exported or sent.
+// with the tax authority (D-172). Nothing here is sent. One quiet button writes the payments
+// of a month or a year to a file for the accountant, with no name in it (D-194): the core
+// makes the file and the shell saves it; the window only says where.
 import { useMemo, useRef, useState, type ReactNode } from "react";
 import { useApp } from "../../App";
 import { Segmented } from "../../components/Switch";
-import { Dialog, Skeleton } from "../../components/ui";
+import { Dialog, ErrorLine, Skeleton } from "../../components/ui";
 import { asUiError, ipc } from "../../ipc/client";
 import { clinicApi } from "../../ipc/clinic";
 import type { Alert } from "../../ipc/generated/Alert";
@@ -83,6 +85,14 @@ function clearsIn(seconds: number): string {
 
 const visitsWord = (n: number) => (n === 1 ? "פגישה אחת" : `${n} פגישות`);
 
+/** What the file for the accountant covers: a month, or a whole year. */
+export type ExportKind = "month" | "year";
+
+/** The period the core is asked for (D-194): "2026-11" for a month, "2026" for its year. */
+export function exportPeriod(kind: ExportKind, month: string): string {
+  return kind === "month" ? month : month.slice(0, 4);
+}
+
 type View = "diary" | "year";
 
 /** The view she was on stays while the program is open (in memory only), so a look at a
@@ -148,12 +158,15 @@ function DiaryView({ today }: { today: string }) {
 
   return (
     <div className="stack clinic-diary">
-      <nav className="row clinic-period" aria-label="בחירת חודש">
-        <button type="button" className="btn btn-small" disabled={prev === null} onClick={() => go(prev)}>החודש הקודם</button>
-        <h2 className="clinic-period-name" aria-live="polite">{formatMonth(month)}</h2>
-        <button type="button" className="btn btn-small" disabled={next === null} onClick={() => go(next)}>החודש הבא</button>
-        {month !== thisMonth && <button type="button" className="link-btn" onClick={() => go(thisMonth)}>לחודש הנוכחי</button>}
-      </nav>
+      <div className="row clinic-period-bar">
+        <nav className="row clinic-period" aria-label="בחירת חודש">
+          <button type="button" className="btn btn-small" disabled={prev === null} onClick={() => go(prev)}>החודש הקודם</button>
+          <h2 className="clinic-period-name" aria-live="polite">{formatMonth(month)}</h2>
+          <button type="button" className="btn btn-small" disabled={next === null} onClick={() => go(next)}>החודש הבא</button>
+          {month !== thisMonth && <button type="button" className="link-btn" onClick={() => go(thisMonth)}>לחודש הנוכחי</button>}
+        </nav>
+        <IncomeExport kind="month" month={month} />
+      </div>
 
       {diary.error && !d ? <ReadError error={diary.error.message} retry={reload} />
         : !d ? (
@@ -425,12 +438,16 @@ function YearView({ today }: { today: string }) {
   const y = income.data;
   return (
     <div className="stack clinic-year">
-      <nav className="row clinic-period" aria-label="בחירת שנה">
-        <button type="button" className="btn btn-small" disabled={year <= FIRST_YEAR} onClick={() => setYear(year - 1)}>השנה הקודמת</button>
-        <h2 className="clinic-period-name num" aria-live="polite">{year}</h2>
-        <button type="button" className="btn btn-small" disabled={year >= LAST_YEAR} onClick={() => setYear(year + 1)}>השנה הבאה</button>
-        {year !== thisYear && <button type="button" className="link-btn" onClick={() => setYear(thisYear)}>לשנה הנוכחית</button>}
-      </nav>
+      <div className="row clinic-period-bar">
+        <nav className="row clinic-period" aria-label="בחירת שנה">
+          <button type="button" className="btn btn-small" disabled={year <= FIRST_YEAR} onClick={() => setYear(year - 1)}>השנה הקודמת</button>
+          <h2 className="clinic-period-name num" aria-live="polite">{year}</h2>
+          <button type="button" className="btn btn-small" disabled={year >= LAST_YEAR} onClick={() => setYear(year + 1)}>השנה הבאה</button>
+          {year !== thisYear && <button type="button" className="link-btn" onClick={() => setYear(thisYear)}>לשנה הנוכחית</button>}
+        </nav>
+        {/* The month the dialog offers first, if she switches to one: this month's, in the year shown. */}
+        <IncomeExport kind="year" month={`${year}${monthOf(today).slice(4)}`} />
+      </div>
       {income.error && !y ? <ReadError error={income.error.message} retry={reload} />
         : !y ? <Skeleton card lines={8} label="טוען את סיכום השנה" />
         : <YearTable income={y} erased={erased.data ?? null} unsure={erased.error !== null && erased.data === undefined} />}
@@ -528,5 +545,89 @@ function YearTable({ income, erased, unsure }: { income: IncomeYear; erased: Dia
         </Section>
       </div>
     </>
+  );
+}
+
+// ------------------------------------------------------------------ the file for the accountant
+
+/** How the file names the anonymous line of the erased cards (the core's own label, D-179). */
+const ERASED_WORDS = "רשומות של כרטיסים שנמחקו";
+
+/** "ייצוא לרואה החשבון" (D-194): a quiet button beside the month or the year, and its dialog.
+ *  `kind` and `month`: what the dialog offers first (the month or the year she is looking at). */
+function IncomeExport({ kind, month }: { kind: ExportKind; month: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button type="button" className="btn btn-small btn-ghost clinic-export-open" onClick={() => setOpen(true)}>ייצוא לרואה החשבון</button>
+      {open && <IncomeExportDialog kind={kind} month={month} onClose={() => setOpen(false)} />}
+    </>
+  );
+}
+
+/** Picks a month or a whole year, and has the core write the file. What the file holds is
+ *  said before it is made; where it was saved is said after (a toast). A month with payments
+ *  that lack a receipt number says so first, so she can complete them before sending. */
+function IncomeExportDialog({ kind: first, month: firstMonth, onClose }: { kind: ExportKind; month: string; onClose: () => void }) {
+  const { notify, fail } = useApp();
+  const [kind, setKind] = useState<ExportKind>(first);
+  const [month, setMonth] = useState(firstMonth);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const diary = useDiary(month);
+  // A year moves by twelve months, so the month she may come back to stays in the year shown.
+  const step = kind === "month" ? 1 : 12;
+  const prev = shiftMonth(month, -step);
+  const next = shiftMonth(month, step);
+  const period = exportPeriod(kind, month);
+  const shown = kind === "month" ? formatMonth(month) : `שנת ${period}`;
+  // Counted from the lines of the month, as the month's figures count them (D-179).
+  const missing = kind === "month" && diary.data ? missingReceipts(diary.data.days) : 0;
+
+  async function save() {
+    setBusy(true);
+    setError(null);
+    try {
+      const where = await ipc.exportIncome(period);
+      // The path is isolated, so its slashes do not mix with the Hebrew around it.
+      notify(`הקובץ לרואה החשבון נשמר: \u2066${where}\u2069`);
+      onClose();
+    } catch (e) {
+      setError(fail(asUiError(e)));
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Dialog narrow title="ייצוא לרואה החשבון" subtitle="התקבולים בקובץ אחד, בלי שמות" onClose={onClose}
+      footer={<>
+        <span className="grow" />
+        <button type="button" className="btn" onClick={onClose}>ביטול</button>
+        <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void save()}>שמירת הקובץ</button>
+      </>}>
+      <div className="stack clinic-export">
+        <Segmented<ExportKind> label="מה לייצא" value={kind} onChange={setKind}
+          options={[{ value: "month", label: "חודש" }, { value: "year", label: "שנה שלמה" }]} />
+        <div className="row clinic-period" role="group" aria-label={kind === "month" ? "החודש לייצוא" : "השנה לייצוא"}>
+          <button type="button" className="btn btn-small" disabled={prev === null} onClick={() => prev !== null && setMonth(prev)}>
+            {kind === "month" ? "החודש הקודם" : "השנה הקודמת"}
+          </button>
+          <span className="clinic-export-period" aria-live="polite">{shown}</span>
+          <button type="button" className="btn btn-small" disabled={next === null} onClick={() => next !== null && setMonth(next)}>
+            {kind === "month" ? "החודש הבא" : "השנה הבאה"}
+          </button>
+        </div>
+        <p className="clinic-export-what">
+          בקובץ: התאריך, מספר הקבלה, הסכום, אמצעי התשלום והמצב (תקין או בוטל) של כל תקבול, ואחריהם מה שהתקבל בכל חודש לפי אמצעי תשלום, כולל {ERASED_WORDS}, כסכומים בלבד. אין בו שמות, טלפונים, הערות או סיבות ביטול.
+        </p>
+        {missing > 0 && (
+          <p className="clinic-overdue" role="status">
+            {missing === 1 ? "בחודש הזה יש תקבול אחד בלי מספר קבלה" : `בחודש הזה יש ${missing} תקבולים בלי מספר קבלה`}. כדאי להשלים את המספר בכרטיס של המטופל לפני ששולחים. הקובץ סופר אותם בסופו.
+          </p>
+        )}
+        <p className="hint">הקובץ נשמר במחשב, בתיקייה שלא מסונכרנת לענן (בדרך כלל ההורדות). התוכנה לא שולחת אותו: את שולחת אותו לרואה החשבון בעצמך.</p>
+        <ErrorLine error={error} />
+      </div>
+    </Dialog>
   );
 }

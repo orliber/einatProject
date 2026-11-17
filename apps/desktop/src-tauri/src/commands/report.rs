@@ -10,6 +10,32 @@ pub(crate) async fn check_export(
     with_core(&state, move |c| c.check_export(&case_id)).await
 }
 
+/// Of the notes the finish page shows (by the page's keys), the ones she left as they are
+/// (D-193).
+#[tauri::command]
+pub(crate) async fn left_notes(
+    state: tauri::State<'_, AppState>,
+    case_id: String,
+    keys: Vec<String>,
+) -> Res<Vec<String>> {
+    with_core(&state, move |c| c.left_notes(&case_id, &keys)).await
+}
+
+/// "בסדר, להשאיר" (`left`) and "להחזיר" on the finish page, kept with the case (D-193).
+#[tauri::command]
+pub(crate) async fn set_note_left(
+    state: tauri::State<'_, AppState>,
+    case_id: String,
+    draft_id: Option<String>,
+    key: String,
+    left: bool,
+) -> Res<()> {
+    with_core(&state, move |c| {
+        c.set_note_left(&case_id, draft_id.as_deref(), &key, left)
+    })
+    .await
+}
+
 /// A new file under a free name in the folder: "name.docx", "name (2).docx", … The file is
 /// created, not only named, so a file that appears in between is never overwritten.
 pub(crate) fn create_free(
@@ -231,6 +257,20 @@ pub(crate) async fn export_security_pdf(
     let dir = export_dir(&app).await?;
     let bytes = with_core(&state, |c| c.security_layers_pdf()).await?;
     save_export(dir, "שכבות ההגנה.pdf".to_owned(), bytes).await
+}
+
+/// D-194: the clinic's income diary of a month (`2026-11`) or a year (`2026`) for the
+/// accountant, as a CSV with no name, phone or id of a patient in it, into the same folder
+/// as the reports. The core makes the file and logs the period; the window never sees it.
+#[tauri::command]
+pub(crate) async fn export_income(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    period: String,
+) -> Res<String> {
+    let dir = export_dir(&app).await?;
+    let export = with_core(&state, move |c| c.clinic_income_export(&period)).await?;
+    save_export(dir, export.file_name, export.bytes).await
 }
 
 /// Whether a file is one this vault exported, unchanged: when it was made, or `None`. A file

@@ -316,10 +316,7 @@ export function visitTitle(visit: { kind: VisitKind; title: string }): string {
 
 /** "נועם לדוגמה" → "נ. ל.": what discreet mode shows in place of a name, when a family in the
  *  room may see the screen. At most three words are kept. */
-export function initials(name: string): string {
-  const letters = name.split(/\s+/).filter(Boolean).slice(0, 3).map((word) => `${Array.from(word)[0] ?? ""}.`);
-  return letters.join(" ");
-}
+export { initials } from "../../discreet";
 
 /** "בוקר טוב", "צהריים טובים", "ערב טוב" or "לילה טוב", by the minute of her day. */
 export function greeting(minute: number): string {

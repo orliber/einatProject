@@ -80,6 +80,7 @@ impl Core {
         // Restored from the bin while the password was checked: left alone.
         self.refuse_unless_in_trash(case_id)?;
         self.vault_mut()?.delete_case(case_id)?;
+        self.notes.forget_case(case_id);
         self.forget_final_style(case_id);
         self.forget_failure(case_id)
     }
@@ -120,6 +121,7 @@ impl Core {
         let expired = v.trashed_before(cutoff.min(backed_up))?;
         for id in expired {
             self.vault_mut()?.delete_case(&id)?;
+            self.notes.forget_case(&id);
             self.forget_final_style(&id);
             self.forget_failure(&id)?;
         }
