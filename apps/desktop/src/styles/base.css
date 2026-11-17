@@ -223,6 +223,9 @@ select.select {
 .field.grow {
   max-width: var(--field-m);
 }
+.field.grow.fit-s {
+  max-width: var(--field-s);
+}
 .field.grow.fit-l {
   max-width: var(--field-l);
 }

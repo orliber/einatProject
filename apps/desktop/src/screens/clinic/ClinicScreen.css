@@ -416,7 +416,7 @@
 .clinic-picker-results .clinic-picker-list {
   border: 0;
   border-radius: 0;
-  max-height: 264px;
+  max-height: min(264px, 45vh);
 }
 .clinic-picker-row {
   width: 100%;
@@ -433,11 +433,20 @@
   text-align: start;
   cursor: pointer;
 }
-.clinic-picker-list li:first-child .clinic-picker-row {
+.clinic-picker-list li:first-child .clinic-picker-row,
+.clinic-picker-list > .clinic-picker-row:first-child {
   border-top: 0;
 }
 .clinic-picker-row:hover {
   background: var(--surface-alt);
+}
+/* The name the arrows marked: the focus stays in the field, so the mark is drawn here. */
+.clinic-picker-row[aria-selected="true"] {
+  background: var(--primary-soft);
+  box-shadow: inset 3px 0 0 var(--primary);
+}
+[dir="rtl"] .clinic-picker-row[aria-selected="true"] {
+  box-shadow: inset -3px 0 0 var(--primary);
 }
 .clinic-overlap {
   margin-bottom: var(--space-3);

@@ -133,7 +133,7 @@ describe("the follow-ups tab", () => {
 
     await user.click(within(form).getByRole("button", { name: "לשייך לילד או לילדה (לא חובה)" }));
     await user.type(within(form).getByLabelText("מטופל"), "תמ");
-    await user.click(await within(form).findByRole("button", { name: "תמר" }));
+    await user.click(await within(form).findByRole("option", { name: "תמר" }));
     expect(await a11yViolations(view.container)).toEqual([]);
     await user.click(within(form).getByRole("button", { name: "הוספה" }));
 

@@ -436,7 +436,7 @@ function TaskDialog({ task, onClose }: { task: ClinicTask; onClose: () => void }
         <button type="button" className="btn btn-primary" disabled={busy || !dirty} onClick={() => void submit()}>שמירה</button>
       </>}>
       <div className="stack clinic-form">
-        <TextField id="task-edit-title" label="מה המעקב" value={title} maxLength={TITLE_MAX} autoFocus onChange={setTitle} />
+        <TextField id="task-edit-title" label="מה המעקב" value={title} maxLength={TITLE_MAX} autoFocus onChange={setTitle} className="fit-l" />
         <div className="clinic-form-row">
           <SelectField<TaskKind> id="task-edit-kind" label="סוג" value={kind} options={optionsWith(TASK_KINDS, TASK_KIND_LABEL, kind)} onChange={setKind}
             hint={kind === "unknown" ? "הסוג שנשמר לא מוכר לגרסה הזו של התוכנה. כדי לשמור צריך לבחור סוג מהרשימה." : undefined} />
