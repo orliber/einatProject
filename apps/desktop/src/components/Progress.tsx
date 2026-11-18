@@ -1,7 +1,8 @@
 // How long Claude takes: an estimate learned from the last answers on this computer, and a
 // progress line that says how far along a request is and about how long is left.
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ipc } from "../ipc/client";
+import { RichText } from "./RichText";
 import "./Progress.css";
 
 /** Requests to Claude ("draft", "sort", "consult"), and the waits that stay on this computer. */
@@ -118,20 +119,57 @@ export function useNow(active: boolean): number {
   return now;
 }
 
-/** How many words Claude has written so far, asked once a second while a request is on its way. */
-export function useWords(approval: string | undefined): number {
-  const [words, setWords] = useState(0);
+/** What the AI has written so far, while a request is on its way: the number of words, and for
+ *  a section or a consultation the words themselves, with the names put back on this computer
+ *  (D-203). Asked a few times a second, so the text grows as it is written. Shown, never kept. */
+export function useLive(approval: string | undefined): { words: number; text: string } {
+  // Kept with the request it belongs to, so another request never shows the last one's text.
+  const [live, setLive] = useState({ of: "", words: 0, text: "" });
   useEffect(() => {
     if (!approval) return;
     let alive = true;
-    const ask = () => ipc.sendProgress(approval).then((n) => alive && setWords(n)).catch(() => undefined);
-    const t = setInterval(() => void ask(), 1000);
+    const ask = () =>
+      ipc
+        .sendProgress(approval)
+        .then((p) => {
+          if (!alive) return;
+          // A moment the core was busy: what was shown stays. Otherwise the answer is what
+          // is shown, and nothing after a lock.
+          setLive((was) => {
+            const kept = was.of === approval && p.words >= was.words ? was.text : "";
+            return { of: approval, words: p.words, text: p.busy ? kept : p.text };
+          });
+        })
+        .catch(() => undefined);
+    const t = setInterval(() => void ask(), 400);
     return () => {
       alive = false;
       clearInterval(t);
     };
   }, [approval]);
-  return words;
+  return approval && live.of === approval ? { words: live.words, text: live.text } : { words: 0, text: "" };
+}
+
+/** How many words the AI has written so far. */
+export function useWords(approval: string | undefined): number {
+  return useLive(approval).words;
+}
+
+/** The words being written, as text only (never markup), kept scrolled to the newest line.
+ *  `rich`: laid out like the finished answer (headings, bold, lists; React nodes, never HTML). */
+export function LiveText({ text, className = "", rich = false }: { text: string; className?: string; rich?: boolean }) {
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = box.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [text]);
+  if (!text) return null;
+  return (
+    <div ref={box} className={`live-text ${className}`.trim()} dir="auto" aria-live="off">
+      {rich ? <RichText text={text} /> : text}
+      <span className="live-caret" aria-hidden="true" />
+    </div>
+  );
 }
 
 /** "כ-120 מילים עד עכשיו", once there are any. */
@@ -157,7 +195,7 @@ export function leftText(elapsed: number, estimate: number, known = true): strin
 /** A bar that fills toward the estimate and then waits, never claiming to be done early. */
 export function ProgressLine({ started, estimate, label, approval, known = true, small = false }: { started: number; estimate: number; label: string; approval?: string | undefined; known?: boolean; small?: boolean }) {
   const now = useNow(true);
-  const words = useWords(approval);
+  const { words, text } = useLive(approval);
   const elapsed = now - started;
   const share = Math.min(0.95, elapsed / Math.max(estimate, 1));
   const over = elapsed > estimate;
@@ -172,6 +210,7 @@ export function ProgressLine({ started, estimate, label, approval, known = true,
       <div className="progress-track" aria-hidden="true">
         <div className={over ? "progress-fill waiting" : "progress-fill"} style={{ width: `${Math.round(share * 100)}%` }} />
       </div>
+      <LiveText text={text} />
     </div>
   );
 }

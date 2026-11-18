@@ -60,6 +60,7 @@ import type { SectionMode } from "./SectionMode";
 import type { SectionModeView } from "./SectionModeView";
 import type { SectionResult } from "./SectionResult";
 import type { SecurityStatus } from "./SecurityStatus";
+import type { SendProgress } from "./SendProgress";
 import type { SentCursor } from "./SentCursor";
 import type { SentPage } from "./SentPage";
 import type { SentText } from "./SentText";
@@ -228,7 +229,7 @@ export type Commands = {
   send_consult: { args: { approvalId: string }; returns: ConsultResult };
   send_interpretations: { args: { approvalId: string }; returns: InterpretationResult };
   send_message: { args: { kind: MessageKind; patientId: string; visitId: string | null; channel: Channel; contact: number | null }; returns: Handed };
-  send_progress: { args: { approvalId: string }; returns: number };
+  send_progress: { args: { approvalId: string }; returns: SendProgress };
   send_report_check: { args: { approvalId: string }; returns: ReportCheckResult };
   send_section: { args: { approvalId: string }; returns: SectionResult };
   send_sort: { args: { approvalId: string }; returns: SortResult };
