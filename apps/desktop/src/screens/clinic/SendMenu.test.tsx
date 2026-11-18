@@ -1,5 +1,5 @@
 // A message to the family (D-201): the toast after the chat opened names the contact as the
-// screen may show it now, initials in discreet mode (D-192, D-203), and never carries the
+// screen may show it now, initials in discreet mode (D-192, D-204), and never carries the
 // message. The names are invented; the chat is never really opened (mocked).
 import { configure, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";

@@ -134,7 +134,7 @@ describe("the report page, one section in focus", () => {
     const first = focused(page);
     if (!first) throw new Error("no section in focus");
     expect(page.querySelectorAll(".a4-section.is-focus")).toHaveLength(1);
-    // Before the draft: what matters to her here, behind its quiet line (D-203), then "✦ לנסח".
+    // Before the draft: what matters to her here, behind its quiet line (D-204), then "✦ לנסח".
     await user.click(await within(first).findByRole("button", { name: "איך לנסח? (לא חובה)" }));
     const brief = await within(first).findByRole("textbox", { name: /^איך לנסח את הסעיף/ });
     // Out of focus, an empty section is one line, with no box of its own.
@@ -283,7 +283,7 @@ describe("the report page, one section in focus", () => {
   });
 });
 
-describe("the brief behind a quiet line (D-203)", () => {
+describe("the brief behind a quiet line (D-204)", () => {
   const BOX = { name: /^איך לנסח את הסעיף/ };
 
   it("the brief starts folded behind “איך לנסח? (לא חובה)”, aria-expanded false", async () => {

@@ -1,4 +1,4 @@
-// What a visit offers on a list (review item 3 of 18.11.2026, D-203): the one step that fits the
+// What a visit offers on a list (review item 3 of 18.11.2026, D-204): the one step that fits the
 // time, and the rest under "⋯" in a fixed order. The names are invented; the clock is given
 // (Sunday 15.11.2026 at 10:00), and the chat is never really opened (mocked).
 import { configure, render, screen, waitFor, within } from "@testing-library/react";

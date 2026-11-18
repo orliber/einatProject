@@ -384,7 +384,7 @@ describe("main screens", () => {
 });
 
 /** "✦ לנסח" or "✦ לנסח את הסעיף" on an empty section: a section out of focus is brought into
- *  focus by its line's "✦ לנסח" first (D-140), and its "✦ לנסח את הסעיף" sends (D-203). */
+ *  focus by its line's "✦ לנסח" first (D-140), and its "✦ לנסח את הסעיף" sends (D-204). */
 const DRAFT_BUTTON = /^✦ לנסח( את הסעיף)?$/;
 async function draftFrom(user: ReturnType<typeof userEvent.setup>, button: HTMLElement) {
   const section = button.closest<HTMLElement>(".a4-section");

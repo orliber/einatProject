@@ -300,7 +300,7 @@ function A4Section({ api, section: s, focused, onPick, onNext }: {
   const qc = useQueryClient();
   const briefs = useQuery({ queryKey: ["draftBriefs"], queryFn: ipc.draftBriefs, staleTime: 60_000 });
   const keptBrief = briefs.data?.sections[s.key] ?? "";
-  // D-203 §3: the box waits behind one quiet line, "איך לנסח? (לא חובה)", until she asks for it.
+  // D-204 §3: the box waits behind one quiet line, "איך לנסח? (לא חובה)", until she asks for it.
   // A wish kept for the section, or one she wrote before, opens it by itself: a wish is never
   // sent unseen, nor dropped without her seeing it.
   const [briefAsked, setBriefAsked] = useState(false);
@@ -798,7 +798,7 @@ function A4Section({ api, section: s, focused, onPick, onNext }: {
                   }
                 }} />
             ) : (
-              // D-203 §3: folded, one row. "✦ לנסח את הסעיף" sends what an empty box sends (no
+              // D-204 §3: folded, one row. "✦ לנסח את הסעיף" sends what an empty box sends (no
               // wish, the usual request), through the same review; nothing is kept or deleted.
               <div className="row wrap-row a4-brief-row a4-brief-closed">
                 <button id={`draft-${s.key}`} type="button" className="btn btn-primary" disabled={busy} onClick={() => void write()}>✦ לנסח את הסעיף</button>

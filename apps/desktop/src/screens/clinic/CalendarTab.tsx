@@ -3,7 +3,7 @@
 // shown: the day and the week share the week's answer, the month asks for its whole page.
 // A visit is opened by pressing it; it is moved, without opening, by the buttons of the bar
 // under the grid (or Alt and the arrow keys on the visit): at once on screen, and back where it
-// was if the vault refuses. How to move one is behind the bar's "?" (D-203). The side of a visit
+// was if the vault refuses. How to move one is behind the bar's "?" (D-204). The side of a visit
 // is the colour of its kind, explained by the legend under the grid; this window only, never sent
 // anywhere (D-202). The arithmetic is in calendarLayout.ts. Israel's holidays (D-196), when she
 // has them on, are named in each day's head; a day the clinic is closed is shaded.
@@ -437,7 +437,7 @@ function TimeGrid({ dates, hours, days, now, chosenId, actions, onDay, opensAt, 
   const height = gridHeight(hours);
   const nowAt = dates.includes(now.date) ? nowOffset(now.minute, hours) : null;
   // A week opens at the top of its grid: the start of her working day, or the hour of an earlier
-  // visit that week (D-203). A day opens at the hour of now when it is today.
+  // visit that week (D-204). A day opens at the hour of now when it is today.
   const startAt = useRef(0);
   useLayoutEffect(() => {
     startAt.current = openingScroll(opensAt, nowAt);
@@ -575,7 +575,7 @@ function GridVisit({ view, chosen, short, style, actions }: {
 // ------------------------------------------------------------------ the day's list
 
 /** The day as a list beside its grid. Each visit offers one step by the time and the rest under
- *  "⋯", as on the front page (`VisitActions`, D-203); her own time has neither. */
+ *  "⋯", as on the front page (`VisitActions`, D-204); her own time has neither. */
 function Agenda({ date, now, visits, onOpen, onNew, onHold, onNote }: {
   date: string; now: Today; visits: VisitView[]; onOpen: (view: VisitView) => void; onNew: () => void;
   onHold: (visit: Visit) => void; onNote: (patientId: string, visit: Visit) => void;

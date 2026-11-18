@@ -147,7 +147,7 @@ async function cardOfCase(caseId: string): Promise<string | null> {
 export function CaseScreen({ caseId, view, section }: { caseId: string; view: string; section?: string }) {
   const { go, fail, lockNow, status, notify, showShortcuts } = useApp();
   const shown = useShownName();
-  // The case bar shows no app status (D-203 §3): demo mode and a new version are in the top bar
+  // The case bar shows no app status (D-204 §3): demo mode and a new version are in the top bar
   // and on the lock screen. The hourly look for a version still runs while a case is open.
   useDailyUpdateCheck();
   // The clinic card linked to this case, if any (D-195). Quiet: a failure only hides the link.
@@ -168,7 +168,7 @@ export function CaseScreen({ caseId, view, section }: { caseId: string; view: st
   /** "מה יצא מהמחשב": open for one section (its key), or the whole case (""). */
   const [sentFor, setSentFor] = useState<string | null>(null);
   /** The section in focus on the report page (round 48); `move` brings it into view. It starts
-   *  on `section` when one was asked for (the cases card's "הסעיף הבא", D-203 §2). */
+   *  on `section` when one was asked for (the cases card's "הסעיף הבא", D-204 §2). */
   const [focus, setFocus] = useState<{ key: string; at: number; move: boolean; para?: string } | null>(
     () => (section ? { key: section, at: Date.now(), move: true } : null));
   const [searching, setSearching] = useState(false);
@@ -548,7 +548,7 @@ export function CaseScreen({ caseId, view, section }: { caseId: string; view: st
           <span className={detail.meta.consent ? "chip chip-ok" : "chip chip-warn"}>{detail.meta.consent ? "✓ הסכמה" : "חסרה הסכמה"}</span>
           {detail.meta.follows && <span className="chip chip-sand">מעקב</span>}
         </button>
-        {/* D-203 §3: the stages joined by a line, green once done; the lines are drawing only,
+        {/* D-204 §3: the stages joined by a line, green once done; the lines are drawing only,
             and a finished stage says so in words to a screen reader. */}
         <nav className="stages" aria-label="שלבי התיק">
           {stages.map((st, i) => {
@@ -568,7 +568,7 @@ export function CaseScreen({ caseId, view, section }: { caseId: string; view: st
             );
           })}
         </nav>
-        {/* D-203 §3: one quiet family of tools, each an icon with its name. */}
+        {/* D-204 §3: one quiet family of tools, each an icon with its name. */}
         <div className="case-tools">
           {stage === 2 && !narrowBar && (
             <button type="button" className="btn btn-quiet" aria-pressed={fullPage} title={fullPage ? "להחזיר את תוכן הדוח שבצד" : "להסתיר את תוכן הדוח שבצד"} onClick={() => setFullPage(!fullPage)}>
@@ -783,7 +783,7 @@ function Contents(props: {
       </nav>
       <div className="contents-foot">
         {/* D-114: material not sorted yet goes into no draft, so it is said above the writing,
-            with what to do. D-203 §3: one quiet line with a dot; what it means is in its title
+            with what to do. D-204 §3: one quiet line with a dot; what it means is in its title
             and, for a screen reader, in words. While the whole report is written its run sorts
             first, so the line steps aside. */}
         {unsorted > 0 && props.onSort && (

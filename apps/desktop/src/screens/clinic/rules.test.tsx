@@ -114,7 +114,7 @@ describe("rows that could not be read (D-178)", () => {
   it("are said first on the front page, about no patient and with nothing to open", async () => {
     await openOn(TODAY, unread);
     const needs = await region("מה דורש אותי");
-    // Their topic is the first, and so the open one (D-203).
+    // Their topic is the first, and so the open one (D-204).
     const topic = within(within(needs).getAllByRole("heading", { level: 3 })[0] as HTMLElement).getByRole("button");
     expect(topic).toHaveAccessibleName("רישום שלא נקרא: 1");
     expect(topic).toHaveAttribute("aria-expanded", "true");
@@ -269,7 +269,7 @@ describe("the small things", () => {
   it("an alert on a patient's own card leaves the child's name out, so nothing links to the card she is on", async () => {
     await openCard("נועם");
     const needs = await region("מה דורש אותי");
-    // The name is the card's heading (D-203): the lines under it do not repeat it, as a link or as text.
+    // The name is the card's heading (D-204): the lines under it do not repeat it, as a link or as text.
     expect(within(needs).queryByText("נועם")).toBeNull();
     expect(within(needs).queryByRole("button", { name: "נועם" })).toBeNull();
     // What an alert is for stays: the way to the note it asks for.
@@ -279,7 +279,7 @@ describe("the small things", () => {
   it("the same alert on the front page does lead to the card", async () => {
     const { user, went } = await openOn(TODAY);
     const needs = await region("מה דורש אותי");
-    // The alert is under its topic (D-203), here the first one and so open; the name in it is
+    // The alert is under its topic (D-204), here the first one and so open; the name in it is
     // a way to the card.
     const topic = within(within(needs).getAllByRole("heading", { level: 3 })[0] as HTMLElement).getByRole("button");
     expect(topic).toHaveAccessibleName("פגישה בלי סיכום: 2");

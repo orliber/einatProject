@@ -68,7 +68,7 @@ describe("two parts: writing reports and running the clinic", () => {
   });
 });
 
-describe("the bar's tools (D-203)", () => {
+describe("the bar's tools (D-204)", () => {
   it("the bar's tools are one family: an eye switch with no word, “קיצורי מקלדת (F1)”, “הגדרות”, then “נעילה”", async () => {
     const { user } = await openApp();
     const header = document.querySelector(".topbar") as HTMLElement;

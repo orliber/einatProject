@@ -192,7 +192,7 @@ function CardBody({ card, today, now, back, onBack }: { card: PatientCard; today
     if (task) void tick({ task, done: true });
   }
 
-  // One step by the time and the rest under "⋯" (`VisitActions`, D-203), as on the front page;
+  // One step by the time and the rest under "⋯" (`VisitActions`, D-204), as on the front page;
   // on the card there is no reminder, "לא הגיעו" is offered, and the "⋯" is named by the date.
   // A visit still ahead, or a cancelled one, offers nothing here: its time opens it.
   const actionsOf = (view: VisitView) => {
@@ -220,7 +220,7 @@ function CardBody({ card, today, now, back, onBack }: { card: PatientCard; today
     { key: "framework", node: discreet ? "" : p.framework },
     { key: "born", node: p.birth_date ? <>{born} <span className="num" dir="ltr">{formatDate(p.birth_date)}</span></> : "" },
   ].filter((f) => f.node !== "");
-  // The rare step of the header (D-203): one "⋯" for every status, so the button never leaves the
+  // The rare step of the header (D-204): one "⋯" for every status, so the button never leaves the
   // page and the dialog it opened gives the focus back to it.
   const more = p.status === "closed"
     ? { label: "עוד פעולות לכרטיס, כמו פתיחה מחדש", items: [{ label: "פתיחה מחדש", run: () => void reopen(), disabled: save.isPending }] }
@@ -379,7 +379,7 @@ function AboutCell({ label, text, hiddenText, wide = false }: { label: string; t
 const STEP_WORD: Record<StepState, string> = { done: "הושלם", now: "עכשיו", todo: "בהמשך" };
 const STEP_MARK: Record<StepState, string> = { done: "✓", now: "●", todo: "" };
 
-/** The assessment as one joined bar of steps (D-203). Each state has its own form (a tick, a
+/** The assessment as one joined bar of steps (D-204). Each state has its own form (a tick, a
  *  full dot, an empty dashed ring) and its own word for a screen reader, so it never rests on
  *  colour alone; the line between two steps is decoration. */
 function ProcessSteps({ steps }: { steps: ProcessStep[] }) {
@@ -432,7 +432,7 @@ function CaseBox({ patient, link }: { patient: Patient; link: CaseLink | null })
       <button type="button" className="link-btn" onClick={() => setPicking(true)}>לקשר לתיק קיים</button>
     </span>
   );
-  // A cell of the card's band (D-203), still the region "תיק האבחון"; its steps are quiet links.
+  // A cell of the card's band (D-204), still the region "תיק האבחון"; its steps are quiet links.
   return (
     <section className="pcard-band-cell pcard-case" aria-labelledby={headingId}>
       <h3 id={headingId} className="pcard-band-label">תיק האבחון</h3>

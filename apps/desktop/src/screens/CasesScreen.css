@@ -235,7 +235,7 @@ button.crumb:hover:not([aria-current="page"]) {
 .col-go {
   width: 150px;
 }
-/* The "⋯" alone (D-203 §2): the name opens the case. */
+/* The "⋯" alone (D-204 §2): the name opens the case. */
 .col-menu {
   width: 56px;
 }
@@ -280,7 +280,7 @@ button.crumb:hover:not([aria-current="page"]) {
 .num {
   font-variant-numeric: tabular-nums;
 }
-/* One word, one line, one thin bar (D-203 §2). */
+/* One word, one line, one thin bar (D-204 §2). */
 .status-cell {
   display: flex;
   flex-direction: column;
@@ -353,7 +353,7 @@ button.crumb:hover:not([aria-current="page"]) {
   vertical-align: middle;
 }
 
-/* ---------- the card back into the last case (D-203 §2) ---------- */
+/* ---------- the card back into the last case (D-204 §2) ---------- */
 .resume {
   display: flex;
   align-items: center;
@@ -445,7 +445,7 @@ button.crumb:hover:not([aria-current="page"]) {
 }
 
 /* D-113: a folder row is quieter than a case: no button beside it, its name opens it.
-   D-203 §2: a case's name opens it the same way, in the child's own type. */
+   D-204 §2: a case's name opens it the same way, in the child's own type. */
 .folder-name,
 .case-open {
   display: block;

@@ -1,4 +1,4 @@
-// The small "?" beside a fixed explanation (D-203): a toggletip the keyboard, a touch and a screen
+// The small "?" beside a fixed explanation (D-204): a toggletip the keyboard, a touch and a screen
 // reader all reach. The copy here is invented.
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";

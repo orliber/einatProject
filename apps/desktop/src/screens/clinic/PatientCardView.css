@@ -10,7 +10,7 @@
   min-height: 32px;
 }
 
-/* ---------- who: one line, then the band of details (D-203) ---------- */
+/* ---------- who: one line, then the band of details (D-204) ---------- */
 /* The band's own corners are the card's. The dialogs of the case cell are fixed to the page,
    so this never clips them. */
 .pcard-head {

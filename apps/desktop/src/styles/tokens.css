@@ -37,7 +37,7 @@
   --line: #e3e6e3;
   --line-strong: #cfd5d2;
   --field-line: #cfd5d2;
-  /* The calendar's kinds (D-203): each readable at 4.5:1 on its own tint; intake and therapy
+  /* The calendar's kinds (D-204): each readable at 4.5:1 on its own tint; intake and therapy
      use --primary and --warn. Today's column on the time grid: --primary-wash. */
   --kind-assessment: #3b6ea5;
   --kind-assessment-soft: #e8eef6;
@@ -154,7 +154,7 @@
     --line: #2c3634;
     --line-strong: #3d4947;
     --field-line: #56635f;
-    /* The calendar's kinds (D-203), and today's column. */
+    /* The calendar's kinds (D-204), and today's column. */
     --kind-assessment: #8ab4e6;
     --kind-assessment-soft: #1b2a3b;
     --kind-assessment-line: #2f4a68;
@@ -213,7 +213,7 @@
     --line: #2c3634;
     --line-strong: #3d4947;
     --field-line: #56635f;
-    /* The calendar's kinds (D-203), and today's column. */
+    /* The calendar's kinds (D-204), and today's column. */
     --kind-assessment: #8ab4e6;
     --kind-assessment-soft: #1b2a3b;
     --kind-assessment-line: #2f4a68;

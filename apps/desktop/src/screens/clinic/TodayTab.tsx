@@ -2,7 +2,7 @@
 // figures. The reference for the other tabs: data through the hooks of clinicData, names and
 // money through parts, quick actions that show first and roll back if the vault refuses.
 // Each visit offers one step, the one its time asks for, and the rest under "⋯"
-// (`VisitActions`, D-203): "התקיימה" once it has begun, "לכתוב סיכום" once it was held,
+// (`VisitActions`, D-204): "התקיימה" once it has begun, "לכתוב סיכום" once it was held,
 // "תזכורת" while it is ahead. A line "עכשיו" stands between the visits that began and the
 // ones still ahead, and "מה דורש אותי" is grouped by topic (`AlertGroups`).
 import { Fragment, useState } from "react";

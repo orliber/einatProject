@@ -1,4 +1,4 @@
-// The small "?" beside a fixed explanation (the design round of 18.11.2026, D-203): a toggletip,
+// The small "?" beside a fixed explanation (the design round of 18.11.2026, D-204): a toggletip,
 // not a title tooltip, so the keyboard, a touch and a screen reader reach it too. A click opens a
 // short card under it and a second click, Escape, a press outside or Tab away closes it.
 // The children are static copy written in code: never data, names or model output, and always

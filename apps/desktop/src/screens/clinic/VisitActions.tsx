@@ -1,4 +1,4 @@
-// What a visit on a list offers (review item 3 of 18.11.2026, D-203): one step, the one that
+// What a visit on a list offers (review item 3 of 18.11.2026, D-204): one step, the one that
 // fits the time, and everything else under "⋯". A visit that has begun and is not marked
 // offers "התקיימה" (the main button once it is over); one that was held without a note,
 // "לכתוב סיכום"; one still ahead, "תזכורת". The same piece on the clinic's front page, in the

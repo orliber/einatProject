@@ -31,7 +31,7 @@ const WHAT: Record<MessageKind, string> = {
 /**
  * Sending a message to the family, for a menu that offers it ("תזכורת", "הודעת תשלום", and the
  * reminder lines of a visit's "⋯"). The toast names the contact as the screen may show it now:
- * initials in discreet mode (D-192; a gap since D-201, closed in D-203). It never carries the
+ * initials in discreet mode (D-192; a gap since D-201, closed in D-204). It never carries the
  * message itself.
  */
 export function useSend(kind: MessageKind, patientId: string, visitId: string | null = null): {

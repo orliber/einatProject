@@ -300,7 +300,7 @@ export function alertGroups(alerts: Alert[]): { kind: AlertKind; alerts: Alert[]
  * "מה דורש אותי": each alert as a line, the patient's name as a button that opens the card,
  * then the sentence the clinic wrote (which never carries the name). `onVisit` and `onTask`
  * add a step right on the line, when the tab has one to offer. `onCard`: the list is shown on
- * this patient's own card, so their name is left out: it is the page's heading (D-203), and a
+ * this patient's own card, so their name is left out: it is the page's heading (D-204), and a
  * link to where she already is would lead nowhere.
  * An alert about no patient (rows that were not read, D-178) has no name at all.
  * `grouped`: the list sits under its kind's heading (`AlertGroups`), so a line has no icon and
@@ -354,7 +354,7 @@ export function AlertList({ alerts, onVisit, onTask, empty, onCard, grouped = fa
 const UPCOMING: AlertKind[] = ["feedback_soon", "materials_missing"];
 
 /**
- * "מה דורש אותי" by topic (review item 4 of 18.11.2026, D-203): one row per kind that opens and
+ * "מה דורש אותי" by topic (review item 4 of 18.11.2026, D-204): one row per kind that opens and
  * folds, with its count, and under it the lines of that kind (`ALERTS_SHOWN` of them, then
  * "להציג את כל ה-N"). The first kind is open; one she opened or folded stays so. When the line
  * she was on goes (she dealt with it), the focus goes to its kind's row, or, when the whole

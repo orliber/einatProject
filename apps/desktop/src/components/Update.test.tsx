@@ -1,7 +1,7 @@
 // Updates (D-033, D-038): the settings row (check now, the newest already, a check that fails),
 // the window of a new version (now, later, a download that fails, a computer that does not
 // install by itself), the chip in the top bar, the one status badge that tells demo mode and a
-// new version together (D-203), and the daily check that she can turn off.
+// new version together (D-204), and the daily check that she can turn off.
 // The versions and notes are invented.
 import { configure, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";

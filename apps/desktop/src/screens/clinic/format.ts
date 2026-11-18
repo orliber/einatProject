@@ -199,7 +199,7 @@ export function today(now: Date = new Date()): Today {
 }
 
 // ------------------------------------------------------------------ a visit and the time
-// When a visit asks for something (review item 3 of 18.11.2026, D-203): one step that fits the
+// When a visit asks for something (review item 3 of 18.11.2026, D-204): one step that fits the
 // time is offered on the line, the rest wait in "⋯". A visit under way counts as begun: a
 // reminder makes no sense once it has started.
 

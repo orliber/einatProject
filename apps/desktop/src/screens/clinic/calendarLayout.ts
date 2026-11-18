@@ -130,7 +130,7 @@ export function nowOffset(minute: number, hours: Hours, hourPx = HOUR_PX): numbe
 }
 
 /**
- * Where a time grid is scrolled to when a range is first shown (D-203): a week opens at the top
+ * Where a time grid is scrolled to when a range is first shown (D-204): a week opens at the top
  * of its grid (the start of her day, or the hour of an earlier visit); a day that is today opens
  * an hour before now, so now is in sight.
  */

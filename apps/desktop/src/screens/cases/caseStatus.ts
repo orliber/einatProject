@@ -1,4 +1,4 @@
-// Where a case stands: one word, one line, one bar (round 47, canvas "תיקים"; D-203 §2).
+// Where a case stands: one word, one line, one bar (round 47, canvas "תיקים"; D-204 §2).
 // Pure, so the table and the "continue" card say the same thing and a test can check it.
 import type { CaseSummary } from "../../ipc/client";
 

@@ -59,7 +59,7 @@
   font-weight: 700;
   box-shadow: 0 1px 3px rgb(0 0 0 / 0.08);
 }
-/* The program's tools (D-203): one family of quiet 44px buttons, the discreet eye, the
+/* The program's tools (D-204): one family of quiet 44px buttons, the discreet eye, the
    keyboard shortcuts and the settings as icons, then "נעילה" with its word. */
 .topbar-tools {
   display: inline-flex;
@@ -152,7 +152,7 @@
   border-radius: 999px;
   background: var(--ok);
 }
-/* The one quiet status badge (D-203): demo mode, a new version, or both. Text with a dot,
+/* The one quiet status badge (D-204): demo mode, a new version, or both. Text with a dot,
    never colour alone; a button only when there is a version to open. */
 .topbar-status {
   display: inline-flex;

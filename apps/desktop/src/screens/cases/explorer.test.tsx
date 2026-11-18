@@ -115,7 +115,7 @@ describe("the case explorer", () => {
     // "עודכן": when a case inside last changed; nothing for an empty folder.
     expect(row.querySelector("td.col-when")?.textContent).not.toBe("");
     expect(folderRow("הפניות מהמכון").querySelector("td.col-when")?.textContent).toBe("");
-    // D-203 §2: no prominent button in the table. Beside "+ תיק חדש", the one prominent button
+    // D-204 §2: no prominent button in the table. Beside "+ תיק חדש", the one prominent button
     // is on the card above it, on the case she is continuing.
     expect(table().querySelectorAll(".btn-primary")).toHaveLength(0);
     const card = screen.getByRole("region", { name: "להמשיך איפה שהפסקת" });
@@ -230,7 +230,7 @@ describe("the case explorer", () => {
     expect(await screen.findByText(/התיקייה "הפניות מהמכון" הועברה ל"אבחונים פרטיים"/)).toBeInTheDocument();
   });
 
-  it("a case dragged by its name moves like one dragged by its row (D-203)", async () => {
+  it("a case dragged by its name moves like one dragged by its row (D-204)", async () => {
     await openList();
     const name = within(caseRow("נועם")).getByRole("button", { name: "להמשיך בתיק של נועם" });
     expect(name).toHaveAttribute("draggable", "true");

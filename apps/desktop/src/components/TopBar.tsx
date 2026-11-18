@@ -34,7 +34,7 @@ const EyeIcon = ({ shut }: { shut: boolean }) => (
 /**
  * The bar above every page outside a case (D-191): the program's two parts as one switch
  * ("כתיבת הדוחות", "ניהול הקליניקה"), one quiet status badge (demo mode, a new version, or
- * both: D-203), "מוצפן", the tools of the whole program in one family of 44px buttons (the
+ * both: D-204), "מוצפן", the tools of the whole program in one family of 44px buttons (the
  * discreet eye, the keyboard shortcuts, the settings, the lock), and under it the row of the
  * pages of the part she is in.
  */
@@ -60,7 +60,7 @@ export function TopBar({ active }: { active: Route["name"] }) {
         <StatusChip demo={status.demo_mode} />
         <span className="topbar-safe"><span className="topbar-dot" aria-hidden="true" />{he.encrypted}</span>
         <div className="topbar-tools">
-          {/* The eye alone (D-203): its colour, its title and the initials on the page tell the state. */}
+          {/* The eye alone (D-204): its colour, its title and the initials on the page tell the state. */}
           <button type="button" role="switch" aria-checked={discreet} aria-label="מצב דיסקרטי"
             title={discreet ? `מצב דיסקרטי פעיל: שמות מוצגים בראשי תיבות. לחיצה מחזירה את השמות (${MOD}+Shift+D).` : `מצב דיסקרטי: שמות מוצגים בראשי תיבות, למקרה שמישהו בחדר רואה את המסך (${MOD}+Shift+D).`}
             className={discreet ? "btn icon-btn topbar-discreet-on" : "btn icon-btn"} onClick={() => setDiscreet(!discreet)}>

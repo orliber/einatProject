@@ -1,6 +1,6 @@
 # ניהול קליניקה (בטא) – מפרט
 
-> החלטות: D-170 עד D-179, D-194 (ייצוא לרואה החשבון) ו-D-196 עד D-200 (תכנון ותמונת מצב), ב-`DECISIONS.md`. "בטא" כתוב על המתג "ניהול הקליניקה" בסרגל העליון, בכל עמוד של הקליניקה (D-203).
+> החלטות: D-170 עד D-179, D-194 (ייצוא לרואה החשבון) ו-D-196 עד D-200 (תכנון ותמונת מצב), ב-`DECISIONS.md`. "בטא" כתוב על המתג "ניהול הקליניקה" בסרגל העליון, בכל עמוד של הקליניקה (D-204).
 
 ## מה זה ולמי
 עינת מנהלת קליניקה של אבחונים התפתחותיים. היום היומן, סיכומי הפגישות, התשלומים והמעקבים נמצאים מחוץ לתוכנה. המודול מביא אותם פנימה, לתוך הכספת המוצפנת, ומחבר אותם לתיק האבחון ולדוח.
@@ -332,7 +332,7 @@ Data through `@tanstack/react-query` (`["clinic", …]` keys, invalidated
 after a write). Loading shows `Skeleton`; search is debounced; quick actions (marking a visit, a
 task done) update the screen first and roll back on failure; long lists render in pages.
 RTL, keyboard reachable, labelled, both colour themes (only tokens from `styles/tokens.css`).
-The front page (`TodayTab.tsx`, D-203) has no beta line of its own: the bar's switch says "בטא".
+The front page (`TodayTab.tsx`, D-204) has no beta line of its own: the bar's switch says "בטא".
 Each visit offers one step by the time, through `VisitActions` (begun and still planned →
 "התקיימה", the primary once it is over; held without a note → "לכתוב סיכום"; still ahead →
 "תזכורת"), and everything else in its "⋯", which always ends with "לפתוח את הפגישה"; reserved
@@ -343,7 +343,7 @@ between two (`nowIndex`); the count beside the title is `todayCountWords` ("4 ב
 alert that follows comes with the next read, never faked. "מה דורש אותי" is `AlertGroups` (by
 kind in `ALERT_ORDER`, the first open, "N דברים" beside the title), and an "unmarked" line of a
 visit on today's list offers "התקיימה" (`holdOf`); one of an earlier day still opens the visit.
-The calendar (`CalendarTab.tsx`, D-203) opens a week at the top of its grid (`openingScroll`:
+The calendar (`CalendarTab.tsx`, D-204) opens a week at the top of its grid (`openingScroll`:
 the start of her day, or the hour of an earlier visit that week), and today's day view an hour
 before now. Each visit's side bar is the colour of its kind (`.cal-kind-*`, custom properties
 over the `--kind-*` tokens of both themes), and a legend under the grid names the kinds on the
@@ -355,7 +355,7 @@ in the month "איך פותחים יום"). A visit chosen for moving gets its b
 legend's fixed-height slot, so the grid never moves under the pointer. Today is a tinted column
 (`--primary-wash`, a closed holiday's stripes win), with the now line only there. The day list
 uses `VisitActions`, as the front page does.
-The patient card (`PatientCardView.tsx`, D-203) has a one-line header (the name as its h2, the
+The patient card (`PatientCardView.tsx`, D-204) has a one-line header (the name as its h2, the
 status, the facts in one muted line) with "+ פגישה חדשה", "עריכת הפרטים" and one `ActionsMenu`
 for the rare step ("סגירת הכרטיס", or "פתיחה מחדש" on a closed card); the menu stays mounted in
 every status, and closing its dialog puts the focus back on it. Under the header, one band of

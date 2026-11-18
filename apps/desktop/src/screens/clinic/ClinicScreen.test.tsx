@@ -1,7 +1,7 @@
 // The clinic's page over the demo core: the tabs (click, keyboard, deep links), the front
 // page with the demo clinic's visits, the quick actions, the three dialogs, discreet mode and
 // the accessibility check. Every name is invented; the clock is held at a Sunday morning so
-// "today" is the same day on every run (and at 15:12 for the afternoon of the board, D-203).
+// "today" is the same day on every run (and at 15:12 for the afternoon of the board, D-204).
 import { configure, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
@@ -90,7 +90,7 @@ const NAMES = ["תמר", "איתי", "מאיה", "נועם", "יובל", "עומ
 describe("the clinic's page", () => {
   it("marks the clinic as beta only on the bar's switch, shows the eight tabs, and passes the accessibility check", async () => {
     const { view } = await openClinic();
-    // The page has no line of its own about the beta (D-203): the switch says it, below.
+    // The page has no line of its own about the beta (D-204): the switch says it, below.
     expect(screen.queryByText(/בגרסת בטא/)).toBeNull();
     expect(screen.queryByRole("note")).toBeNull();
     expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["היום", "יומן", "מטופלים", "המתנה", "מעקבים", "כספים", "תמונת מצב", "הגדרות הקליניקה"]);
@@ -319,7 +319,7 @@ describe("the front page", () => {
   });
 });
 
-describe("the front page by the time (D-203)", () => {
+describe("the front page by the time (D-204)", () => {
   it("one action by the time: “התקיימה” on visits that are over, “תזכורת” on the one ahead, the rest under “⋯”", async () => {
     afternoon();
     const { user } = await openClinic();

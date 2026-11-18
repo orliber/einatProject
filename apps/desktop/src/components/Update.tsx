@@ -184,7 +184,7 @@ export function useUpdateReady(): boolean {
 const DEMO_TITLE = "לא הוגדר מפתח API. התשובות הן דוגמאות מקומיות, ושום דבר לא נשלח.";
 
 /**
- * The one quiet status badge in the top bar (D-203): demo mode, a new version, or both in one
+ * The one quiet status badge in the top bar (D-204): demo mode, a new version, or both in one
  * badge. Demo mode alone is text with its explanation in the title, as before; a version makes
  * it a button that opens the version's window. Nothing at all when there is neither. Mounting
  * it runs the daily check, so the check runs on every page with the bar.

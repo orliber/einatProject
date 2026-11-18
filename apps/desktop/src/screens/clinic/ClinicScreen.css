@@ -156,7 +156,7 @@
   gap: var(--space-2);
 }
 
-/* The line "עכשיו" between today's visits (D-203): the same --warn-dot as the calendar's
+/* The line "עכשיו" between today's visits (D-204): the same --warn-dot as the calendar's
    .cal-now, with its words in --warn. */
 .clinic-now {
   display: flex;
@@ -181,7 +181,7 @@
   border-radius: 2px;
 }
 
-/* Time she kept for herself, on the front page: hatched, its hours quiet (D-203). */
+/* Time she kept for herself, on the front page: hatched, its hours quiet (D-204). */
 .clinic-today .clinic-visit[data-kind="block"] .clinic-visit-body {
   padding: var(--space-1) var(--space-3);
   border: 1px dashed var(--line-strong);
@@ -220,7 +220,7 @@
   gap: var(--space-2);
 }
 
-/* ---------- what needs her, by topic (AlertGroups, D-203) ---------- */
+/* ---------- what needs her, by topic (AlertGroups, D-204) ---------- */
 /* One row per kind that opens and folds, like the finish step's groups (.fin-head). The
    focus ring comes from the global :focus-visible. */
 .clinic-need-title {

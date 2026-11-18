@@ -52,7 +52,7 @@ describe("the section's panels on the report page (D-168)", () => {
     if (!section) throw new Error("no section in focus");
     // Until asked for, nothing of it is on the page.
     expect(within(page).queryByText("איך לכתוב את הסעיף הזה")).toBeNull();
-    // With the brief folded (D-203), the guide is in the section's "⋯".
+    // With the brief folded (D-204), the guide is in the section's "⋯".
     await user.click(await within(section).findByRole("button", { name: /^עוד על הסעיף/ }));
     await user.click(await screen.findByRole("menuitem", { name: "איך לכתוב את הסעיף" }));
     // Still the report page: the guide is in the section, with its editor one click away.

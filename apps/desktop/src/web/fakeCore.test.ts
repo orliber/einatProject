@@ -103,7 +103,7 @@ describe("FakeCore review screens", () => {
   });
 });
 
-describe("the case list's next section (D-203)", () => {
+describe("the case list's next section (D-204)", () => {
   it("names the first section with nothing approved, as the core does, and none once all are approved", async () => {
     const core = new FakeCore();
     const caseId = await newCase(core);

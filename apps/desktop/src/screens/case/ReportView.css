@@ -141,7 +141,7 @@
   align-items: center;
   gap: 12px;
 }
-/* D-203 §3: the box folded, one row: "✦ לנסח את הסעיף", "לכתוב בעצמי", "איך לנסח? (לא חובה)". */
+/* D-204 §3: the box folded, one row: "✦ לנסח את הסעיף", "לכתוב בעצמי", "איך לנסח? (לא חובה)". */
 .a4-brief-closed {
   gap: 12px;
   margin-top: 8px;

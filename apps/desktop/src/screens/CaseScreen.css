@@ -396,7 +396,7 @@
   font-weight: 600;
   padding: 8px 4px;
 }
-/* D-203 §3: a thin divider between the way back and the case itself (drawing only). */
+/* D-204 §3: a thin divider between the way back and the case itself (drawing only). */
 .case-sep {
   width: 1px;
   height: 24px;
@@ -447,7 +447,7 @@
   display: flex;
   justify-content: center;
   align-items: center;
-  /* D-203 §3: the stages are joined by a line (.step-link) instead of a gap. */
+  /* D-204 §3: the stages are joined by a line (.step-link) instead of a gap. */
   gap: 0;
 }
 .stages .step-link {
@@ -503,7 +503,7 @@
   color: var(--ok);
   border-color: transparent;
 }
-/* D-203 §3: the tools beside the stages, one quiet family: an icon and a name each, then "⋯". */
+/* D-204 §3: the tools beside the stages, one quiet family: an icon and a name each, then "⋯". */
 .case-tools {
   display: flex;
   align-items: center;
@@ -739,7 +739,7 @@
     padding: 0 8px;
   }
 }
-/* D-114: material not sorted yet, said above the writing, with what to do. D-203 §3: one
+/* D-114: material not sorted yet, said above the writing, with what to do. D-204 §3: one
    quiet line with a dot (what it means is in the button's title and, for a screen reader, in
    words). */
 .contents-alert {

@@ -76,7 +76,7 @@
 .cal-move-scope {
   gap: var(--space-2);
 }
-/* What the colour at a visit's side means (D-203): only the kinds on the page. */
+/* What the colour at a visit's side means (D-204): only the kinds on the page. */
 .cal-legend {
   list-style: none;
   margin: 0;
@@ -105,7 +105,7 @@
   background: repeating-linear-gradient(135deg, var(--sand) 0 3px, var(--surface-alt) 3px 6px);
 }
 
-/* ---------- the colour of each kind (D-203) ---------- */
+/* ---------- the colour of each kind (D-204) ---------- */
 /* Custom properties only: the side bar, the fill and the frame of a visit, the bar of a month's
    line and the legend's swatch read them. The window's own colours, never sent anywhere
    (D-202 sends only times and a fixed word). */
@@ -156,7 +156,7 @@
 /* The grid scrolls inside itself, both ways: the page never scrolls sideways, and the names
    of the days and the hours stay in sight. */
 /* Its height. In a tall window: what is left around it, so the page itself does not scroll
-   (measured at 1280x900, D-203). About 415px go to the top bar (64), the tabs (46), the page's
+   (measured at 1280x900, D-204). About 415px go to the top bar (64), the tabs (46), the page's
    padding (40 above, 40 below), the calendar's bar (44, or 100 when it wraps in a narrow
    window), and the line under the grid with its gaps (12 + 54 + 12, or 98 when the bar of a
    chosen visit wraps): even then, choosing a visit never brings a scrollbar that would move the
@@ -348,7 +348,7 @@ button.cal-day-name:hover {
   border-inline-start-color: var(--kind-bar, var(--primary));
   box-shadow: 0 0 0 2px var(--primary), var(--shadow-1);
 }
-/* The side bar is the kind (its colour, D-203). What happened is said by the form of the line
+/* The side bar is the kind (its colour, D-204). What happened is said by the form of the line
    and by a word: a solid edge on the kind's tint (planned), the same on the tint of "done" with
    its word (held), a dashed frame and a line through (cancelled), a dotted edge on the plain
    surface with its word (did not come), a dashed edge over stripes (her own time). */

@@ -133,7 +133,7 @@ export function casesShown(all: CaseSummary[], current: string | null, matches: 
 
 /**
  * One word, one line and a thin bar of the approved sections (canvas "תיקים": "שהסטטוס יהיה
- * ברור ונקי"; D-203 §2). A case ready to go out is one green chip. The bar is aria-hidden: the
+ * ברור ונקי"; D-204 §2). A case ready to go out is one green chip. The bar is aria-hidden: the
  * line beside it says the same numbers, and a case still at its materials shows it empty.
  */
 function StatusCell({ s }: { s: CaseStatus }) {
@@ -416,7 +416,7 @@ export function CasesScreen() {
           </div>
         </div>
         {resume && resumeStatus && !q && !inTrash && (
-          // D-203 §2: the one prominent button of the list. It opens the report on the section it
+          // D-204 §2: the one prominent button of the list. It opens the report on the section it
           // names, so "הסעיף הבא" is where she lands. A warning word stays on the card.
           <section className="paper resume" aria-labelledby="resume-title">
             <div className="resume-body">
@@ -607,7 +607,7 @@ export function CasesScreen() {
                                       </svg>
                                     </span>
                                     <div className="min0">
-                                      {/* D-203 §2, as D-113 did for a folder: the name is the row's one stop
+                                      {/* D-204 §2, as D-113 did for a folder: the name is the row's one stop
                                           on the keyboard, and its name for a screen reader keeps the verb.
                                           "(ללא שם)" keeps the words she sees inside that name (WCAG 2.5.3). */}
                                       <div className="case-title">

@@ -46,7 +46,7 @@ const PageLoading = () => <main className="center-note" aria-busy="true" />;
 
 export type Route =
   | { name: "cases" }
-  // `section`: the report opens on it (the cases card's "הסעיף הבא", D-203 §2).
+  // `section`: the report opens on it (the cases card's "הסעיף הבא", D-204 §2).
   | { name: "case"; id: string; view: string; section?: string }
   | { name: "consult"; caseId?: string }
   | { name: "style" }

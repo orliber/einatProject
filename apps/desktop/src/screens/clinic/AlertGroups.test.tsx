@@ -1,4 +1,4 @@
-// "מה דורש אותי" by topic (review item 4 of 18.11.2026, D-203): one row per kind that opens and
+// "מה דורש אותי" by topic (review item 4 of 18.11.2026, D-204): one row per kind that opens and
 // folds, the first one open, the cap of four lines, the step "התקיימה" for a visit that was
 // not marked, and where the focus goes when the line she dealt with goes (WCAG 2.4.3). Every
 // name and sentence is invented.

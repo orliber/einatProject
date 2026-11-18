@@ -1,6 +1,6 @@
 // The clinic's page (beta, D-170): the bar with the clinic's tabs under it (D-191), and the open
 // tab. "בטא" is on the bar's switch ("ניהול הקליניקה", TopBar's .topbar-beta), which shows on
-// every clinic page at every width; the page has no line of its own about it (D-203). The tab
+// every clinic page at every width; the page has no line of its own about it (D-204). The tab
 // and the open patient live in the app's route, so a link from one tab to another (or to a
 // patient's card) is one `go`.
 import { useMemo } from "react";
