@@ -1502,6 +1502,13 @@ fn failed_send_keeps_the_approval_for_a_retry() {
 
     // The shell's path: take it out, send without holding the core, then finish.
     let out = core.begin_send(&id, SendKind::Section).unwrap();
+    // D-203: while it is written, the words so far come back with the case's names.
+    let live = out.live().expect("a section is shown while it is written");
+    assert_eq!(
+        live.show(r#"{"reply": "", "paragraphs": [{"text": "[ילד] נרגע [יל"#),
+        "אלון נרגע "
+    );
+    assert!(core.is_session(live.session()));
     let response = out.transmit();
     let err = core.finish_section(out, response).unwrap_err();
     assert!(

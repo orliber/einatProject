@@ -216,7 +216,7 @@ pub trait Transport: Send + Sync {
     fn send_streaming(
         &self,
         payload: &ClearedPayload,
-        progress: &dyn Fn(u32),
+        progress: sse::Progress<'_>,
     ) -> Result<Value, EgressError> {
         let _ = progress;
         self.send(payload)
@@ -688,7 +688,7 @@ impl AnthropicTransport {
         })
     }
 
-    fn post_once(&self, body: &[u8], progress: &dyn Fn(u32)) -> Result<Value, EgressError> {
+    fn post_once(&self, body: &[u8], progress: sse::Progress<'_>) -> Result<Value, EgressError> {
         let resp = self
             .client
             .post(&self.url)
@@ -716,7 +716,7 @@ impl AnthropicTransport {
 
     /// One attempt through the breaker: refused at once while it is open, and its outcome
     /// told to it.
-    fn attempt(&self, body: &[u8], progress: &dyn Fn(u32)) -> Result<Value, EgressError> {
+    fn attempt(&self, body: &[u8], progress: sse::Progress<'_>) -> Result<Value, EgressError> {
         // A poisoned lock refuses, like everything here that cannot be checked.
         self.breaker
             .lock()
@@ -732,13 +732,13 @@ impl AnthropicTransport {
 
 impl Transport for AnthropicTransport {
     fn send(&self, payload: &ClearedPayload) -> Result<Value, EgressError> {
-        self.send_streaming(payload, &|_| {})
+        self.send_streaming(payload, &|_, _| {})
     }
 
     fn send_streaming(
         &self,
         payload: &ClearedPayload,
-        progress: &dyn Fn(u32),
+        progress: sse::Progress<'_>,
     ) -> Result<Value, EgressError> {
         let body: Value = serde_json::from_slice(payload.body())
             .map_err(|e| EgressError::Policy(e.to_string()))?;

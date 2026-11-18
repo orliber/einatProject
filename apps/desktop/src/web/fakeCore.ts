@@ -1761,7 +1761,7 @@ export class FakeCore {
       case "forget_backup":
         return null;
       case "send_progress":
-        return 0;
+        return { words: 0, text: "" };
       case "check_update":
         return {
           ...(this.newerVersion ? { version: this.newerVersion, current: "0.8.1" } : { version: "0.2.0", current: "0.1.0" }),
