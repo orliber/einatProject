@@ -2,11 +2,14 @@
 // The day shown is the tab's own state; today comes from `useToday()`. One request per range
 // shown: the day and the week share the week's answer, the month asks for its whole page.
 // A visit is opened by pressing it; it is moved, without opening, by the buttons of the bar
-// over the grid (or Alt and the arrow keys on the visit): at once on screen, and back where it
-// was if the vault refuses. The arithmetic is in calendarLayout.ts. Israel's holidays (D-196),
-// when she has them on, are named in each day's head; a day the clinic is closed is shaded.
+// under the grid (or Alt and the arrow keys on the visit): at once on screen, and back where it
+// was if the vault refuses. How to move one is behind the bar's "?" (D-203). The side of a visit
+// is the colour of its kind, explained by the legend under the grid; this window only, never sent
+// anywhere (D-202). The arithmetic is in calendarLayout.ts. Israel's holidays (D-196), when she
+// has them on, are named in each day's head; a day the clinic is closed is shaded.
 import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { useApp } from "../../App";
+import { HelpTip } from "../../components/HelpTip";
 import { Segmented } from "../../components/Switch";
 import { Dialog, PlusIcon, Skeleton } from "../../components/ui";
 import { clinicApi } from "../../ipc/clinic";
@@ -14,10 +17,11 @@ import type { Holiday } from "../../ipc/generated/Holiday";
 import type { Scope } from "../../ipc/generated/Scope";
 import type { Today } from "../../ipc/generated/Today";
 import type { Visit } from "../../ipc/generated/Visit";
+import type { VisitKind } from "../../ipc/generated/VisitKind";
 import type { VisitView } from "../../ipc/generated/VisitView";
 import {
-  applyMove, byDate, gridHeight, gridHours, hourMarks, HOUR_PX, minutesToPx, MONTH_ROWS, monthWeeks, movedTo, nowOffset, placeDay, rangeTitle,
-  shiftAnchor, slotAt, STEP_MINUTES, suggestStart, viewRange, weekDays, type CalendarView, type Hours, type MoveBy,
+  applyMove, byDate, gridHeight, gridHours, hourMarks, kindsShown, minutesToPx, MONTH_ROWS, monthWeeks, movedTo, nowOffset, openingScroll, placeDay,
+  rangeTitle, shiftAnchor, slotAt, STEP_MINUTES, suggestStart, viewRange, weekDays, type CalendarView, type Hours, type MoveBy,
 } from "./calendarLayout";
 import { useCalendar, useClinicSettings, useHolidays, useOptimistic, useReloadClinic, useToday } from "./clinicData";
 import {
@@ -26,7 +30,7 @@ import {
 } from "./format";
 import { NoteDialog } from "./NoteDialog";
 import { EmptyState, Pager, PatientName, ReadError, Section, StatusBadge, usePaged, useShownName, VisitRow } from "./parts";
-import { SendMenu } from "./SendMenu";
+import { VisitActions } from "./VisitActions";
 import { VisitDialog, type VisitStart } from "./VisitDialog";
 import "./CalendarTab.css";
 
@@ -144,6 +148,8 @@ export function CalendarTab() {
     () => gridHours(dayStart, dayEnd, shown.flatMap((d) => (days.get(d) ?? NO_VISITS).map((v) => v.visit))),
     [dayStart, dayEnd, shown, days],
   );
+  // The legend explains the kinds on the page: the days shown, or the month's whole page.
+  const legendKinds = useMemo(() => kindsShown(views ?? NO_VISITS, view === "month" ? null : shown), [views, shown, view]);
 
   // A visit marked "held" shows so at once.
   const hold = useOptimistic<VisitView[], Visit>(
@@ -267,33 +273,39 @@ export function CalendarTab() {
   } else if (view === "month") {
     body = (
       <>
-        <p className="muted clinic-quiet cal-hint">
-          {views.length === 0 ? "אין פגישות בחודש הזה. לחיצה על יום פותחת אותו, ושם אפשר לקבוע פגישה." : "לחיצה על יום פותחת אותו."}
-        </p>
         <MonthGrid anchor={anchor} days={days} today={now.date} onDay={(date) => show("day", date)} />
+        <div className="cal-foot cal-foot-month">
+          {views.length === 0
+            ? <p className="muted cal-empty">אין פגישות בחודש הזה. לחיצה על יום פותחת אותו, ושם אפשר לקבוע פגישה.</p>
+            : <KindLegend kinds={legendKinds} />}
+        </div>
       </>
     );
   } else {
     const timeGrid = (
       <TimeGrid dates={shown} hours={hours} days={days} now={now} chosenId={picked?.visit.id ?? null} actions={grid}
-        scrollKey={view === "day" ? `day ${anchor}` : `week ${range.from}`}
+        opensAt={view === "day" ? "now" : "start"} scrollKey={view === "day" ? `day ${anchor}` : `week ${range.from}`}
         {...(view === "week" ? { onDay: (date: string) => show("day", date) } : {})} />
     );
-    body = (
-      <>
-        <MoveBar picked={picked} scope={chosen?.scope ?? null} empty={shown.every((d) => (days.get(d) ?? NO_VISITS).length === 0)} view={view}
-          onStep={(by) => { if (picked) step(picked, by, false); }}
-          onScope={() => { if (picked) setOpen({ kind: "scope", view: picked, by: null, refocus: false }); }}
-          onOpen={() => { if (picked) setOpen({ kind: "visit", view: picked }); }}
-          onDone={() => setChosen(null)} />
-        {view === "week" ? timeGrid : (
-          <div className="cal-day-view">
-            {timeGrid}
-            <Agenda key={anchor} date={anchor} today={now.date} visits={days.get(anchor) ?? NO_VISITS} onOpen={grid.open} onNew={() => newOn(anchor)}
-              onHold={(v) => void hold(v)} onNote={(patientId, visit) => setOpen({ kind: "note", patientId, visit })} />
-          </div>
-        )}
-      </>
+    const empty = shown.every((d) => (days.get(d) ?? NO_VISITS).length === 0);
+    // Under the grid, in a slot of its own height: the chosen visit's bar, or else what the
+    // colours mean (or, on an empty page, how to start). Choosing a visit never moves the grid.
+    const foot = picked ? (
+      <MoveBar picked={picked} scope={chosen?.scope ?? null}
+        onStep={(by) => step(picked, by, false)}
+        onScope={() => setOpen({ kind: "scope", view: picked, by: null, refocus: false })}
+        onOpen={() => setOpen({ kind: "visit", view: picked })}
+        onDone={() => setChosen(null)} />
+    ) : empty ? (
+      <p className="muted cal-empty">{`אין פגישות ${view === "day" ? "ביום" : "בשבוע"} הזה. כדי לקבוע פגישה לוחצים על שעה ביומן.`}</p>
+    ) : <KindLegend kinds={legendKinds} />;
+    const stage = <div className="cal-stage">{timeGrid}<div className="cal-foot">{foot}</div></div>;
+    body = view === "week" ? stage : (
+      <div className="cal-day-view">
+        {stage}
+        <Agenda key={anchor} date={anchor} now={now} visits={days.get(anchor) ?? NO_VISITS} onOpen={grid.open} onNew={() => newOn(anchor)}
+          onHold={(v) => void hold(v)} onNote={(patientId, visit) => setOpen({ kind: "note", patientId, visit })} />
+      </div>
     );
   }
 
@@ -308,6 +320,15 @@ export function CalendarTab() {
         </div>
         <h2 className="cal-title" aria-live="polite">{rangeTitle(view, anchor)}</h2>
         <span className="grow" />
+        <HelpTip key={view === "month" ? "month" : "grid"} label={view === "month" ? "איך פותחים יום" : "איך מזיזים פגישה"}>
+          {view === "month" ? <p>לחיצה על יום פותחת אותו, ושם אפשר לקבוע פגישה.</p> : (
+            <>
+              <p>כדי להזיז פגישה בלי לפתוח אותה, מצביעים עליה ולוחצים על החצים שבפינה שלה.</p>
+              <p>מהמקלדת: עומדים על הפגישה ולוחצים Alt עם החצים.</p>
+              <p>כדי לקבוע פגישה לוחצים על שעה ביומן.</p>
+            </>
+          )}
+        </HelpTip>
         <button type="button" className="btn btn-primary" onClick={() => (view === "day" ? newOn(anchor) : setOpen({ kind: "new" }))}><PlusIcon /> פגישה חדשה</button>
       </header>
 
@@ -334,22 +355,13 @@ export function CalendarTab() {
   );
 }
 
-// ------------------------------------------------------------------ the bar of a chosen visit
+// ------------------------------------------------------------------ under the grid
 
-/** The line over the grid: how to move a visit, and, once one is chosen, the steps it can take. */
-function MoveBar({ picked, scope, empty, view, onStep, onScope, onOpen, onDone }: {
-  picked: VisitView | null; scope: Scope | null; empty: boolean; view: CalendarView;
+/** The line under the grid once a visit is chosen: what it is, and the steps it can take. */
+function MoveBar({ picked, scope, onStep, onScope, onOpen, onDone }: {
+  picked: VisitView; scope: Scope | null;
   onStep: (by: MoveBy) => void; onScope: () => void; onOpen: () => void; onDone: () => void;
 }) {
-  if (!picked) {
-    return (
-      <p className="cal-move muted">
-        {empty
-          ? `אין פגישות ${view === "day" ? "ביום" : "בשבוע"} הזה. כדי לקבוע פגישה לוחצים על שעה ביומן.`
-          : "כדי להזיז פגישה בלי לפתוח אותה, מצביעים עליה ולוחצים על החצים שבפינה שלה."}
-      </p>
-    );
-  }
   const v = picked.visit;
   const can = (by: MoveBy) => movedTo(v, by) !== null;
   const steps: { label: string; keys: string; by: MoveBy }[] = [
@@ -387,6 +399,19 @@ function MoveBar({ picked, scope, empty, view, onStep, onScope, onOpen, onDone }
   );
 }
 
+/** What the colour at a visit's side means: only the kinds on the page, in words from the code
+ *  (never a visit's own title). Nothing when there is nothing to explain. */
+function KindLegend({ kinds }: { kinds: VisitKind[] }) {
+  if (kinds.length === 0) return null;
+  return (
+    <ul className="cal-legend" aria-label="מקרא: צבעי סוגי הפגישות">
+      {kinds.map((k) => (
+        <li key={k} className={`cal-legend-item cal-kind-${k}`}><span className="cal-swatch" aria-hidden="true" />{VISIT_KIND_LABEL[k]}</li>
+      ))}
+    </ul>
+  );
+}
+
 // ------------------------------------------------------------------ the time grid (day, week)
 
 interface GridActions {
@@ -404,17 +429,18 @@ interface GridActions {
 }
 
 /** The hours down the side and a column for each day. The grid scrolls inside itself. */
-function TimeGrid({ dates, hours, days, now, chosenId, actions, onDay, scrollKey }: {
+function TimeGrid({ dates, hours, days, now, chosenId, actions, onDay, opensAt, scrollKey }: {
   dates: string[]; hours: Hours; days: Map<string, VisitView[]>; now: Today; chosenId: string | null; actions: GridActions;
-  onDay?: (date: string) => void; scrollKey: string;
+  onDay?: (date: string) => void; opensAt: "start" | "now"; scrollKey: string;
 }) {
   const scroller = useRef<HTMLDivElement>(null);
   const height = gridHeight(hours);
   const nowAt = dates.includes(now.date) ? nowOffset(now.minute, hours) : null;
-  // When a range is first shown, the hour of now (when it is on the page) is in sight.
+  // A week opens at the top of its grid: the start of her working day, or the hour of an earlier
+  // visit that week (D-203). A day opens at the hour of now when it is today.
   const startAt = useRef(0);
   useLayoutEffect(() => {
-    startAt.current = nowAt === null ? 0 : Math.max(0, nowAt - HOUR_PX);
+    startAt.current = openingScroll(opensAt, nowAt);
   });
   useLayoutEffect(() => {
     if (scroller.current) scroller.current.scrollTop = startAt.current;
@@ -518,7 +544,7 @@ function GridVisit({ view, chosen, short, style, actions }: {
     actions.moveKey(view, by);
   }
 
-  const classes = ["cal-visit", `cal-visit-${v.status}`, block ? "cal-visit-block" : "", view.overlaps ? "cal-visit-overlap" : "", chosen ? "cal-visit-chosen" : "", short ? "cal-visit-short" : ""];
+  const classes = ["cal-visit", `cal-visit-${v.status}`, `cal-kind-${v.kind}`, block ? "cal-visit-block" : "", view.overlaps ? "cal-visit-overlap" : "", chosen ? "cal-visit-chosen" : "", short ? "cal-visit-short" : ""];
   return (
     <li className={classes.filter(Boolean).join(" ")} style={style} data-status={v.status}>
       {/* Its name is its own text, so what is read out holds what is seen: "09:00–10:30 תמר, מפגש אבחון, מתוכננת". */}
@@ -548,26 +574,13 @@ function GridVisit({ view, chosen, short, style, actions }: {
 
 // ------------------------------------------------------------------ the day's list
 
-/** The day as a list beside its grid, with the quick actions of the front page. */
-function Agenda({ date, today, visits, onOpen, onNew, onHold, onNote }: {
-  date: string; today: string; visits: VisitView[]; onOpen: (view: VisitView) => void; onNew: () => void;
+/** The day as a list beside its grid. Each visit offers one step by the time and the rest under
+ *  "⋯", as on the front page (`VisitActions`, D-203); her own time has neither. */
+function Agenda({ date, now, visits, onOpen, onNew, onHold, onNote }: {
+  date: string; now: Today; visits: VisitView[]; onOpen: (view: VisitView) => void; onNew: () => void;
   onHold: (visit: Visit) => void; onNote: (patientId: string, visit: Visit) => void;
 }) {
   const { shown, page, pages, setPage } = usePaged(visits, 12);
-  const actionsOf = (view: VisitView) => {
-    const v = view.visit;
-    if (v.kind === "block" || v.patient_id === null) return null;
-    const patientId = v.patient_id;
-    // A visit still ahead has not happened yet: as on the card.
-    const due = v.date <= today;
-    return (
-      <>
-        {v.status === "planned" && due && <button type="button" className="btn btn-small" onClick={() => onHold(v)}>התקיימה</button>}
-        {v.status !== "cancelled" && <button type="button" className="btn btn-small" onClick={() => onNote(patientId, v)}>סיכום</button>}
-        {v.status === "planned" && <SendMenu kind="reminder" patientId={patientId} visitId={v.id} label="תזכורת" />}
-      </>
-    );
-  };
   return (
     <Section title="סדר היום" aside={<span className="muted small">{visits.length === 0 ? "" : countText(visits.length)}</span>}>
       {visits.length === 0 ? (
@@ -577,7 +590,18 @@ function Agenda({ date, today, visits, onOpen, onNew, onHold, onNote }: {
       ) : (
         <>
           <ul className="clinic-list clinic-visits">
-            {shown.map((view) => <VisitRow key={view.visit.id} view={view} actions={actionsOf(view)} onOpen={() => onOpen(view)} />)}
+            {shown.map((view) => {
+              const v = view.visit;
+              // The key is the visit's and the step keeps its place: after "התקיימה" the focus
+              // stays on the same button, now "לכתוב סיכום".
+              const pid = v.kind !== "block" ? v.patient_id : null;
+              return (
+                <VisitRow key={v.id} view={view} onOpen={() => onOpen(view)}
+                  actions={pid !== null
+                    ? <VisitActions view={view} patientId={pid} now={now} onHold={onHold} onNote={(x) => onNote(pid, x)} onOpen={() => onOpen(view)} />
+                    : undefined} />
+              );
+            })}
           </ul>
           <Pager page={page} pages={pages} onPage={setPage} label="עמודי סדר היום" />
         </>
@@ -638,7 +662,7 @@ function MonthDay({ date, visits, today, outside, onDay }: { date: string; visit
           {visits.slice(0, MONTH_ROWS).map((view) => {
             const v = view.visit;
             return (
-              <li key={v.id} className={`cal-month-visit cal-visit-${v.status}${v.kind === "block" ? " cal-visit-block" : ""}`} data-status={v.status}>
+              <li key={v.id} className={`cal-month-visit cal-visit-${v.status} cal-kind-${v.kind}${v.kind === "block" ? " cal-visit-block" : ""}`} data-status={v.status}>
                 <span className="num cal-visit-time" dir="ltr">{formatTime(v.start)}</span>
                 <span className="cal-visit-who">{v.kind === "block" ? visitTitle(v) : <PatientName name={view.patient_name} />}</span>
                 {v.kind !== "block" && v.status !== "planned" && <span className="visually-hidden">, {VISIT_STATUS_LABEL[v.status]}</span>}

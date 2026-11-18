@@ -1,10 +1,11 @@
 // The calendar's arithmetic, apart from its screen: which days and hours a view shows, where a
-// visit sits on the time grid (and beside which others, when they overlap), the weeks of a
-// month, and where a visit lands when she moves it. Pure functions over ISO dates and minutes
-// from midnight; nothing here reads the clock or the page.
+// visit sits on the time grid (and beside which others, when they overlap), where the grid opens,
+// the kinds its legend explains, the weeks of a month, and where a visit lands when she moves it.
+// Pure functions over ISO dates and minutes from midnight; nothing here reads the clock or the page.
 import type { Scope } from "../../ipc/generated/Scope";
+import type { VisitKind } from "../../ipc/generated/VisitKind";
 import type { VisitView } from "../../ipc/generated/VisitView";
-import { addDays, dayNumber, formatDateLong, formatMonth, monthOf, monthRange, weekday, weekRange, type DateRange } from "./format";
+import { addDays, dayNumber, formatDateLong, formatMonth, monthOf, monthRange, VISIT_KINDS, weekday, weekRange, type DateRange } from "./format";
 
 export type CalendarView = "day" | "week" | "month";
 
@@ -128,6 +129,15 @@ export function nowOffset(minute: number, hours: Hours, hourPx = HOUR_PX): numbe
   return minute < hours.start || minute > hours.end ? null : minutesToPx(minute - hours.start, hourPx);
 }
 
+/**
+ * Where a time grid is scrolled to when a range is first shown (D-203): a week opens at the top
+ * of its grid (the start of her day, or the hour of an earlier visit); a day that is today opens
+ * an hour before now, so now is in sight.
+ */
+export function openingScroll(opensAt: "start" | "now", nowAt: number | null, hourPx = HOUR_PX): number {
+  return opensAt === "now" && nowAt !== null ? Math.max(0, nowAt - hourPx) : 0;
+}
+
 /** The first half hour still ahead when the day is today (inside her hours), else the start of her day. */
 export function suggestStart(date: string, today: { date: string; minute: number }, dayStart: number, dayEnd: number): number {
   if (date !== today.date) return dayStart;
@@ -203,6 +213,22 @@ export function byDate(views: VisitView[]): Map<string, VisitView[]> {
     else days.set(v.visit.date, [v]);
   }
   return days;
+}
+
+/** The order of the legend: her kinds as she chooses them, then one a later version wrote, and
+ *  her own time last. */
+const LEGEND_ORDER: VisitKind[] = [...VISIT_KINDS.filter((k) => k !== "block"), "unknown", "block"];
+
+/** The kinds the legend explains: those of the visits shown on these dates (`null`: every date
+ *  of the answer), a cancelled visit aside, in the legend's fixed order. */
+export function kindsShown(views: VisitView[], dates: string[] | null): VisitKind[] {
+  const on = dates === null ? null : new Set(dates);
+  const seen = new Set<VisitKind>();
+  for (const v of views) {
+    if (v.visit.status === "cancelled" || (on !== null && !on.has(v.visit.date))) continue;
+    seen.add(v.visit.kind);
+  }
+  return LEGEND_ORDER.filter((k) => seen.has(k));
 }
 
 /** A step she can take with a visit: minutes earlier (-) or later (+), days back (-) or ahead (+). */

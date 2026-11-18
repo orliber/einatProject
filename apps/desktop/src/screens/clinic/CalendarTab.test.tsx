@@ -1,7 +1,8 @@
 // The calendar over the demo core: the three views and what each asks for, the visits on the
-// grid, opening and scheduling, moving a visit (at once, with rollback), the day's quick
-// actions, discreet mode and the accessibility check. Every name is invented; the clock is
-// held at Sunday 15.11.2026, 08:00.
+// grid with the colour of their kind and the legend under it, where the grid opens, the "?" of
+// the bar, opening and scheduling, moving a visit (at once, with rollback), the day list's one
+// step and "⋯", discreet mode and the accessibility check. Every name is invented; the clock is
+// held at Sunday 15.11.2026, 08:00 unless a test says otherwise.
 import { act, configure, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
@@ -71,6 +72,28 @@ const visitsOf = (name: string) => Array.from(day(name).querySelectorAll<HTMLEle
 const visit = (name: RegExp) => screen.getByRole("button", { name });
 const bar = () => screen.getByRole("group", { name: "הזזת הפגישה שנבחרה" });
 const step = (name: string) => within(bar()).getByRole("button", { name });
+const LEGEND = "מקרא: צבעי סוגי הפגישות";
+const legend = () => screen.queryByRole("list", { name: LEGEND });
+const MOVE_HELP = "כדי להזיז פגישה בלי לפתוח אותה, מצביעים עליה ולוחצים על החצים שבפינה שלה.";
+
+/** The "⋯" of a visit's row in the day list. */
+const moreOf = (row: HTMLElement) => within(row).getByRole("button", { name: /^עוד פעולות לפגישה של / });
+
+/** Picks a step from the "⋯" of a visit's row. */
+async function fromMenu(user: ReturnType<typeof userEvent.setup>, row: HTMLElement, item: string) {
+  await user.click(moreOf(row));
+  await user.click(await screen.findByRole("menuitem", { name: item }));
+}
+
+/** The words of a visit's "⋯", in order; the menu is closed again after. */
+async function menuOf(user: ReturnType<typeof userEvent.setup>, row: HTMLElement): Promise<string[]> {
+  await user.click(moreOf(row));
+  const menu = await screen.findByRole("menu");
+  const words = within(menu).getAllByRole("menuitem").map((i) => i.textContent ?? "");
+  await user.keyboard("{Escape}");
+  await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+  return words;
+}
 
 /** The visit dialog, once its form is drawn (it shows the shape of the form while it reads). */
 async function visitDialog(name: "פגישה חדשה" | "פרטי הפגישה"): Promise<HTMLElement> {
@@ -107,8 +130,40 @@ describe("the week", () => {
     expect(within(day(SUNDAY)).getByText("היום")).toBeInTheDocument();
     expect(within(day(MONDAY)).queryByText("היום")).toBeNull();
     expect(screen.getAllByRole("button", { name: /^פגישה חדשה ביום / })).toHaveLength(6);
+    // The side of a visit is the colour of its kind, and the legend under the grid says what
+    // each colour means: the kinds of the week, in a fixed order, her own time last.
+    expect(within(legend() as HTMLElement).getAllByRole("listitem").map((li) => li.textContent)).toEqual([
+      "פגישת היכרות", "מפגש אבחון", "תצפית", "שיחת משוב", "פגישת טיפול", "זמן שמור",
+    ]);
+    expect(visit(/ תמר, מפגש אבחון/).closest("li")).toHaveClass("cal-kind-assessment");
+    expect(visit(/^13:00–15:00 כתיבת דוחות/).closest("li")).toHaveClass("cal-kind-block");
+    // The line of now is drawn only in today's column.
+    expect(day(SUNDAY).querySelector(".cal-now")).not.toBeNull();
+    expect(day(MONDAY).querySelector(".cal-now")).toBeNull();
     expect(asked()).toEqual(["2026-11-15 2026-11-21"]);
     expect(await a11yViolations(view.container)).toEqual([]);
+  });
+
+  it("opens the week at the start of her working day, even late in the day", async () => {
+    vi.setSystemTime(new Date(2026, 10, 15, 15, 12));
+    const { user } = await openCalendar();
+    const grid = () => screen.getByRole("group", { name: "היומן לפי שעות" });
+    // 08:00 is at the top, though now (15:12) is on this week's Sunday.
+    expect(grid().scrollTop).toBe(0);
+    expect(day(SUNDAY).querySelector(".cal-now")).not.toBeNull();
+    // Today's day opens an hour before now: 15:12 is 403.2 pixels down a grid from 08:00.
+    await user.click(viewRadio("יום"));
+    expect(title()).toBe(SUNDAY);
+    expect(grid().scrollTop).toBeCloseTo(347.2);
+    // Another day, and another week, open at the top.
+    await user.click(screen.getByRole("button", { name: "היום הבא" }));
+    expect(title()).toBe(MONDAY);
+    expect(grid().scrollTop).toBe(0);
+    await user.click(viewRadio("שבוע"));
+    await user.click(screen.getByRole("button", { name: "השבוע הבא" }));
+    expect(title()).toBe("22 עד 28 בנובמבר 2026");
+    await screen.findByRole("button", { name: /^16:00–16:50 מאיה, פגישת טיפול/ });
+    expect(grid().scrollTop).toBe(0);
   });
 
   it("places a visit by its start and its length", async () => {
@@ -240,13 +295,24 @@ describe("the week", () => {
   it("an empty week says so and how to start, and still shows her working days", async () => {
     window.history.replaceState({}, "", "/?clinic=empty");
     const { view, user } = await openCalendar();
-    expect(screen.getByText("אין פגישות בשבוע הזה. כדי לקבוע פגישה לוחצים על שעה ביומן.")).toBeInTheDocument();
+    // Under the grid, in the place of the legend, which has nothing to explain.
+    expect(screen.getByText("אין פגישות בשבוע הזה. כדי לקבוע פגישה לוחצים על שעה ביומן.").closest(".cal-foot")).not.toBeNull();
+    expect(legend()).toBeNull();
     expect(screen.getAllByRole("region")).toHaveLength(5);
     expect(await a11yViolations(view.container)).toEqual([]);
     await user.click(viewRadio("יום"));
     expect(screen.getByRole("heading", { name: "אין פגישות ביום הזה" })).toBeInTheDocument();
+    expect(screen.getByText("אין פגישות ביום הזה. כדי לקבוע פגישה לוחצים על שעה ביומן.").closest(".cal-foot")).not.toBeNull();
+    expect(legend()).toBeNull();
     await user.click(viewRadio("חודש"));
-    expect(await screen.findByText("אין פגישות בחודש הזה. לחיצה על יום פותחת אותו, ושם אפשר לקבוע פגישה.")).toBeInTheDocument();
+    expect((await screen.findByText("אין פגישות בחודש הזה. לחיצה על יום פותחת אותו, ושם אפשר לקבוע פגישה.")).closest(".cal-foot")).not.toBeNull();
+    expect(legend()).toBeNull();
+    // How to open a day is behind the month's "?".
+    const help = screen.getByRole("button", { name: "איך פותחים יום" });
+    expect(screen.queryByRole("button", { name: "איך מזיזים פגישה" })).toBeNull();
+    await user.click(help);
+    expect(help).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("לחיצה על יום פותחת אותו, ושם אפשר לקבוע פגישה.")).toBeInTheDocument();
   });
 });
 
@@ -261,7 +327,23 @@ describe("moving a visit", () => {
       return core.handle(cmd, args);
     };
     const { user, saves, view } = await openCalendar({ over: slow });
-    expect(screen.getByText("כדי להזיז פגישה בלי לפתוח אותה, מצביעים עליה ולוחצים על החצים שבפינה שלה.")).toBeInTheDocument();
+    // How to move a visit is behind the bar's "?", closed until she asks; no bar until a visit is chosen.
+    const help = screen.getByRole("button", { name: "איך מזיזים פגישה" });
+    expect(help).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText(MOVE_HELP)).toBeNull();
+    expect(screen.queryByRole("group", { name: "הזזת הפגישה שנבחרה" })).toBeNull();
+    await user.click(help);
+    expect(help).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText(MOVE_HELP)).toBeInTheDocument();
+    expect(screen.getByText("מהמקלדת: עומדים על הפגישה ולוחצים Alt עם החצים.")).toBeInTheDocument();
+    expect(screen.getByText("כדי לקבוע פגישה לוחצים על שעה ביומן.")).toBeInTheDocument();
+    expect(await a11yViolations(view.container)).toEqual([]);
+    await user.keyboard("{Escape}");
+    expect(help).toHaveAttribute("aria-expanded", "false");
+    expect(help).toHaveFocus();
+    expect(screen.queryByText(MOVE_HELP)).toBeNull();
+    expect(screen.queryByRole("group", { name: "הזזת הפגישה שנבחרה" })).toBeNull();
+
     await user.click(screen.getByRole("button", { name: "הזזת הפגישה של תמר, ראשון 09:00" }));
     expect(screen.getByRole("button", { name: "הזזת הפגישה של תמר, ראשון 09:00" })).toHaveAttribute("aria-pressed", "true");
     expect(within(bar()).getByRole("status")).toHaveTextContent("תמריום ראשון, 15.11.202609:00–10:30");
@@ -284,8 +366,12 @@ describe("moving a visit", () => {
     await user.click(step("להקדים ברבע שעה"));
     await waitFor(() => expect(visitsOf(SUNDAY)[0]).toBe("09:00–10:30 תמר, מפגש אבחון, מתוכננת"));
     await waitFor(() => expect(saves()).toHaveLength(4));
+    // The bar sat under the grid, where the legend comes back once she is done.
+    expect(bar().closest(".cal-foot")).not.toBeNull();
+    expect(legend()).toBeNull();
     await user.click(step("סיום"));
     expect(screen.queryByRole("group", { name: "הזזת הפגישה שנבחרה" })).toBeNull();
+    expect(legend()?.closest(".cal-foot")).not.toBeNull();
   });
 
   it("a move the vault refuses goes back, and says why", async () => {
@@ -412,15 +498,37 @@ describe("the day", () => {
   it("“התקיימה” marks the visit at once, on the list and on the grid", async () => {
     const { user, row, saves } = await openDay();
     expect(within(row("תמר")).getByText("מתוכננת")).toBeInTheDocument();
-    await user.click(within(row("תמר")).getByRole("button", { name: "התקיימה" }));
+    // At 08:00 her visit has not begun: its one step is "תזכורת", and "התקיימה" is under "⋯".
+    expect(within(row("תמר")).queryByRole("button", { name: "התקיימה" })).toBeNull();
+    expect(within(row("תמר")).getByRole("button", { name: "תזכורת" })).toBeInTheDocument();
+    expect(await menuOf(user, row("תמר"))).toEqual(["התקיימה", "לכתוב סיכום", "לפתוח את הפגישה"]);
+    await fromMenu(user, row("תמר"), "התקיימה");
     expect(within(row("תמר")).getByText("התקיימה")).toBeInTheDocument();
     expect(await screen.findByRole("button", { name: "09:00–10:30 תמר, מפגש אבחון, התקיימה" })).toBeInTheDocument();
     await waitFor(() => expect(saves()[0]).toMatchObject({ scope: "one", visit: { status: "held" } }));
-    await waitFor(() => expect(within(row("תמר")).queryByRole("button", { name: "התקיימה" })).toBeNull());
-    // Her own time has nothing to mark.
+    // Held without a note: its one step is "לכתוב סיכום", and nothing is left to mark.
+    expect(within(row("תמר")).getByRole("button", { name: "לכתוב סיכום" })).toBeInTheDocument();
+    expect(await menuOf(user, row("תמר"))).toEqual(["לפתוח את הפגישה"]);
+    // Her own time has nothing to mark, and no "⋯".
     const own = within(screen.getByRole("region", { name: "סדר היום" })).getAllByRole("listitem")[2] as HTMLElement;
     expect(own).toHaveTextContent("כתיבת דוחות");
     expect(within(own).queryByRole("button", { name: "התקיימה" })).toBeNull();
+    expect(within(own).queryByRole("button", { name: /^עוד פעולות/ })).toBeNull();
+  });
+
+  it("a visit that has begun offers “התקיימה” as its one step, and the focus stays on it as it becomes “לכתוב סיכום”", async () => {
+    vi.setSystemTime(new Date(2026, 10, 15, 10, 45));
+    const { user, row, saves } = await openDay();
+    // תמר's visit (09:00–10:30) is over: "התקיימה" is the main button, and not in "⋯" again.
+    const held = within(row("תמר")).getByRole("button", { name: "התקיימה" });
+    expect(held).toHaveClass("btn-primary");
+    expect(within(row("תמר")).queryByRole("button", { name: "תזכורת" })).toBeNull();
+    expect(await menuOf(user, row("תמר"))).toEqual(["לכתוב סיכום", "לשלוח תזכורת בוואטסאפ", "לשלוח תזכורת ב-SMS", "לשלוח תזכורת במייל", "להעתיק את התזכורת", "לפתוח את הפגישה"]);
+    await user.click(held);
+    await waitFor(() => expect(saves()[0]).toMatchObject({ visit: { status: "held" } }));
+    await waitFor(() => expect(within(row("תמר")).getByRole("button", { name: "לכתוב סיכום" })).toHaveFocus());
+    await user.keyboard("{Enter}");
+    expect(await screen.findByRole("dialog", { name: "סיכום מפגש אבחון" })).toBeInTheDocument();
   });
 
   it("a visit of a day still ahead has nothing to mark yet", async () => {
@@ -429,6 +537,7 @@ describe("the day", () => {
     await waitFor(() => expect(within(screen.getByRole("region", { name: "סדר היום" })).getByRole("button", { name: "תמר" })).toBeInTheDocument());
     expect(within(row("תמר")).queryByRole("button", { name: "התקיימה" })).toBeNull();
     expect(within(row("תמר")).getByRole("button", { name: "תזכורת" })).toBeInTheDocument();
+    expect(await menuOf(user, row("תמר"))).toEqual(["לכתוב סיכום", "לפתוח את הפגישה"]);
   });
 
   it("a mark the vault refuses rolls back, and says why", async () => {
@@ -437,13 +546,13 @@ describe("the day", () => {
       return undefined;
     };
     const { user, row, notes } = await openDay(refuse);
-    await user.click(within(row("איתי")).getByRole("button", { name: "התקיימה" }));
+    await fromMenu(user, row("איתי"), "התקיימה");
     await waitFor(() => expect(notes).toContain("הפגישה לא נשמרה."));
     await waitFor(() => expect(within(row("איתי")).getByText("מתוכננת")).toBeInTheDocument());
-    expect(within(row("איתי")).getByRole("button", { name: "התקיימה" })).toBeInTheDocument();
+    expect(await menuOf(user, row("איתי"))).toEqual(["התקיימה", "לכתוב סיכום", "לפתוח את הפגישה"]);
   });
 
-  it("“סיכום” opens the visit's note, and “תזכורת” copies through the protected clipboard only", async () => {
+  it("“לכתוב סיכום” opens the visit's note, and “תזכורת” copies through the protected clipboard only", async () => {
     const { user, row, calls, notes } = await openDay();
     await user.click(within(row("תמר")).getByRole("button", { name: "תזכורת" }));
     await user.click(await screen.findByRole("menuitem", { name: "רק להעתיק" }));
@@ -451,7 +560,7 @@ describe("the day", () => {
     const copied = calls.filter((c) => c.cmd === "copy_secret");
     expect(copied).toHaveLength(1);
     expect(String(copied[0]?.args.text)).toContain("15.11.2026, בשעה 09:00");
-    await user.click(within(row("תמר")).getByRole("button", { name: "סיכום" }));
+    await fromMenu(user, row("תמר"), "לכתוב סיכום");
     expect(await screen.findByRole("dialog", { name: "סיכום מפגש אבחון" })).toBeInTheDocument();
   });
 
@@ -539,11 +648,16 @@ describe("discreet mode on the calendar", () => {
     // Her own titles are not names, and stay.
     expect(visitsOf(SUNDAY)[2]).toBe("13:00–15:00 כתיבת דוחות, זמן שמור");
     hidden();
+    // The "?" holds fixed words only.
+    await user.click(screen.getByRole("button", { name: "איך מזיזים פגישה" }));
+    expect(screen.getByText(MOVE_HELP)).toBeInTheDocument();
+    hidden();
     await user.click(screen.getByRole("button", { name: "הזזת הפגישה של ת., ראשון 09:00" }));
     expect(within(bar()).getByRole("status")).toHaveTextContent("ת.יום ראשון, 15.11.2026");
     hidden();
     await user.click(viewRadio("יום"));
     expect(within(screen.getByRole("region", { name: "סדר היום" })).getByRole("button", { name: "ת." })).toBeInTheDocument();
+    expect(within(screen.getByRole("region", { name: "סדר היום" })).getByRole("button", { name: "עוד פעולות לפגישה של ת., 09:00" })).toBeInTheDocument();
     hidden();
     await user.click(viewRadio("חודש"));
     const table = await screen.findByRole("table", { name: "נובמבר 2026" });

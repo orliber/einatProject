@@ -343,6 +343,18 @@ between two (`nowIndex`); the count beside the title is `todayCountWords` ("4 ב
 alert that follows comes with the next read, never faked. "מה דורש אותי" is `AlertGroups` (by
 kind in `ALERT_ORDER`, the first open, "N דברים" beside the title), and an "unmarked" line of a
 visit on today's list offers "התקיימה" (`holdOf`); one of an earlier day still opens the visit.
+The calendar (`CalendarTab.tsx`, D-203) opens a week at the top of its grid (`openingScroll`:
+the start of her day, or the hour of an earlier visit that week), and today's day view an hour
+before now. Each visit's side bar is the colour of its kind (`.cal-kind-*`, custom properties
+over the `--kind-*` tokens of both themes), and a legend under the grid names the kinds on the
+page (`kindsShown`: no cancelled visit, a fixed order, reserved time last, labels from
+`VISIT_KIND_LABEL` only); what happened is the line's form and a word (held, cancelled, did not
+come, reserved). Kind colours are window-only and never reach Google (D-202 sends only times and
+a fixed word). The fixed explanations are behind the bar's "?" (`HelpTip`: "איך מזיזים פגישה",
+in the month "איך פותחים יום"). A visit chosen for moving gets its bar under the grid, in the
+legend's fixed-height slot, so the grid never moves under the pointer. Today is a tinted column
+(`--primary-wash`, a closed holiday's stripes win), with the now line only there. The day list
+uses `VisitActions`, as the front page does.
 In כספים, "ייצוא לרואה החשבון" (beside the month and beside the year) opens a dialog that picks
 a month or a whole year and calls `ipc.exportIncome(period)` (not through `clinic`: the file goes
 from the core to the disk, and the window gets only its path, said in a toast). The browser

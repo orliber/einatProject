@@ -1,5 +1,5 @@
-/* The calendar: its bar, the time grid of a day and of a week, and the month.
-   Colours come only from styles/tokens.css, so both themes hold. */
+/* The calendar: its bar, the time grid of a day and of a week with the line under it, and the
+   month. Colours come only from styles/tokens.css, so both themes hold. */
 .cal {
   display: flex;
   flex-direction: column;
@@ -24,17 +24,30 @@
   margin: 0;
   font-size: var(--text-xl);
 }
-.cal-hint {
-  min-height: 24px;
-}
 .cal-ask {
   margin: 0;
   font-size: var(--text-md);
 }
 
-/* ---------- the line over the grid: the visit chosen for moving ---------- */
-/* Its height is kept when nothing is chosen, so choosing a visit never moves the grid
-   under the pointer. */
+/* ---------- under the grid: the chosen visit's bar, or the legend ---------- */
+.cal-stage {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+/* Its height is kept whatever it holds (the bar of the visit chosen for moving, the legend, or
+   how to start on an empty page), so choosing a visit never moves anything under the pointer.
+   A plain box, never a region. */
+.cal-foot {
+  min-height: 54px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+}
+.cal-foot-month {
+  min-height: 0;
+}
 .cal-move {
   margin: 0;
   min-height: 54px;
@@ -63,21 +76,99 @@
 .cal-move-scope {
   gap: var(--space-2);
 }
+/* What the colour at a visit's side means (D-203): only the kinds on the page. */
+.cal-legend {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  font-size: var(--text-sm);
+  color: var(--ink-soft);
+}
+.cal-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.cal-swatch {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  border-radius: 3px;
+  background: var(--kind-bar);
+}
+.cal-kind-block .cal-swatch {
+  box-sizing: border-box;
+  border: 1px dashed var(--ink-muted);
+  background: repeating-linear-gradient(135deg, var(--sand) 0 3px, var(--surface-alt) 3px 6px);
+}
+
+/* ---------- the colour of each kind (D-203) ---------- */
+/* Custom properties only: the side bar, the fill and the frame of a visit, the bar of a month's
+   line and the legend's swatch read them. The window's own colours, never sent anywhere
+   (D-202 sends only times and a fixed word). */
+.cal-kind-intake {
+  --kind-bar: var(--primary);
+  --kind-soft: var(--primary-soft);
+  --kind-line: var(--primary-line);
+}
+.cal-kind-assessment {
+  --kind-bar: var(--kind-assessment);
+  --kind-soft: var(--kind-assessment-soft);
+  --kind-line: var(--kind-assessment-line);
+}
+.cal-kind-observation {
+  --kind-bar: var(--kind-observation);
+  --kind-soft: var(--kind-observation-soft);
+  --kind-line: var(--kind-observation-line);
+}
+.cal-kind-feedback {
+  --kind-bar: var(--kind-feedback);
+  --kind-soft: var(--kind-feedback-soft);
+  --kind-line: var(--kind-feedback-line);
+}
+.cal-kind-guidance {
+  --kind-bar: var(--kind-guidance);
+  --kind-soft: var(--kind-guidance-soft);
+  --kind-line: var(--kind-guidance-line);
+}
+.cal-kind-therapy {
+  --kind-bar: var(--warn);
+  --kind-soft: var(--warn-soft);
+  --kind-line: var(--warn-line);
+}
+.cal-kind-meeting,
+.cal-kind-other,
+.cal-kind-unknown {
+  --kind-bar: var(--ink-muted);
+  --kind-soft: var(--sand);
+  --kind-line: var(--line-strong);
+}
+.cal-kind-block {
+  --kind-bar: var(--ink-faint);
+  --kind-soft: var(--surface-alt);
+  --kind-line: var(--line-strong);
+}
 
 /* ---------- the time grid ---------- */
 /* The grid scrolls inside itself, both ways: the page never scrolls sideways, and the names
    of the days and the hours stay in sight. */
-/* Its height. In a tall window: what is left around it (about 470px go to the top bar, the
-   beta note, the clinic's heading, the tabs, the calendar's bar, the line of the visit being
-   moved and the space under the grid), so the page itself does not scroll (measured at
-   1280x900). In a short window that would leave only the 300px floor, four and a half hours
-   on a laptop at 125% (1093x614). So there the grid takes what is left under the tabs (about
-   210px once the page is scrolled to them), up to 420px: 404px at 614px high, 08:00 to 14:00
-   in sight with the tabs and the bar. Never under 300px (850x480). */
+/* Its height. In a tall window: what is left around it, so the page itself does not scroll
+   (measured at 1280x900, D-203). About 415px go to the top bar (64), the tabs (46), the page's
+   padding (40 above, 40 below), the calendar's bar (44, or 100 when it wraps in a narrow
+   window), and the line under the grid with its gaps (12 + 54 + 12, or 98 when the bar of a
+   chosen visit wraps): even then, choosing a visit never brings a scrollbar that would move the
+   grid. In a short window that would leave only the 300px floor, four and a half hours on a
+   laptop at 125% (1093x614). So there the grid takes what is left under the tabs (about 210px
+   once the page is scrolled to them: the tabs, the bar, and the line under the grid), up to
+   420px: 404px at 614px high, 08:00 to 14:00 in sight with the tabs, the bar and the legend.
+   Never under 300px (850x480). */
 .cal-grid {
   display: grid;
   overflow: auto;
-  max-height: clamp(300px, max(calc(100vh - 470px), min(calc(100vh - 210px), 420px)), 960px);
+  max-height: clamp(300px, max(calc(100vh - 415px), min(calc(100vh - 210px), 420px)), 960px);
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-lg);
   background: var(--surface);
@@ -172,8 +263,9 @@ button.cal-day-name:hover {
   background-image: linear-gradient(to bottom, var(--line) 1px, transparent 1px), linear-gradient(to bottom, var(--sand) 1px, transparent 1px);
   background-size: 100% 56px, 100% 28px;
 }
+/* Today's column is tinted; the closed day's stripes, below, win over it (D-196). */
 .cal-day-today .cal-day-body {
-  background-color: var(--surface-alt);
+  background-color: var(--primary-wash);
 }
 .cal-day-visits {
   list-style: none;
@@ -218,10 +310,10 @@ button.cal-day-name:hover {
   row-gap: 1px;
   overflow: hidden;
   padding: 2px var(--space-2);
-  border: 1px solid var(--primary-line);
-  border-inline-start: 4px solid var(--primary);
+  border: 1px solid var(--kind-line, var(--primary-line));
+  border-inline-start: 4px solid var(--kind-bar, var(--primary));
   border-radius: var(--radius-sm);
-  background: var(--primary-soft);
+  background: var(--kind-soft, var(--primary-soft));
   color: var(--ink);
   font: inherit;
   font-size: var(--text-sm);
@@ -230,7 +322,7 @@ button.cal-day-name:hover {
   cursor: pointer;
 }
 .cal-visit-open:hover {
-  border-color: var(--primary);
+  border-color: var(--kind-bar, var(--primary));
 }
 /* The ring stays inside the visit: the grid would cut one drawn outside it. */
 .cal-visit-open:focus-visible {
@@ -253,14 +345,16 @@ button.cal-day-name:hover {
 }
 .cal-visit-chosen .cal-visit-open {
   border-color: var(--primary);
+  border-inline-start-color: var(--kind-bar, var(--primary));
   box-shadow: 0 0 0 2px var(--primary), var(--shadow-1);
 }
-/* What happened is said by the form too: a solid edge (planned), the same in the colour of
-   "done" with its word (held), a dashed frame and a line through (cancelled), a dotted edge
-   with its word (did not come). */
+/* The side bar is the kind (its colour, D-203). What happened is said by the form of the line
+   and by a word: a solid edge on the kind's tint (planned), the same on the tint of "done" with
+   its word (held), a dashed frame and a line through (cancelled), a dotted edge on the plain
+   surface with its word (did not come), a dashed edge over stripes (her own time). */
 .cal-visit-held .cal-visit-open {
   border-color: var(--line-strong);
-  border-inline-start-color: var(--ok);
+  border-inline-start-color: var(--kind-bar);
   background: var(--ok-soft);
 }
 .cal-visit-cancelled .cal-visit-open {
@@ -274,13 +368,14 @@ button.cal-day-name:hover {
   text-decoration: line-through;
 }
 .cal-visit-no_show .cal-visit-open {
-  border-color: var(--warn-line);
-  border-inline-start: 4px dotted var(--warn);
-  background: var(--warn-soft);
+  border-color: var(--line-strong);
+  border-inline-start: 4px dotted var(--kind-bar);
+  background: var(--surface);
 }
 /* Time she kept for herself: quieter than a visit. */
 .cal-visit-block .cal-visit-open {
   border: 1px dashed var(--line-strong);
+  border-inline-start: 4px dashed var(--kind-bar);
   background: repeating-linear-gradient(135deg, var(--sand) 0 6px, var(--surface-alt) 6px 12px);
   color: var(--ink-muted);
 }
@@ -290,6 +385,7 @@ button.cal-day-name:hover {
 }
 .cal-visit-overlap .cal-visit-open {
   border-color: var(--warn);
+  border-inline-start-color: var(--kind-bar);
 }
 /* The arrows at the corner: seen when the pointer or the keyboard is on the visit. */
 .cal-visit-move {
@@ -420,7 +516,7 @@ button.cal-day-name:hover {
   gap: var(--space-1);
   overflow: hidden;
   padding-inline-start: var(--space-1);
-  border-inline-start: 3px solid var(--primary);
+  border-inline-start: 3px solid var(--kind-bar, var(--primary));
   font-size: var(--text-xs);
   line-height: 1.4;
   white-space: nowrap;
@@ -430,12 +526,9 @@ button.cal-day-name:hover {
   font-weight: 500;
   text-overflow: ellipsis;
 }
-.cal-month-visit.cal-visit-held {
-  border-inline-start-color: var(--ok);
-}
+/* As on the grid: the bar is the kind, its line and the mark are what happened. */
 .cal-month-visit.cal-visit-held::after {
   content: "✓";
-  color: var(--ok);
   font-weight: 700;
 }
 .cal-month-visit.cal-visit-cancelled {
@@ -443,11 +536,10 @@ button.cal-day-name:hover {
   color: var(--ink-muted);
 }
 .cal-month-visit.cal-visit-no_show {
-  border-inline-start: 3px dotted var(--warn);
-  color: var(--warn);
+  border-inline-start: 3px dotted var(--kind-bar);
 }
 .cal-month-visit.cal-visit-block {
-  border-inline-start: 3px dashed var(--line-strong);
+  border-inline-start: 3px dashed var(--kind-bar);
   color: var(--ink-muted);
 }
 

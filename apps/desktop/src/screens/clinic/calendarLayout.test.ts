@@ -3,8 +3,8 @@
 import type { Visit } from "../../ipc/generated/Visit";
 import type { VisitView } from "../../ipc/generated/VisitView";
 import {
-  applyMove, byDate, gridHeight, gridHours, hourMarks, HOUR_PX, MIN_VISIT_PX, minutesToPx, monthGridRange, monthWeeks, movedTo, nowOffset, placeDay,
-  rangeTitle, shiftAnchor, slotAt, suggestStart, viewRange, weekDays,
+  applyMove, byDate, gridHeight, gridHours, hourMarks, HOUR_PX, kindsShown, MIN_VISIT_PX, minutesToPx, monthGridRange, monthWeeks, movedTo, nowOffset,
+  openingScroll, placeDay, rangeTitle, shiftAnchor, slotAt, suggestStart, viewRange, weekDays,
 } from "./calendarLayout";
 
 const view = (id: string, date: string, start: number, over: Partial<Visit> = {}): VisitView => ({
@@ -125,6 +125,26 @@ describe("the line of now", () => {
   });
 });
 
+describe("where a time grid opens", () => {
+  // 15:12 on a grid from 08:00: now is 403.2 pixels down.
+  const nowAt = minutesToPx(15 * 60 + 12 - 480);
+
+  it("a week opens at the top of its grid, even late in the day", () => {
+    expect(nowAt).toBeCloseTo(403.2);
+    expect(openingScroll("start", nowAt)).toBe(0);
+  });
+
+  it("a day that is today opens an hour before now", () => {
+    expect(openingScroll("now", nowAt)).toBeCloseTo(347.2);
+    // Early in the day it never scrolls past the top.
+    expect(openingScroll("now", 20)).toBe(0);
+  });
+
+  it("a day that is not today opens at the top", () => {
+    expect(openingScroll("now", null)).toBe(0);
+  });
+});
+
 describe("the hour offered for a new visit", () => {
   it("is the next half hour today, and the start of her day otherwise", () => {
     const now = { date: "2026-11-15", minute: 9 * 60 + 10 };
@@ -218,6 +238,37 @@ describe("the visits of each date", () => {
     expect(days.get("2026-11-15")?.map((v) => v.visit.id)).toEqual(["a", "b"]);
     expect(days.get("2026-11-16")?.map((v) => v.visit.id)).toEqual(["c"]);
     expect(days.get("2026-11-17")).toBeUndefined();
+  });
+});
+
+describe("the kinds in the legend", () => {
+  const kinded = (id: string, date: string, kind: Visit["kind"], over: Partial<Visit> = {}) => view(id, date, 540, { kind, ...over });
+
+  it("are in a fixed order, whatever the order of the visits", () => {
+    const views = [
+      kinded("a", "2026-11-15", "therapy"), kinded("b", "2026-11-15", "block", { patient_id: null }), kinded("c", "2026-11-15", "intake"),
+      kinded("d", "2026-11-16", "assessment"), kinded("e", "2026-11-16", "therapy"),
+    ];
+    expect(kindsShown(views, null)).toEqual(["intake", "assessment", "therapy", "block"]);
+  });
+
+  it("leave out a cancelled visit", () => {
+    const views = [kinded("a", "2026-11-15", "feedback", { status: "cancelled" }), kinded("b", "2026-11-15", "guidance", { status: "held" })];
+    expect(kindsShown(views, null)).toEqual(["guidance"]);
+    expect(kindsShown([kinded("a", "2026-11-15", "feedback", { status: "cancelled" })], null)).toEqual([]);
+  });
+
+  it("are only those of the dates given, and of every date when none is given", () => {
+    const views = [kinded("a", "2026-11-15", "observation"), kinded("b", "2026-11-16", "meeting"), kinded("c", "2026-11-17", "other")];
+    expect(kindsShown(views, ["2026-11-16"])).toEqual(["meeting"]);
+    expect(kindsShown(views, ["2026-11-15", "2026-11-17"])).toEqual(["observation", "other"]);
+    expect(kindsShown(views, [])).toEqual([]);
+    expect(kindsShown(views, null)).toEqual(["observation", "meeting", "other"]);
+  });
+
+  it("put a kind a later version wrote before her own time", () => {
+    const views = [kinded("a", "2026-11-15", "block", { patient_id: null }), kinded("b", "2026-11-15", "unknown"), kinded("c", "2026-11-15", "other")];
+    expect(kindsShown(views, null)).toEqual(["other", "unknown", "block"]);
   });
 });
 
