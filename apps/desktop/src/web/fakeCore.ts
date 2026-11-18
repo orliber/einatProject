@@ -631,7 +631,13 @@ export class FakeCore {
 
   private summary(c: Case): CaseSummary {
     const approved = Array.from(new Set(c.drafts.filter((d) => d.status === "approved").map((d) => d.section)));
-    return { id: c.id, meta: c.meta, child_name: c.people.find((p) => p.role === "child")?.value ?? null, created_at: c.created, updated_at: c.updated, approved_sections: approved, total_sections: SECTIONS.filter((s) => s.key !== "signature").length, folder_id: c.folderId, deleted_at: c.deletedAt, failed_at: null };
+    // As the core does: the first section in report order, the signature aside, with nothing approved.
+    const next = SECTIONS.find((s) => s.key !== "signature" && !approved.includes(s.key));
+    return {
+      id: c.id, meta: c.meta, child_name: c.people.find((p) => p.role === "child")?.value ?? null, created_at: c.created, updated_at: c.updated, approved_sections: approved, total_sections: SECTIONS.filter((s) => s.key !== "signature").length,
+      ...(next ? { next_section: { key: next.key, title: next.title } } : {}),
+      folder_id: c.folderId, deleted_at: c.deletedAt, failed_at: null,
+    };
   }
 
   private tableFor(kind: InputKind): string[] {

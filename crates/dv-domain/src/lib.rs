@@ -32,7 +32,7 @@ pub use prior::{
 };
 pub use records::{
     Age, Author, CaseInput, CaseMeta, CaseSummary, ChatMessage, ChatRole, Consent, DraftParagraph,
-    DraftStatus, Folder, GrammaticalGender, InputKind, MaskEntry, Transmission,
+    DraftStatus, Folder, GrammaticalGender, InputKind, MaskEntry, NextSection, Transmission,
 };
 pub use relative::{
     check_critical_values, relative_sets, CriticalValue, RelativeBasis, RelativeSet,
