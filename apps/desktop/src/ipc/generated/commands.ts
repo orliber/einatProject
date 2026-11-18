@@ -163,7 +163,7 @@ export type Commands = {
   install_update: { args: undefined; returns: null };
   instrument_approvals: { args: undefined; returns: Array<InstrumentApproval> };
   keep_case_longer: { args: { caseId: string; years: number }; returns: null };
-  keep_draft_brief: { args: { sectionKey: string; text: string; keep: boolean }; returns: DraftBriefs };
+  keep_draft_brief: { args: { sectionKey: string; text: string; keep: boolean; seen: string | null }; returns: DraftBriefs };
   left_notes: { args: { caseId: string; keys: Array<string> }; returns: Array<string> };
   letter: { args: { caseId: string; audience: string }; returns: Array<ParagraphView> };
   list_cases: { args: undefined; returns: Array<CaseSummary> };

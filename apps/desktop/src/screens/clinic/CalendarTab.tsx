@@ -2,12 +2,13 @@
 // The day shown is the tab's own state; today comes from `useToday()`. One request per range
 // shown: the day and the week share the week's answer, the month asks for its whole page.
 // A visit is opened by pressing it; it is moved, without opening, by the buttons of the bar
-// under the grid (or Alt and the arrow keys on the visit): at once on screen, and back where it
-// was if the vault refuses. How to move one is behind the bar's "?" (D-204). The side of a visit
-// is the colour of its kind, explained by the legend under the grid; this window only, never sent
-// anywhere (D-202). The arithmetic is in calendarLayout.ts. Israel's holidays (D-196), when she
-// has them on, are named in each day's head; a day the clinic is closed is shaded.
-import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
+// under the grid, or on top of the day's list in a day (or Alt and the arrow keys on the visit):
+// at once on screen, and back where it was if the vault refuses. How to move one is behind the
+// bar's "?" (D-204). The side of a visit is the colour of its kind, explained by the legend under
+// the grid; this window only, never sent anywhere (D-202). The arithmetic is in calendarLayout.ts.
+// Israel's holidays (D-196), when she has them on, are named in each day's head; a day the clinic
+// is closed is shaded.
+import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode, type RefObject } from "react";
 import { useApp } from "../../App";
 import { HelpTip } from "../../components/HelpTip";
 import { Segmented } from "../../components/Switch";
@@ -19,6 +20,7 @@ import type { Today } from "../../ipc/generated/Today";
 import type { Visit } from "../../ipc/generated/Visit";
 import type { VisitKind } from "../../ipc/generated/VisitKind";
 import type { VisitView } from "../../ipc/generated/VisitView";
+import { TEXT_SIZE_EVENT } from "../../textSize";
 import {
   applyMove, byDate, gridHeight, gridHours, hourMarks, kindsShown, minutesToPx, MONTH_ROWS, monthWeeks, movedTo, nowOffset, openingScroll, placeDay,
   rangeTitle, shiftAnchor, slotAt, STEP_MINUTES, suggestStart, viewRange, weekDays, type CalendarView, type Hours, type MoveBy,
@@ -42,15 +44,20 @@ const NO_HOLIDAYS: Holiday[] = [];
 /** The holidays of the range shown, by date (empty when she has them off). */
 const HolidaysOf = createContext<Map<string, Holiday[]>>(new Map());
 
-/** The holiday names of a day, in one quiet line; a closed day says so to a screen reader too. */
+/** The holiday names of a day, in one quiet line; a closed day says so to a screen reader too.
+ *  The names are a box of their own, which a day's head too narrow for them hides from the eye
+ *  only (CalendarTab.css). */
 function HolidayNames({ date, className }: { date: string; className: string }) {
   const list = useContext(HolidaysOf).get(date) ?? NO_HOLIDAYS;
   if (list.length === 0) return null;
   const closed = list.some((h) => h.closed);
+  const names = list.map((h) => h.name).join(", ");
   return (
-    <span className={`${className}${closed ? " cal-holiday-closed" : ""}`} title={list.map((h) => h.name).join(", ")}>
-      {list.map((h) => h.name).join(", ")}
-      {closed && <span className="visually-hidden">, יום חג</span>}
+    <span className={`${className}${closed ? " cal-holiday-closed" : ""}`} title={names}>
+      <span className="cal-holiday-names">
+        {names}
+        {closed && <span className="visually-hidden">, יום חג</span>}
+      </span>
     </span>
   );
 }
@@ -291,28 +298,35 @@ export function CalendarTab() {
         {...(view === "week" ? { onDay: (date: string) => show("day", date) } : {})} />
     );
     const empty = shown.every((d) => (days.get(d) ?? NO_VISITS).length === 0);
-    // Under the grid: what the colours mean (or, on an empty page, how to start). The chosen
-    // visit's bar lies over that line, which stays under it unseen and unread to keep its height:
-    // choosing a visit never moves the grid (CalendarTab.css).
+    // Under the grid: what the colours mean (or, on an empty page, how to start).
     const line = empty
       ? <p className="muted cal-empty">{`אין פגישות ${view === "day" ? "ביום" : "בשבוע"} הזה. כדי לקבוע פגישה לוחצים על שעה ביומן.`}</p>
       : <KindLegend kinds={legendKinds} />;
-    const foot = picked ? (
+    const bar = picked ? (
+      <MoveBar picked={picked} scope={chosen?.scope ?? null}
+        onStep={(by) => step(picked, by, false)}
+        onScope={() => setOpen({ kind: "scope", view: picked, by: null, refocus: false })}
+        onOpen={() => setOpen({ kind: "visit", view: picked })}
+        onDone={() => setChosen(null)} />
+    ) : null;
+    // Choosing a visit never moves the grid nor anything under the pointer (D-204 §5). In a week
+    // the chosen visit's bar lies over the line under the grid, which stays under it unseen and
+    // unread to keep its height. In a day it is on top of the day's list, beside the grid or
+    // under it, and pushes the list down (CalendarTab.css).
+    const foot = bar !== null && view === "week" ? (
       <>
         <div className="cal-foot-under" aria-hidden="true">{line}</div>
-        <MoveBar picked={picked} scope={chosen?.scope ?? null}
-          onStep={(by) => step(picked, by, false)}
-          onScope={() => setOpen({ kind: "scope", view: picked, by: null, refocus: false })}
-          onOpen={() => setOpen({ kind: "visit", view: picked })}
-          onDone={() => setChosen(null)} />
+        <div className="cal-move-rail">{bar}</div>
       </>
     ) : line;
     const stage = <div className="cal-stage">{timeGrid}<div className="cal-foot">{foot}</div></div>;
     body = view === "week" ? stage : (
       <div className="cal-day-view">
         {stage}
-        <Agenda key={anchor} date={anchor} now={now} visits={days.get(anchor) ?? NO_VISITS} onOpen={grid.open} onNew={() => newOn(anchor)}
-          onHold={(v) => void hold(v)} onNote={(patientId, visit) => setOpen({ kind: "note", patientId, visit })} />
+        <DaySide bar={bar}>
+          <Agenda key={anchor} date={anchor} now={now} visits={days.get(anchor) ?? NO_VISITS} onOpen={grid.open} onNew={() => newOn(anchor)}
+            onHold={(v) => void hold(v)} onNote={(patientId, visit) => setOpen({ kind: "note", patientId, visit })} />
+        </DaySide>
       </div>
     );
   }
@@ -368,12 +382,15 @@ export function CalendarTab() {
 
 // ------------------------------------------------------------------ under the grid
 
-/** The line under the grid once a visit is chosen: what it is, and the steps it can take. */
+/** The bar of a visit chosen for moving (under the grid, or on top of the day's list): what it
+ *  is, and the steps it can take. */
 function MoveBar({ picked, scope, onStep, onScope, onOpen, onDone }: {
   picked: VisitView; scope: Scope | null;
   onStep: (by: MoveBy) => void; onScope: () => void; onOpen: () => void; onDone: () => void;
 }) {
   const v = picked.visit;
+  const self = useRef<HTMLDivElement>(null);
+  useNoShrink(self, true);
   const can = (by: MoveBy) => movedTo(v, by) !== null;
   const steps: { label: string; keys: string; by: MoveBy }[] = [
     { label: "להקדים ברבע שעה", keys: "Alt וחץ למעלה", by: { minutes: -STEP_MINUTES } },
@@ -382,7 +399,7 @@ function MoveBar({ picked, scope, onStep, onScope, onOpen, onDone }: {
     { label: "ליום הבא", keys: "Alt וחץ שמאלה", by: { days: 1 } },
   ];
   return (
-    <div className="cal-move cal-move-on" role="group" aria-label="הזזת הפגישה שנבחרה">
+    <div ref={self} className="cal-move cal-move-on" role="group" aria-label="הזזת הפגישה שנבחרה">
       <span className="cal-move-what" role="status">
         {v.kind === "block" ? <span className="clinic-name clinic-name-strong">{visitTitle(v)}</span> : <PatientName name={picked.patient_name} strong />}
         <span>{formatDateLong(v.date)}</span>
@@ -510,8 +527,9 @@ function DayColumn({ date, visits, hours, height, today, nowAt, chosenId, action
             ? <button type="button" className="cal-day-name" onClick={() => onDay(date)}>{name}<span className="visually-hidden">, לתצוגת היום</span></button>
             : <span className="cal-day-name">{name}</span>}
         </h3>
-        {today && <span className="chip">היום</span>}
+        {/* A holiday's name takes what is left between the date and "היום", which stays beside "+" either way. */}
         <HolidayNames date={date} className="cal-holiday" />
+        {today && <span className="chip">היום</span>}
         <button type="button" className="btn btn-small icon-btn cal-day-add" aria-label={`פגישה חדשה ב${long}`} title="פגישה חדשה ביום הזה" onClick={() => actions.add(date)}><PlusIcon size={15} /></button>
       </header>
       <div className="cal-day-body" style={{ height }} onClick={press}>
@@ -587,7 +605,98 @@ function GridVisit({ view, chosen, short, style, actions }: {
   );
 }
 
+/** While a visit is chosen, the box never gets shorter (D-204 §5). A step can take a line out
+ *  of the bar ("חופפת לפגישה אחרת" going, a shorter day's name) or out of the day's list; on a
+ *  page scrolled to its end, the page would get shorter, the browser would pull it down to its
+ *  new end, and the button under the pointer would move away before the next click. So the box
+ *  keeps the tallest height it had (`min-block-size`), and lets go when the bar goes ("סיום"),
+ *  the window is resized or the text size changes (then it is measured again two frames later,
+ *  once the bar's own height, `--cal-move-h`, has been taken anew). It is kept at its height to
+ *  the fraction (`heightOf`), so it neither loses a part of a pixel nor grows by one and is
+ *  measured again: it only ever grows, so a box at that height is never measured again, and
+ *  nothing loops. (In the day, a bar that changes height sets `--cal-move-h` from inside its
+ *  ResizeObserver, which makes the column taller from there: the browser then counts one
+ *  "ResizeObserver loop" event, harmless, and measures the column in the next frame.) */
+function useNoShrink(ref: RefObject<HTMLElement | null>, on: boolean) {
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el || !on) return;
+    let most = 0;
+    /** Let go, and not measured until the page has settled (the frame waited for). */
+    let settling = 0;
+    const keep = () => {
+      if (settling) return;
+      const h = heightOf(el);
+      if (h <= most) return;
+      most = h;
+      el.style.minBlockSize = `${h}px`;
+    };
+    const anew = () => {
+      most = 0;
+      el.style.removeProperty("min-block-size");
+      if (typeof requestAnimationFrame !== "function") return keep();
+      cancelAnimationFrame(settling);
+      settling = requestAnimationFrame(() => {
+        settling = requestAnimationFrame(() => {
+          settling = 0;
+          keep();
+        });
+      });
+    };
+    keep();
+    const watch = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(keep);
+    // Its whole box: the day's column grows by its padding too (the room it makes for the bar).
+    watch?.observe(el, { box: "border-box" });
+    window.addEventListener("resize", anew);
+    window.addEventListener(TEXT_SIZE_EVENT, anew);
+    return () => {
+      watch?.disconnect();
+      window.removeEventListener("resize", anew);
+      window.removeEventListener(TEXT_SIZE_EVENT, anew);
+      if (settling) cancelAnimationFrame(settling);
+      el.style.removeProperty("min-block-size");
+    };
+  }, [ref, on]);
+}
+
+/** A box's height as laid out, to the fraction, in its own pixels (also when the text size
+ *  scales the window): its height on the screen divided by its zoom. `offsetHeight` rounds it,
+ *  and the computed style keeps six digits: a box kept at such a height could lose a part of a
+ *  pixel, or grow by it and be measured again. The browser lays a height out in 1/64 px after
+ *  the zoom, rounding down, so a ten-thousandth of a pixel more keeps it exactly as it was. */
+function heightOf(el: HTMLElement): number {
+  const zoom = (el as HTMLElement & { currentCSSZoom?: number }).currentCSSZoom;
+  const shown = el.getBoundingClientRect().height;
+  if (zoom !== undefined && zoom > 0 && shown > 0) return shown / zoom + 0.0001;
+  return parseFloat(getComputedStyle(el).blockSize) || el.offsetHeight;
+}
+
 // ------------------------------------------------------------------ the day's list
+
+/** The day's list, with the chosen visit's bar on top of it (D-204 §5). The bar pushes the list
+ *  down, and the grid beside it keeps its height even when it follows a list longer than the
+ *  page: the column gives the bar's height back at its end (`--cal-move-h`, CalendarTab.css),
+ *  so the row of the day counts the list alone. */
+function DaySide({ bar, children }: { bar: ReactNode; children: ReactNode }) {
+  const side = useRef<HTMLDivElement>(null);
+  const shown = bar !== null;
+  useNoShrink(side, shown);
+  useLayoutEffect(() => {
+    const el = side.current;
+    const top = el?.querySelector(":scope > .cal-day-rail > .cal-move");
+    if (!el || !shown || !(top instanceof HTMLElement)) return;
+    // The bar's height, as it folds.
+    const keep = () => el.style.setProperty("--cal-move-h", `${heightOf(top)}px`);
+    keep();
+    const watch = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(keep);
+    watch?.observe(top);
+    return () => {
+      watch?.disconnect();
+      el.style.removeProperty("--cal-move-h");
+    };
+  }, [shown]);
+  return <div className="cal-day-side" ref={side}>{shown && <div className="cal-day-rail">{bar}</div>}{children}</div>;
+}
 
 /** The day as a list beside its grid. Each visit offers one step by the time and the rest under
  *  "⋯", as on the front page (`VisitActions`, D-204); her own time has neither. */

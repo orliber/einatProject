@@ -1192,8 +1192,10 @@ export class FakeCore {
         const text = String(a.text).replace(/\r\n?/g, "\n").trim();
         if (text.length > 1000) fail("refused", "ההנחיה ארוכה מדי: עד 1000 תווים.");
         if (text) this.briefs = [text, ...this.briefs.filter((b) => b !== text)].slice(0, 5);
+        const kept = this.sectionBriefs.get(String(a.sectionKey));
         if (a.keep && text) this.sectionBriefs.set(String(a.sectionKey), text);
-        else this.sectionBriefs.delete(String(a.sectionKey));
+        // Like the core: only the wish her untick was about is forgotten.
+        else if (a.seen == null || kept === undefined || kept === String(a.seen).replace(/\r\n?/g, "\n").trim()) this.sectionBriefs.delete(String(a.sectionKey));
         return { recent: [...this.briefs], sections: Object.fromEntries(this.sectionBriefs) };
       }
       case "set_section_guide": {

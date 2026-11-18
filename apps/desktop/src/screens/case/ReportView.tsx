@@ -23,7 +23,7 @@ import "./ReportView.css";
 import { MarkedText, StyleHintView, applyMark } from "./StyleHintView";
 import { useAi } from "../../ai";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { BriefBox, CHANGE_CHIPS, STYLE_CHIPS } from "./BriefBox";
+import { BriefBox, CHANGE_CHIPS, STYLE_CHIPS, type BriefLeft } from "./BriefBox";
 import { ParagraphNotes, SectionNotesFold } from "./notes";
 import { CLOSING_KEYS, ClosingFlow, closingAnchor, ownEmptyLine } from "./closing";
 
@@ -309,23 +309,69 @@ function A4Section({ api, section: s, focused, onPick, onNext }: {
   const keptBrief = briefs.data?.sections[s.key] ?? "";
   // D-204 §3: the box waits behind one quiet line, "איך לנסח? (לא חובה)", until she asks for it.
   // A wish kept for the section, or one she wrote before, opens it by itself: a wish is never
-  // sent unseen, nor dropped without her seeing it.
-  const [briefAsked, setBriefAsked] = useState(false);
-  /** What was in the box when it last went (folded by "ביטול" or Escape, the section left, her
-   *  own writing opened): not sent and not kept anywhere, only here, and in the box again when
-   *  it opens, ahead of an older wish (sent or kept) and also when she emptied it. null: the box
-   *  has not gone since the last send, so it opens with the wish as the vault has it. The folded
-   *  "✦ לנסח את הסעיף" never sends it (a wish is never sent unseen). */
-  const [briefDraft, setBriefDraft] = useState<string | null>(null);
-  /** Sent from the box: its text went with the request, so none of it comes back. */
+  // sent unseen, nor dropped without her seeing it. Asked for, it stays open when she leaves
+  // the page and comes back (kept like `brief`).
+  const [briefAsked, setBriefAsked] = useKept(`case:${caseId}:report:${s.key}:briefAsked`, false);
+  /** The box as it last went (folded by "ביטול" or Escape, the section or the report page left,
+   *  her own writing opened): her text, the styles pressed and "לזכור" as she left them, so
+   *  Enter never keeps what she unticked as the section's wish for the other children. Kept like
+   *  `brief`, in memory only and emptied when the vault locks (never stored; it goes out only
+   *  when she sends it from the box), and in the box again when it opens, ahead of an older
+   *  wish (sent or kept) and also when she emptied it. null: the box has not gone since the
+   *  last send, so it opens with the wish as the vault has it. The folded "✦ לנסח את הסעיף"
+   *  never sends it (a wish is never sent unseen). It also notes the wish kept for the section
+   *  when it went: if another report kept a newer one since, that newer wish opens instead (as
+   *  without a draft), so an older draft never overwrites it unseen, and a line under the box
+   *  offers her draft back ("להחזיר"), so it is never dropped unseen either; it stays offered
+   *  until she changes the box, sends from it, or takes it back. If the kept wish was only
+   *  removed since, the draft opens with her text and styles, but "לזכור" unticked: the removal
+   *  is newer than her tick, and Enter must not keep that wish again for the other children.
+   *  Only a box she changed is a draft: one she only looked at leaves the draft as it was.
+   *  `about` is the kept wish her "לזכור" is about: the one the box showed as it opened. Unticked,
+   *  Enter forgets the section's wish only while it is still that one, so a newer wish kept in
+   *  another report is never forgotten by an untick in a box that never showed it (the core
+   *  checks it). */
+  const [briefDraft, setBriefDraft] = useKept<(BriefLeft & { kept: string; about: string }) | null>(`case:${caseId}:report:${s.key}:briefDraft`, null);
+  const draft = briefDraft === null ? null
+    : briefDraft.kept === keptBrief ? briefDraft
+    : keptBrief === "" ? { ...briefDraft, keep: false }
+    : null;
+  /** The kept wish her "לזכור" is about in the box as it opens now: the one it shows (opened
+   *  with the kept wish), else the draft's, whatever she does with the checkbox. */
+  const boxAbout = draft === null || draft.text.trim() === keptBrief.trim() ? keptBrief : draft.about;
+  /** Her draft, behind a newer wish kept for the section in another report since it went:
+   *  offered back when it holds words of hers (not the old kept wish, nor the newer one) or
+   *  styles. With styles only, "להחזיר" brings them back with the newer wish, ticked. */
+  const ownWords = briefDraft !== null && briefDraft.text.trim() !== ""
+    && briefDraft.text.trim() !== briefDraft.kept.trim() && briefDraft.text.trim() !== keptBrief.trim();
+  const earlier = briefDraft !== null && draft === null && (ownWords || briefDraft.picked.length > 0) ? briefDraft : null;
+  // The kept wish removed since her draft went: "לזכור" is unticked in it for good, so the same
+  // wish kept again later does not bring her tick back (the removal is newer than the tick).
+  useEffect(() => {
+    if (briefs.data !== undefined && briefDraft !== null && briefDraft.kept !== "" && keptBrief === "")
+      setBriefDraft({ ...briefDraft, keep: false, kept: "" });
+  }, [briefs.data, briefDraft, keptBrief, setBriefDraft]);
+  /** "להחזיר": the box opens again with her draft (a new box, so the one with the kept wish
+   *  going away does not count as what she left), with the keyboard in it. */
+  const [briefRound, setBriefRound] = useState(0);
+  const [briefFocus, setBriefFocus] = useState(false);
+  const restoring = useRef(false);
+  /** Sent from the box: the draft goes once the request went. If it did not (she went back
+   *  from the review, the gate held it, or it failed), the box opens again as it was when she
+   *  sent from it, styles and "לזכור" too, also when she sent a draft unchanged. */
   const briefSent = useRef(false);
+  const sentLeft = useRef<{ left: BriefLeft; changed: boolean } | null>(null);
+  /** Sent, and not settled yet: the box waits, so it never opens with what it held before. */
+  const [briefPending, setBriefPending] = useState(false);
   const briefToggle = useRef<HTMLButtonElement>(null);
   /** Folded back by "ביטול" or Escape: the keyboard goes back to the line that opened it. */
   const backToToggle = useRef(false);
+  /** A wish she sees in the box: kept for the section, or her own (sent, or a box she worked in,
+   *  which `briefAsked` keeps open). */
   const hasWish = keptBrief !== "" || brief.trim() !== "";
   const briefShown = briefAsked || hasWish;
   /** Her wishes are still being read: whether one is kept is not known yet. */
-  const briefWaiting = briefs.data === undefined && !briefs.isError;
+  const briefWaiting = (briefs.data === undefined && !briefs.isError) || briefPending;
   useEffect(() => {
     if (!briefShown && backToToggle.current) {
       backToToggle.current = false;
@@ -383,7 +429,8 @@ function A4Section({ api, section: s, focused, onPick, onNext }: {
     }
   }
 
-  async function write(instruction?: string, replaces?: string, points = false) {
+  /** Resolves true when the request went (false: she went back, the gate held it, or it failed). */
+  async function write(instruction?: string, replaces?: string, points = false): Promise<boolean> {
     onPick();
     setOpen(null);
     setChanging(false);
@@ -392,9 +439,10 @@ function A4Section({ api, section: s, focused, onPick, onNext }: {
     setError(null);
     setPreparing(true);
     try {
-      await api.draft(s.key, instruction, replaces, points);
+      return await api.draft(s.key, instruction, replaces, points);
     } catch (e) {
       setError(fail(e as never));
+      return false;
     } finally {
       setPreparing(false);
     }
@@ -410,12 +458,33 @@ function A4Section({ api, section: s, focused, onPick, onNext }: {
   /** "✦ לנסח" from the box: the wish is kept (recent, and for the section when she asked),
    *  then the request is prepared like every request of hers. Keeping it is a convenience:
    *  if it fails, the draft is still written. */
-  function sendBrief(wish: string, typed: string, keep: boolean) {
+  function sendBrief(wish: string, typed: string, keep: boolean, from: BriefLeft) {
+    const seen = boxAbout;
+    const fromDraft = draft !== null;
     setBrief(typed);
-    setBriefDraft(null);
     briefSent.current = true;
-    void ipc.keepDraftBrief(s.key, typed, keep).then((b) => qc.setQueryData(["draftBriefs"], b), () => undefined);
-    void write(draftRequest(s.key, wish));
+    sentLeft.current = null;
+    setBriefPending(true);
+    const keeping = ipc.keepDraftBrief(s.key, typed, keep, seen).then((b) => qc.setQueryData(["draftBriefs"], b), () => undefined);
+    void Promise.all([write(draftRequest(s.key, wish)), keeping]).then(([sent]) => {
+      const gone = sentLeft.current;
+      sentLeft.current = null;
+      briefSent.current = false;
+      setBriefPending(false);
+      if (sent) {
+        setBriefDraft(null);
+        return;
+      }
+      // Not sent: what she sent from is her draft when she changed it or it was her draft
+      // already, stamped with the wish kept now (her send may have kept it), so the box opens
+      // again as it was, styles and "לזכור" too. A box opened with the kept wish and sent as
+      // it was is no draft of hers, and an earlier one stays offered; a box still open keeps it.
+      const kept = qc.getQueryData<{ sections: Record<string, string> }>(["draftBriefs"])?.sections[s.key] ?? "";
+      if (fromDraft || gone?.changed) {
+        setBriefDraft({ ...(gone?.left ?? from), kept, about: seen });
+        setBriefAsked(true);
+      }
+    });
   }
 
   async function save() {
@@ -647,18 +716,6 @@ function A4Section({ api, section: s, focused, onPick, onNext }: {
   ];
   const empty = s.paragraphs.length === 0;
   const state = mine ? "mine" : pending.length > 0 ? "draft" : empty ? "empty" : "approved";
-  // The box before the first draft is open (the branch for a new section, below).
-  const briefOpen = empty && !job && !editing && !preparing && !mine && focused && canWrite && !briefWaiting && briefShown;
-  // Whenever the box goes, for any reason, what is in it then is what it opens with next time:
-  // always her newest text, also when she emptied it, and nothing once it was sent. Read from
-  // the box as it goes, not on every key, so typing never re-renders the section (F1a).
-  useEffect(() => {
-    if (!briefOpen) return;
-    briefSent.current = false;
-    const box = document.getElementById(`brief-${s.key}`);
-    if (!(box instanceof HTMLTextAreaElement)) return;
-    return () => setBriefDraft(briefSent.current ? null : box.value);
-  }, [briefOpen, s.key]);
 
   return (
     <div id={`sec-${s.key}`} className={`a4-section a4-st-${state}${focused ? " is-focus" : ""}${pending.length ? " has-pending" : ""}`}
@@ -825,12 +882,37 @@ function A4Section({ api, section: s, focused, onPick, onNext }: {
             {briefWaiting ? (
               <WaitLine task="prepare" speed="section" label="פותחת את תיבת ההנחיה" />
             ) : briefShown ? (
+              <>
               <BriefBox id={`brief-${s.key}`} title="איך לנסח את הסעיף? (לא חובה)" chips={STYLE_CHIPS} chipsTitle="סגנון"
                 hint="כתבי מה חשוב לך, או בחרי סגנון. בלי כלום הסעיף ינוסח כמו תמיד, מתוך החומרים."
                 placeholder="למשל: להתחיל מהקשר עם הצוות בגן, ובלי מונחים מקצועיים"
-                recent={briefs.data?.recent} initial={briefDraft ?? (keptBrief || brief)} keep={keptBrief !== ""}
-                sendLabel="✦ לנסח" busy={busy} autoFocus={briefAsked || s.key !== "diagnoses"}
+                key={briefRound}
+                recent={briefs.data?.recent} initial={draft ? draft.text : keptBrief || brief}
+                picked={draft?.picked} keep={draft ? draft.keep : keptBrief !== ""}
+                describedBy={earlier ? `brief-${s.key}-earlier` : undefined}
+                sendLabel="✦ לנסח" busy={busy} autoFocus={briefAsked || briefFocus || s.key !== "diagnoses"}
                 onSend={sendBrief}
+                // Whenever the box goes, what is in it then is what it opens with next time: her
+                // newest text (also emptied), styles and "לזכור", and nothing once it was sent.
+                // Taken as it goes, not on every key, so typing never re-renders the section (F1a).
+                onGone={(left, changed) => {
+                  if (restoring.current) {
+                    restoring.current = false;
+                    return;
+                  }
+                  setBriefFocus(false);
+                  if (briefSent.current) {
+                    sentLeft.current = { left, changed };
+                    return;
+                  }
+                  // Only what she changed is a draft: a box she only looked at leaves the draft
+                  // as it was (an earlier one of hers stays offered under the box).
+                  if (!changed) return;
+                  setBriefDraft({ ...left, kept: keptBrief, about: boxAbout });
+                  // A box she worked in stays open, like one she asked for, also if the wish that
+                  // opened it is removed meanwhile; folded ("ביטול", Escape), it stays folded.
+                  if (!backToToggle.current) setBriefAsked(true);
+                }}
                 onCancel={() => {
                   // With a wish the box stays open (its words are hers to see); else it folds
                   // back, and the keyboard returns to the line that opened it. "ביטול" folds,
@@ -841,6 +923,25 @@ function A4Section({ api, section: s, focused, onPick, onNext }: {
                     setBriefAsked(false);
                   }
                 }} />
+              {earlier && (
+                // Her draft, behind a newer wish kept for the section in another report: never
+                // dropped unseen. "להחזיר" puts it back in the box as she left it; when her
+                // words there were only the old kept wish, the styles come back with the newer one.
+                <p className="small muted a4-brief-earlier">
+                  <span id={`brief-${s.key}-earlier`} className="a4-brief-earlier-text">
+                    {ownWords
+                      ? `מה שכתבת כאן ולא נשלח: ״${earlier.text.trim()}״${earlier.picked.length > 0 ? `, בסגנון: ${earlier.picked.join(", ")}` : ""}`
+                      : `הסגנון שבחרת כאן ולא נשלח: ${earlier.picked.join(", ")}`}
+                  </span>
+                  <button type="button" className="link-btn" disabled={busy} onClick={() => {
+                    restoring.current = true;
+                    setBriefDraft(ownWords ? { ...earlier, kept: keptBrief } : { ...earlier, text: keptBrief, keep: true, kept: keptBrief, about: keptBrief });
+                    setBriefFocus(true);
+                    setBriefRound((n) => n + 1);
+                  }}>להחזיר</button>
+                </p>
+              )}
+              </>
             ) : (
               // D-204 §3: folded, one row. "✦ לנסח את הסעיף" sends what an empty box sends (no
               // wish, the usual request), through the same review; nothing is kept or deleted.

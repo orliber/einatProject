@@ -8,6 +8,14 @@
   flex-direction: column;
   gap: var(--space-4);
 }
+/* On every page of the clinic, room for the page's scrollbar is kept even when there is none:
+   on Windows a scrollbar takes width, so a page that scrolls beside one that does not (another
+   tab, the month beside the week, the bar of a visit chosen on the calendar in a short window)
+   would move everything sideways, the visit under the pointer too (D-204 §5). The part of the
+   reports keeps its own width. */
+html:has(.clinic-panel) {
+  scrollbar-gutter: stable;
+}
 /* The panel takes the keyboard only to be scrolled; its ring would frame the whole page. */
 .clinic-panel:focus-visible {
   outline: none;

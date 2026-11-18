@@ -219,7 +219,8 @@ export const ipc = {
   setSectionGuide: (sectionKey: string, text: string) => run("set_section_guide", { sectionKey, text }),
   /** Her drafting wishes: the last five, and one kept per section (D-140). */
   draftBriefs: () => call("draft_briefs"),
-  keepDraftBrief: (sectionKey: string, text: string, keep: boolean) => call("keep_draft_brief", { sectionKey, text, keep }),
+  /** `seen`: the kept wish her unticked "לזכור" was about; only that one is forgotten (D-204 §3). */
+  keepDraftBrief: (sectionKey: string, text: string, keep: boolean, seen: string | null) => call("keep_draft_brief", { sectionKey, text, keep, seen }),
   setReviewAlways: (on: boolean) => run("set_review_always", { on }),
   setScreenProtection: (on: boolean) => run("set_screen_protection", { on }),
   reportSettings: () => call("report_settings"),

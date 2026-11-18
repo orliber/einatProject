@@ -63,35 +63,73 @@
   min-width: 0;
 }
 /* The line under the grid is as tall as what it says: the legend, or how to start on an empty
-   page. The bar of a visit chosen for moving lies over it, from its top down, out of the flow:
-   so choosing a visit never changes the grid's height nor moves anything under the pointer. A
-   bar taller than the legend (it folds in the day view, and in a week under about 1000px) reaches into the page's margin, and
-   further down the page scrolls. The legend stays under the bar, unseen and unread, to keep the
-   line's height (CalendarTab.tsx). A plain box, never a region. */
-/* With a day or a week on the page, room for the page's scrollbar is kept even when there is
-   none: a bar that reaches below the window adds one, and on Windows a scrollbar takes width,
-   which would move the visit under the pointer sideways (D-204 §5). */
-html:has(.cal-fill) {
-  scrollbar-gutter: stable;
-}
+   page. Choosing a visit never changes the grid's height nor moves anything under the pointer
+   (D-204 §5); its bar is a plain box, never a region.
+   In a week the bar lies over that line, out of the flow, from its top down: never over the
+   grid, so it never comes up under the pointer that chose the visit, nor over the visit she
+   moves. The legend stays under it, unseen and unread, to keep the line's height
+   (CalendarTab.tsx). A bar that folds (in a week under about 1000px) reaches past the page's
+   margin, and the page scrolls to it; Tab to its buttons scrolls them into view. */
 .cal-foot {
   position: relative;
   display: flex;
   flex-direction: column;
 }
-.cal-foot > .cal-move {
+.cal-move-rail {
   position: absolute;
-  inset-block-start: 0;
+  z-index: 6;
   inset-inline: 0;
+  inset-block-start: 0;
 }
 .cal-foot-under {
   visibility: hidden;
+}
+/* In a day the bar is on top of the day's list and pushes the list down: beside the grid, where
+   it has the list's width, or under it in a narrow page. Beside the grid, which follows a list
+   longer than the page, the list alone counts for the height of the day: the bar's rail covers
+   the column, out of the flow, the column makes room for the bar (its height, measured by
+   CalendarTab.tsx, and the gap under it) and gives that room back at its end. Until it is
+   measured the room is nothing (an unset --cal-move-h leaves --cal-move-room unset too), so
+   the grid never grows, even for a moment (which would scroll its hours back to the top). The
+   list, pushed down past the page's end, keeps a margin under it there (--cal-move-end, only
+   with a bar, also given back). With the page scrolled down, the bar keeps 6px under the
+   window's top, over the list (never over the grid); the rail lets the pointer through to it. */
+.cal-day-side {
+  --cal-move-room: calc(var(--cal-move-h) + var(--space-3));
+  --cal-move-end: calc(var(--cal-move-h) * 0 + var(--space-5));
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+  padding-block-start: var(--cal-move-room, 0px);
+  padding-block-end: var(--cal-move-end, 0px);
+  margin-block-end: calc(-1 * (var(--cal-move-room, 0px) + var(--cal-move-end, 0px)));
+}
+.cal-day-rail {
+  position: absolute;
+  z-index: 6;
+  inset: 0;
+  pointer-events: none;
+}
+.cal-day-rail > .cal-move {
+  position: sticky;
+  inset-block-start: 6px;
+  pointer-events: auto;
+}
+/* What takes the keyboard in the list is scrolled to under the bar, never behind it
+   (WCAG 2.4.11): the bar's height, the 6px over it and a little room. */
+.cal-day-side:has(> .cal-day-rail) > :not(.cal-day-rail) * {
+  scroll-margin-block-start: calc(var(--cal-move-h, 0px) + 6px + var(--space-3));
 }
 .cal-move {
   margin: 0;
   min-height: 54px;
   display: flex;
   align-items: center;
+  /* Kept at its tallest while a visit is chosen (useNoShrink): the room left goes under its
+     lines, which stay where they are. */
+  align-content: flex-start;
   flex-wrap: wrap;
   gap: var(--space-2);
   padding: var(--space-2) var(--space-3);
@@ -104,12 +142,17 @@ html:has(.cal-fill) {
   border-color: var(--primary);
   background: var(--primary-soft);
 }
+/* What the bar is about (name, day, time, "חופפת לפגישה אחרת") comes after its buttons on the
+   screen, at the end of the line or on a line of its own, though first for a screen reader: it
+   changes as she moves the visit, and nothing that changes size comes before a button, so a
+   button never moves under the pointer between two clicks (D-204 §5). */
 .cal-move-what {
+  order: 1;
   display: inline-flex;
   align-items: center;
   flex-wrap: wrap;
   gap: var(--space-2);
-  margin-inline-end: auto;
+  margin-inline-start: auto;
   font-weight: 600;
 }
 .cal-move-scope {
@@ -216,6 +259,8 @@ html:has(.cal-fill) {
   z-index: 4;
   background: var(--surface);
   border-inline-end: 1px solid var(--line);
+  /* Its line lies over the first day's border, which is there but unseen (below). */
+  margin-inline-end: -1px;
 }
 .cal-corner,
 .cal-day-head {
@@ -246,8 +291,11 @@ html:has(.cal-fill) {
   flex-direction: column;
   border-inline-start: 1px solid var(--line);
 }
+/* The first day's line is the hours' own, drawn over its border: the border is there, unseen,
+   so every day has the same width and a narrow column folds its name at the same window width
+   in every column of the week. */
 .cal-gutter + .cal-day {
-  border-inline-start: 0;
+  border-inline-start-color: transparent;
 }
 .cal-day-head {
   z-index: 3;
@@ -529,13 +577,23 @@ button.cal-day-name:hover {
     grid-template-columns: minmax(0, 1fr);
     align-content: start;
   }
-  /* The day's list is under its grid now: the bar takes the legend's place in the flow and
-     pushes the list down, instead of lying over it. The grid keeps its floor above. */
-  .cal-day-view .cal-foot > .cal-move {
+  /* The day's list is under its grid now, which keeps its floor: the bar is in the flow, under
+     the legend, and pushes the list down; nothing is given back, and nothing lies over the
+     grid. When the bar is below the window the page can be scrolled to it, and Tab to its
+     buttons brings them into view. */
+  .cal-day-side {
+    padding-block: 0;
+    margin-block-end: 0;
+  }
+  .cal-day-rail {
+    position: static;
+    pointer-events: auto;
+  }
+  .cal-day-rail > .cal-move {
     position: static;
   }
-  .cal-day-view .cal-foot-under {
-    display: none;
+  .cal-day-side:has(> .cal-day-rail) > :not(.cal-day-rail) * {
+    scroll-margin-block-start: 0;
   }
 }
 
@@ -652,6 +710,20 @@ button.cal-day-name:hover {
   flex: 1 1 0px;
   min-width: 0;
   text-align: end;
+  /* Its width is what the head leaves over (basis 0), never its text's, so it can be measured
+     by itself: under 3em a cut name would be a letter or two that reads like a weekday ("ח"),
+     so the eye sees none of it; a screen reader still hears it, and its title holds it. */
+  container: cal-holiday / inline-size;
+}
+@container cal-holiday (max-width: 3em) {
+  .cal-holiday-names {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
 }
 .cal-holiday {
   font-size: var(--text-xs, 12px);

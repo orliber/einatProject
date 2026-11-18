@@ -152,6 +152,23 @@
 .a4-brief-toggle {
   align-self: center;
 }
+/* Her unsent draft, behind a newer wish kept for the section in another report (D-204 §3). */
+.a4-brief-earlier {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin: 0;
+}
+.a4-brief-earlier-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
 /* An empty section out of focus: one dashed line. */
 .a4-gap-line {
   display: flex;

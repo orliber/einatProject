@@ -1,5 +1,5 @@
 // Text size: kept on this computer, within a fixed list, and never breaking when storage is off.
-import { TEXT_SIZES, applyTextSize, readTextSize, stepTextSize } from "./textSize";
+import { TEXT_SIZE_EVENT, TEXT_SIZES, applyTextSize, readTextSize, stepTextSize } from "./textSize";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -23,6 +23,24 @@ describe("text size", () => {
     applyTextSize(100);
     expect(document.documentElement.style.getPropertyValue("zoom")).toBe("");
     expect(readTextSize()).toBe(100);
+  });
+
+  it("tells the window the text size changed, as a resize would (a zoom fires none)", () => {
+    const told = vi.fn();
+    window.addEventListener(TEXT_SIZE_EVENT, told);
+    try {
+      applyTextSize(110);
+      expect(told).toHaveBeenCalledTimes(1);
+      expect(document.documentElement.style.getPropertyValue("zoom")).toBe("110%");
+      // The same size again (a key at the end of the list, Ctrl 0 at 100%): nothing changed.
+      applyTextSize(110);
+      expect(told).toHaveBeenCalledTimes(1);
+      applyTextSize(100);
+      applyTextSize(100);
+      expect(told).toHaveBeenCalledTimes(2);
+    } finally {
+      window.removeEventListener(TEXT_SIZE_EVENT, told);
+    }
   });
 
   it("steps within the list and stops at both ends", () => {

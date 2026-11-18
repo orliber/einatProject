@@ -44,6 +44,15 @@ fn clean(text: &str) -> Result<String, CoreError> {
     Ok(text)
 }
 
+/// A wish as it is compared with a kept one: one kind of line break, trimmed (no limit: a
+/// longer one is simply not the kept one).
+fn same_text(text: &str) -> String {
+    text.replace("\r\n", "\n")
+        .replace('\r', "\n")
+        .trim()
+        .to_owned()
+}
+
 /// A stored list or map; anything unreadable is treated as empty, never as an error that
 /// stops her from drafting.
 fn parse<T: Default + for<'de> Deserialize<'de>>(stored: Option<String>) -> T {
@@ -65,12 +74,18 @@ impl Core {
     }
 
     /// A wish she sent for `section_key`: it becomes the newest recent one, and is kept for
-    /// the section when `keep` (an empty wish with `keep` off forgets the section's).
+    /// the section when `keep` (an empty wish, or `keep` off, forgets the section's).
+    ///
+    /// `seen` is the kept wish her "לזכור" was about as she left it unticked (D-204 §3): the
+    /// section's wish is forgotten only while it is still that one. A wish kept for the
+    /// section in another report since stays: her untick was about an older one, and a newer
+    /// wish is never forgotten unseen. `None`: whichever wish is kept.
     pub fn keep_draft_brief(
         &mut self,
         section_key: &str,
         text: &str,
         keep: bool,
+        seen: Option<&str>,
     ) -> Result<DraftBriefs, CoreError> {
         let key = section_key.trim();
         if key.is_empty() || key.chars().count() > KEY_MAX || !crate::guides::known_section(key) {
@@ -85,7 +100,12 @@ impl Core {
         }
         if keep && !text.is_empty() {
             briefs.sections.insert(key.to_owned(), text);
-        } else {
+        } else if seen.is_none_or(|seen| {
+            briefs
+                .sections
+                .get(key)
+                .is_none_or(|kept| *kept == same_text(seen))
+        }) {
             briefs.sections.remove(key);
         }
         let recent = serde_json::to_string(&briefs.recent)

@@ -1,6 +1,6 @@
 // The case explorer moves, never copies: a case lives in one folder, so a drag to a folder takes
 // it out of where it was, and the recycle bin takes exactly the one case. Invented cases only.
-import { configure, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, configure, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { mockIPC } from "@tauri-apps/api/mocks";
 import { App } from "../../App";
@@ -115,12 +115,13 @@ describe("the case explorer", () => {
     // "עודכן": when a case inside last changed; nothing for an empty folder.
     expect(row.querySelector("td.col-when")?.textContent).not.toBe("");
     expect(folderRow("הפניות מהמכון").querySelector("td.col-when")?.textContent).toBe("");
-    // D-204 §2: no prominent button in the table. Beside "+ תיק חדש", the one prominent button
-    // is on the card above it, on the case she is continuing.
+    // D-204 §2: no prominent button in the table, and one green button on the screen (Einat,
+    // 18.11.2026): the card's, on the case she is continuing; "+ תיק חדש" is a plain button then.
     expect(table().querySelectorAll(".btn-primary")).toHaveLength(0);
     const card = screen.getByRole("region", { name: "להמשיך איפה שהפסקת" });
-    const prominent = Array.from(screen.getByRole("main").querySelectorAll(".btn-primary")).filter((b) => b.textContent !== "+ תיק חדש");
+    const prominent = Array.from(screen.getByRole("main").querySelectorAll(".btn-primary"));
     expect(prominent).toEqual([within(card).getByRole("button", { name: "להמשיך לכתוב ←" })]);
+    expect(screen.getByRole("button", { name: "+ תיק חדש" })).not.toHaveClass("btn-primary");
     // The folder's name is its stop on the keyboard: Tab to it, Enter opens it.
     within(row).getByRole("button", { name: "פתיחת התיקייה אבחונים פרטיים" }).focus();
     await user.keyboard("{Enter}");
@@ -130,6 +131,11 @@ describe("the case explorer", () => {
     expect(table().querySelectorAll(".btn-primary")).toHaveLength(0);
     await user.click(screen.getByRole("button", { name: "לתיקייה שמעל" }));
     await vi.waitFor(() => expect(screen.queryByRole("navigation", { name: "מיקום" })).toBeNull());
+    // While she searches the card steps aside, and "+ תיק חדש" is the green button again.
+    await user.type(screen.getByRole("searchbox", { name: "חיפוש תיקים" }), "נועם");
+    expect(screen.queryByRole("region", { name: "להמשיך איפה שהפסקת" })).toBeNull();
+    expect(screen.getByRole("button", { name: "+ תיק חדש" })).toHaveClass("btn-primary");
+    await user.clear(screen.getByRole("searchbox", { name: "חיפוש תיקים" }));
   });
 
   it("the sentence about dragging is gone, and the case's name is the button that opens it", async () => {
@@ -326,6 +332,64 @@ describe("the case explorer", () => {
     await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "העברה לסל המחזור" }));
     await vi.waitFor(() => expect(screen.queryByText("אי אפשר לפתוח מעקב עכשיו.")).toBeNull());
     refuse = false;
+  });
+
+  // In a narrow window the tree folds behind "תיקיות" after a pick, and the keyboard goes to
+  // that button, but only when it went with the tree (or was lost).
+  it("a folder picked in the folded tree gives the keyboard to the button that reopens it", async () => {
+    const { user } = await openList();
+    const toggle = screen.getByRole("button", { name: "תיקיות" });
+    await user.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    await user.click(treeRow(/^אבחונים פרטיים/));
+    await vi.waitFor(() => expect(toggle).toHaveAttribute("aria-expanded", "false"));
+    await vi.waitFor(() => expect(toggle).toHaveFocus());
+  });
+
+  it("“תיקייה חדשה בפנים” from the folded tree keeps the keyboard in the new folder's name, not behind the window", async () => {
+    const { user } = await openList();
+    const toggle = screen.getByRole("button", { name: "תיקיות" });
+    await user.click(toggle);
+    const row = treeRow(/^אבחונים פרטיים/);
+    row.focus();
+    // Shift+F10 on the folder: the browser's context menu event on the focused row.
+    fireEvent.contextMenu(row);
+    await user.click(await screen.findByRole("menuitem", { name: "תיקייה חדשה בפנים" }));
+    const name = await within(await screen.findByRole("dialog")).findByLabelText("שם התיקייה");
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    // The tree's fold has had its turn (a timer): the name field still has the keyboard.
+    await act(() => new Promise((r) => setTimeout(r, 30)));
+    expect(name).toHaveFocus();
+    expect(toggle).not.toHaveFocus();
+    await user.keyboard("ילדים");
+    expect(name).toHaveValue("ילדים");
+    // Closed, the keyboard is on "תיקיות", not on the folded tree's hidden row.
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "סגירה" }));
+    if (screen.queryByRole("dialog")) await user.click(screen.getByRole("button", { name: "לסגור בלי לשמור" }));
+    await vi.waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(toggle).toHaveFocus();
+  });
+
+  it("a folder entered from the table keeps the keyboard, on its name in the path, not on the page", async () => {
+    const { user } = await openList();
+    within(folderRow("אבחונים פרטיים")).getByRole("button", { name: "פתיחת התיקייה אבחונים פרטיים" }).focus();
+    await user.keyboard("{Enter}");
+    const crumb = await within(screen.getByRole("navigation", { name: "מיקום" })).findByRole("button", { name: "אבחונים פרטיים" });
+    expect(crumb).toHaveAttribute("aria-current", "page");
+    await vi.waitFor(() => expect(crumb).toHaveFocus());
+  });
+
+  it("“תיקייה חדשה בפנים” from the table's “⋯” gives the keyboard back to “תיקייה כאן”, not to the page", async () => {
+    const { user } = await openList();
+    await user.click(within(folderRow("אבחונים פרטיים")).getByRole("button", { name: "פעולות על התיקייה אבחונים פרטיים" }));
+    await user.click(await screen.findByRole("menuitem", { name: "תיקייה חדשה בפנים" }));
+    const dialog = await screen.findByRole("dialog");
+    await vi.waitFor(() => expect(within(dialog).getByLabelText("שם התיקייה")).toHaveFocus());
+    await user.keyboard("{Escape}");
+    await vi.waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    // In the folder she went into, on the same step there.
+    expect(within(screen.getByRole("navigation", { name: "מיקום" })).getByRole("button", { name: "אבחונים פרטיים" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("button", { name: /תיקייה כאן/ })).toHaveFocus();
   });
 });
 

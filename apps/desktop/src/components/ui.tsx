@@ -168,6 +168,13 @@ function trapTab(frame: HTMLElement, e: KeyboardEvent) {
   }
 }
 
+/** A dialog's frame (not a small card like the page's popovers). */
+const FRAME = '[role="dialog"][aria-modal="true"]';
+
+/** A closed dialog's frame, and where its focus went back to: a dialog that opened in the
+ *  commit that closed it was asked for from inside it, so that is its opener too. */
+const handedOver = new WeakMap<Element, Element | null>();
+
 /** A modal frame. Escape closes it; focus moves into it when it opens and back to the opener on close. */
 export function Dialog(props: {
   title: string;
@@ -200,15 +207,26 @@ export function Dialog(props: {
   // mounts), and that field goes with the dialog (F5-r of 18.11.2026).
   const [opener] = useState(() => document.activeElement);
   useEffect(() => {
+    const frame = ref.current;
+    // Opened in the commit that closed another dialog (NoteDialog's loading frame replaced by its
+    // form, a step that leads to the next): the keyboard was in that dialog, which is gone, so
+    // focus goes back where that one's would have gone (its cleanup ran just before this).
+    let back: Element | null = opener;
+    const gone = back instanceof Element && !back.isConnected ? back.closest(FRAME) : null;
+    if (gone && handedOver.has(gone)) back = handedOver.get(gone) ?? null;
     // A field marked autoFocus inside has already taken focus: keep it there, so she can type
     // at once. Otherwise the frame takes focus.
-    const frame = ref.current;
     if (frame && !frame.contains(document.activeElement)) frame.focus();
     return () => {
       // A trial unmount (StrictMode, in development) leaves the frame on the page: not closed.
       if (frame?.isConnected) return;
+      if (frame) handedOver.set(frame, back);
+      // A dialog that opened in this same commit has taken the focus (a field marked autoFocus):
+      // it stays there.
+      const at = document.activeElement;
+      if (at instanceof Element && at !== document.body && at.closest(FRAME)?.isConnected) return;
       // Focus goes back to whatever opened the dialog, if it is still on the page.
-      if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
+      if (back instanceof HTMLElement && back.isConnected) back.focus();
     };
   }, [opener]);
   useEffect(() => {

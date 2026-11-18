@@ -1,7 +1,7 @@
 // The case list, laid out like a file explorer (round 47, D-085): a folder tree on the right,
 // the path and the search above, and one table of subfolders and cases. Folders nest to any
 // depth (the core already keeps `parent_id`); this screen only shows them that way.
-import { useMemo, useState, type DragEvent } from "react";
+import { useEffect, useMemo, useState, type DragEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useApp } from "../App";
 import { BackupReminder } from "../components/Backup";
@@ -188,13 +188,29 @@ export function CasesScreen() {
   const allCases = useMemo(() => fresh(cases.data, cases.dataUpdatedAt), [cases.data, cases.dataUpdatedAt]);
   // A folder that no longer exists (deleted elsewhere): back to the top.
   const current = folderId && allFolders.some((f) => f.id === folderId) ? folderId : null;
-  // In a narrow window the tree folds away after a pick; focus goes to the button that reopens it.
+  // In a narrow window the tree folds away after a pick; focus goes to the button that reopens it,
+  // when it would go with the tree. At once: a window the pick opens ("תיקייה חדשה בפנים") then
+  // takes it from that button, and gives it back there when it closes (not to a hidden row).
   const closeTree = () => {
     if (!treeOpen) return;
     setTreeOpen(false);
-    setTimeout(() => document.querySelector<HTMLElement>(".tree-toggle")?.focus(), 0);
+    const toggle = () => document.querySelector<HTMLElement>(".tree-toggle")?.focus();
+    if (document.activeElement?.closest(".explorer-tree")) toggle();
+    // Lost on the way (what she picked from is gone): there too, but never from an open window
+    // (it would be behind it) or from wherever she is now.
+    setTimeout(() => {
+      if (document.querySelector('[role="dialog"]')) return;
+      const at = document.activeElement;
+      if (at && at !== document.body && !at.closest(".explorer-tree")) return;
+      toggle();
+    }, 0);
   };
+  // A folder entered from a row of the table: the row goes away with the list it is in, so the
+  // keyboard goes to where she is now, the folder's name in the path, and not to the page (from
+  // where Tab would start over at the top). Not when a window took it, or when it is elsewhere.
+  const [toPathOf, setToPathOf] = useState<string | null>(null);
   const setFolderId = (id: string | null) => {
+    setToPathOf(document.activeElement?.closest(".explorer-main tr") ? id : null);
     rememberFolder(id);
     setFolderIdState(id);
     setInTrash(false);
@@ -274,6 +290,8 @@ export function CasesScreen() {
     return { inProgress: open.length, resume: [...open].sort((a, b) => b.updated_at - a.updated_at)[0] };
   }, [allCases]);
   const resumeStatus = resume ? caseStatus(resume) : null;
+  /** The "להמשיך איפה שהפסקת" card is shown (not while searching or in the recycle bin). */
+  const resuming = Boolean(resume && resumeStatus && !q && !inTrash);
   const trashCount = trash.data?.length ?? 0;
 
   // ---------------------------------------------------------------- moving
@@ -361,10 +379,23 @@ export function CasesScreen() {
     }
   });
 
+  useEffect(() => {
+    if (toPathOf === null || toPathOf !== current) return;
+    const at = document.activeElement;
+    if (document.querySelector('[role="dialog"]') || (at && at !== document.body)) return;
+    document.querySelector<HTMLElement>('.explorer-main .crumbs [aria-current="page"]')?.focus();
+  }, [toPathOf, current]);
+
   // ---------------------------------------------------------------- actions
   const folderItems = (f: Folder): MenuItem[] => [
     { label: "פתיחה", run: () => setFolderId(f.id) },
-    { label: "תיקייה חדשה בפנים", run: () => { setFolderId(f.id); setModal({ kind: "new-folder" }); } },
+    { label: "תיקייה חדשה בפנים", run: () => {
+      // From the table, whose row goes away with the folder she enters: the window gives the
+      // keyboard back to "תיקייה כאן", the same step in that folder, not to the page.
+      if (document.activeElement?.closest(".explorer-main tr")) document.querySelector<HTMLElement>(".library-bar .new-folder-here")?.focus();
+      setFolderId(f.id);
+      setModal({ kind: "new-folder" });
+    } },
     { label: "שינוי שם", run: () => setModal({ kind: "rename", folder: f }) },
     { label: "העברה לתיקייה אחרת…", run: () => setModal({ kind: "move-folder", folder: f }) },
     { label: "מחיקת התיקייה", run: () => setModal({ kind: "delete-folder", folder: f }), danger: true },
@@ -412,10 +443,12 @@ export function CasesScreen() {
             <p className="muted">{cases.data ? (allCases.length ? inWorkLine(inProgress) : "עוד אין תיקים") : " "}</p>
           </div>
           <div className="row head-actions">
-            <button type="button" className="btn btn-primary btn-big" onClick={() => setCreating(true)}>+ תיק חדש</button>
+            {/* One green button on the screen (Einat, 18.11.2026): with the "להמשיך" card below,
+                that card's button is the one; "+ תיק חדש" steps back to a plain button. */}
+            <button type="button" className={resuming ? "btn" : "btn btn-primary btn-big"} onClick={() => setCreating(true)}>+ תיק חדש</button>
           </div>
         </div>
-        {resume && resumeStatus && !q && !inTrash && (
+        {resuming && resume && resumeStatus && (
           // D-204 §2: the one prominent button of the list. It opens the report on the section it
           // names, so "הסעיף הבא" is where she lands. A warning word stays on the card.
           <section className="paper resume" aria-labelledby="resume-title">
@@ -524,7 +557,7 @@ export function CasesScreen() {
                   </label>
                 )}
                 {!inTrash && (
-                  <button type="button" className="btn" onClick={() => setModal({ kind: "new-folder" })}><FolderIcon size={16} /> תיקייה כאן</button>
+                  <button type="button" className="btn new-folder-here" onClick={() => setModal({ kind: "new-folder" })}><FolderIcon size={16} /> תיקייה כאן</button>
                 )}
               </div>
 

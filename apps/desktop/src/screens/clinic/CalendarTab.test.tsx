@@ -14,7 +14,9 @@ import type { VisitView } from "../../ipc/generated/VisitView";
 import tokens from "../../styles/tokens.css?raw";
 import { a11yViolations } from "../../test/a11y";
 import { appApi, Host, serve, type Override, type Served } from "../../test/host";
+import { applyTextSize } from "../../textSize";
 import calendarCss from "./CalendarTab.css?raw";
+import clinicCss from "./ClinicScreen.css?raw";
 import { ClinicScreen, forgetDiscreet } from "./ClinicScreen";
 
 configure({ asyncUtilTimeout: 5000 });
@@ -716,7 +718,7 @@ describe("the bar and the height of the calendar", () => {
     expect(code.match(/\d+(vh|dvh|svh|lvh)\b(?! \/ var\(--zoom, 1\))/g)).toBeNull();
   });
 
-  it("the line under the grid is as tall as the legend; a chosen visit's bar lies over it, so the grid keeps its height", async () => {
+  it("in a week the chosen visit's bar lies over the line under the grid and goes down from it, never over the grid", async () => {
     const { user } = await openCalendar();
     const foot = () => (legend() as HTMLElement).closest(".cal-foot") as HTMLElement;
     // No band kept empty for a bar that is not there (it was 54px to 173px, under a 20px legend).
@@ -733,16 +735,195 @@ describe("the bar and the height of the calendar", () => {
     expect(within(under).getAllByRole("listitem", { hidden: true }).map((li) => li.textContent)).toEqual([
       "פגישת היכרות", "מפגש אבחון", "תצפית", "שיחת משוב", "פגישת טיפול", "זמן שמור",
     ]);
-    expect(under.nextElementSibling).toBe(bar());
+    // The bar is alone in its rail, a plain box (no role), after the grid as the keyboard goes.
+    const rail = under.nextElementSibling as HTMLElement;
+    expect(rail).toHaveClass("cal-move-rail");
+    expect(rail).not.toHaveAttribute("role");
+    expect(Array.from(rail.children)).toEqual([bar()]);
+    expect(screen.getByRole("group", { name: "היומן לפי שעות" }).compareDocumentPosition(bar()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(legend()).toBeNull();
     expect(rule(".cal-foot")).toContain("position: relative;");
-    expect(rule(".cal-foot > .cal-move")).toContain("position: absolute;\n  inset-block-start: 0;\n  inset-inline: 0;");
     expect(rule(".cal-foot-under")).toContain("visibility: hidden;");
-    // Where the day's list is under its grid, the bar takes the legend's place and pushes the list down.
-    expect(calendarCss).toMatch(/@container page \(max-width: 720px\) \{[^@]*\.cal-day-view \.cal-foot > \.cal-move \{\n {4}position: static;[^@]*\.cal-day-view \.cal-foot-under \{\n {4}display: none;/);
+    // The rail starts at the line's top and goes down from it: never over the grid, so the bar
+    // never comes up under the pointer that chose the visit, nor over the visit being moved (a
+    // bar that rose over the grid caught a second click and moved the visit). A folded bar
+    // reaches past the page's margin, and the page can be scrolled to it.
+    expect(rule(".cal-move-rail")).toMatch(/^\n\s*position: absolute;\n\s*z-index: 6;\n\s*inset-inline: 0;\n\s*inset-block-start: 0;\n$/);
+    expect(calendarCss).not.toMatch(/\.cal-move-rail[^{]*\{[^}]*(sticky|-200px|inset-block-end)/);
+    expect(calendarCss).not.toContain("--cal-foot-room");
+    // What the bar is about is first for a screen reader, but after the buttons on the screen:
+    // it changes as she moves the visit ("חופפת לפגישה אחרת" comes and goes, the day's name
+    // changes), and a button that moved with it caught a second click on "לדחות ברבע שעה" as
+    // "להקדים ברבע שעה". Nothing before the buttons changes size, so none moves under the pointer.
+    const what = bar().firstElementChild as HTMLElement;
+    expect(what).toHaveClass("cal-move-what");
+    expect(what).toHaveAttribute("role", "status");
+    expect(rule(".cal-move-what")).toContain("order: 1;");
+    // Kept at its tallest while a visit is chosen, its lines stay at its top.
+    expect(rule(".cal-move")).toContain("align-content: flex-start;");
+    expect(rule(".cal-move-what")).toContain("margin-inline-start: auto;");
+    expect(rule(".cal-move-what")).not.toContain("margin-inline-end");
+    expect(calendarCss).not.toMatch(/\.cal-move[^{]*\{[^}]*\border: -/);
     await user.click(step("סיום"));
     expect(foot().firstElementChild).toBe(legend());
     expect(document.querySelector(".cal-foot-under")).toBeNull();
+    expect(document.querySelector(".cal-move-rail")).toBeNull();
+  });
+
+  it("in a day the chosen visit's bar is on top of the day's list and pushes it down, and the grid keeps its height", async () => {
+    // The window's ResizeObserver (jsdom has none), and a bar 98px high, as it folds beside the grid.
+    const watchers: (() => void)[] = [];
+    const watching: { by: object; el: Element }[] = [];
+    vi.stubGlobal("ResizeObserver", class {
+      constructor(told: () => void) {
+        watchers.push(told);
+      }
+      observe(el: Element) {
+        watching.push({ by: this, el });
+      }
+      unobserve() {}
+      disconnect() {
+        for (let i = watching.length - 1; i >= 0; i--) if (watching[i]?.by === this) watching.splice(i, 1);
+      }
+    });
+    const watched = () => watching.map((w) => w.el);
+    // The bar's height as it folds; like a browser, never under the height it is kept at.
+    let folded = 98;
+    const height = vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockImplementation(function (this: HTMLElement) {
+      if (this.classList.contains("cal-day-side")) return 400;
+      return this.classList.contains("cal-move") ? Math.max(folded, parseFloat(this.style.minBlockSize) || 0) : 0;
+    });
+    try {
+      const { user, view } = await openCalendar();
+      await user.click(viewRadio("יום"));
+      const list = () => screen.getByRole("region", { name: "סדר היום" });
+      const side = () => list().parentElement as HTMLElement;
+      expect(side()).toHaveClass("cal-day-side");
+      expect(side().style.getPropertyValue("--cal-move-h")).toBe("");
+      await user.click(screen.getByRole("button", { name: "הזזת הפגישה של תמר, ראשון 09:00" }));
+      // On top of the list, which it pushes down; under the grid the legend is seen as before.
+      const rail = side().firstElementChild as HTMLElement;
+      expect(rail).toHaveClass("cal-day-rail");
+      expect(Array.from(rail.children)).toEqual([bar()]);
+      expect(Array.from(side().children)).toEqual([rail, list()]);
+      expect(legend()?.closest(".cal-foot")).not.toBeNull();
+      expect(document.querySelector(".cal-foot-under, .cal-move-rail")).toBeNull();
+      // As the keyboard goes: the grid's visits, the bar, the list. A plain box, no region.
+      expect(screen.getByRole("group", { name: "היומן לפי שעות" }).compareDocumentPosition(bar()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(bar().compareDocumentPosition(list()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(screen.getAllByRole("region")).toEqual([day(SUNDAY), list()]);
+      expect(await a11yViolations(view.container)).toEqual([]);
+      // Its height is measured as it folds, for the room the column gives back at its end.
+      expect(side().style.getPropertyValue("--cal-move-h")).toBe("98px");
+      expect(new Set(watched())).toEqual(new Set([bar(), side()]));
+      folded = 142;
+      act(() => watchers.forEach((w) => w()));
+      expect(side().style.getPropertyValue("--cal-move-h")).toBe("142px");
+      // A step that takes a line out of the bar ("חופפת לפגישה אחרת" going) does not make it,
+      // or the list's room, shorter while the visit is chosen: on a page scrolled to its end the
+      // browser would pull the page down, and the button under the pointer away from it.
+      expect(bar().style.minBlockSize).toBe("142px");
+      folded = 60;
+      act(() => watchers.forEach((w) => w()));
+      expect(bar().style.minBlockSize).toBe("142px");
+      expect(side().style.getPropertyValue("--cal-move-h")).toBe("142px");
+      // A resized window lets go, and the bar is measured again once the page has settled (two
+      // frames, after the bar's own height was taken anew): a box measured with the old height
+      // in between is not kept.
+      const frame = () => new Promise<void>((done) => requestAnimationFrame(() => done()));
+      const settled = async () => {
+        await frame();
+        await frame();
+      };
+      act(() => {
+        window.dispatchEvent(new Event("resize"));
+      });
+      expect(bar().style.minBlockSize).toBe("");
+      expect(side().style.minBlockSize).toBe("");
+      act(() => watchers.forEach((w) => w()));
+      expect(bar().style.minBlockSize).toBe("");
+      await act(frame);
+      expect(bar().style.minBlockSize).toBe("");
+      await act(frame);
+      expect(bar().style.minBlockSize).toBe("60px");
+      // So does a change of the text size (the window is not resized then), and only a change: a
+      // key at the end of the list keeps the height.
+      folded = 120;
+      act(() => watchers.forEach((w) => w()));
+      expect(bar().style.minBlockSize).toBe("120px");
+      folded = 75;
+      act(() => applyTextSize(125));
+      expect(bar().style.minBlockSize).toBe("");
+      await act(settled);
+      expect(bar().style.minBlockSize).toBe("75px");
+      folded = 70;
+      act(() => applyTextSize(125));
+      await act(settled);
+      expect(bar().style.minBlockSize).toBe("75px");
+      act(() => applyTextSize(100));
+      await act(settled);
+      expect(bar().style.minBlockSize).toBe("70px");
+      // Kept to the fraction, in the bar's own pixels: its height on the screen over its zoom (a
+      // hair more, as the browser rounds it down to 1/64 px), never offsetHeight's whole pixels.
+      const zoomed = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+        return new DOMRect(0, 0, 300, this.classList.contains("cal-move") ? 122.5 : 0);
+      });
+      Object.defineProperty(HTMLElement.prototype, "currentCSSZoom", { configurable: true, get: () => 1.25 });
+      try {
+        act(() => watchers.forEach((w) => w()));
+        expect(bar().style.minBlockSize).toBe("98.0001px");
+        expect(side().style.getPropertyValue("--cal-move-h")).toBe("98.0001px");
+      } finally {
+        zoomed.mockRestore();
+        Reflect.deleteProperty(HTMLElement.prototype, "currentCSSZoom");
+      }
+      // "סיום" while a resize is settling: nothing is measured or kept after the bar went.
+      act(() => {
+        window.dispatchEvent(new Event("resize"));
+        fireEvent.click(step("סיום"));
+      });
+      await act(settled);
+      expect(side().style.minBlockSize).toBe("");
+      expect(screen.queryByRole("group", { name: "הזזת הפגישה שנבחרה" })).toBeNull();
+      expect(side().style.getPropertyValue("--cal-move-h")).toBe("");
+      expect(side().style.minBlockSize).toBe("");
+      expect(watched()).toEqual([]);
+    } finally {
+      height.mockRestore();
+      vi.unstubAllGlobals();
+    }
+    // Beside the grid the bar is out of the flow, at the column's top: the column makes room for
+    // it and gives that room back at its end, so the list alone counts for the day's height (the
+    // grid follows a longer list), and the grid never grows, not even before the bar is measured.
+    expect(rule(".cal-day-side")).toContain("--cal-move-room: calc(var(--cal-move-h) + var(--space-3));");
+    expect(rule(".cal-day-side")).toContain("padding-block-start: var(--cal-move-room, 0px);\n  padding-block-end: var(--cal-move-end, 0px);\n  margin-block-end: calc(-1 * (var(--cal-move-room, 0px) + var(--cal-move-end, 0px)));");
+    // The list pushed past the page's end keeps a margin under it there, only with a bar.
+    expect(rule(".cal-day-side")).toContain("--cal-move-end: calc(var(--cal-move-h) * 0 + var(--space-5));");
+    // Its rail covers the column, lets the pointer through to the list, and the bar keeps 6px
+    // under the window's top while the page is scrolled down: over the list, never the grid.
+    expect(rule(".cal-day-rail")).toMatch(/position: absolute;\n\s*z-index: 6;\n\s*inset: 0;\n\s*pointer-events: none;/);
+    expect(rule(".cal-day-rail > .cal-move")).toMatch(/position: sticky;\n\s*inset-block-start: 6px;\n\s*pointer-events: auto;/);
+    // What takes the keyboard in the list is scrolled to under the bar, never behind it
+    // (WCAG 2.4.11), and under the grid, where the bar lies over nothing, it is scrolled as usual.
+    const under = ".cal-day-side:has(> .cal-day-rail) > :not(.cal-day-rail) *";
+    expect(rule(under)).toContain("scroll-margin-block-start: calc(var(--cal-move-h, 0px) + 6px + var(--space-3));");
+    expect(calendarCss).toMatch(/@container page \(max-width: 720px\) \{[^@]*\.cal-day-side:has\(> \.cal-day-rail\) > :not\(\.cal-day-rail\) \* \{\n {4}scroll-margin-block-start: 0;/);
+    // Under the grid (a narrow page) it is in the flow under the legend, nothing is given back,
+    // and nothing lies over the grid.
+    expect(calendarCss).toMatch(/@container page \(max-width: 720px\) \{[^@]*\.cal-day-side \{\n {4}padding-block: 0;\n {4}margin-block-end: 0;\n {2}\}\n {2}\.cal-day-rail \{\n {4}position: static;\n {4}pointer-events: auto;\n {2}\}\n {2}\.cal-day-rail > \.cal-move \{\n {4}position: static;/);
+    expect(calendarCss).not.toContain("-200px");
+  });
+
+  it("keeps room for the page's scrollbar on every page of the clinic, so its tabs and views have one width", async () => {
+    // Before, only a day or a week kept it: on Windows, the month beside the week, or a tab that
+    // does not scroll beside the calendar, moved the page 15px sideways. The reports keep theirs.
+    expect(clinicCss).toMatch(/\nhtml:has\(\.clinic-panel\) \{\n {2}scrollbar-gutter: stable;\n\}/);
+    expect(calendarCss).not.toContain("scrollbar-gutter");
+    const { user } = await openCalendar();
+    for (const name of ["שבוע", "חודש", "יום"]) {
+      await user.click(viewRadio(name));
+      expect(screen.getByRole("tabpanel")).toHaveClass("clinic-panel");
+    }
   });
 
   it("a narrow column never cuts the date: “היום” steps back first, then the weekday is one letter", async () => {
@@ -777,6 +958,57 @@ describe("the bar and the height of the calendar", () => {
     // what is left over, down to nothing.
     expect(rule(".cal-day-head h3")).toMatch(/flex: 0 1 auto;[^}]*margin-inline-end: auto;/);
     expect(rule(".cal-day-head .cal-holiday")).toMatch(/flex: 1 1 0px;\n\s*min-width: 0;/);
+  });
+
+  it("a holiday's name too narrow to read is hidden from the eye only, never cut to a letter that reads like a weekday", async () => {
+    const { user, view } = await openCalendar();
+    for (let i = 0; i < 3; i++) await user.click(screen.getByRole("button", { name: "השבוע הבא" }));
+    expect(title()).toBe("6 עד 12 בדצמבר 2026");
+    // Hanukkah in every day's head: the names are a box of their own inside the holiday's,
+    // which keeps the whole name in its title; nothing in it is hidden from a screen reader.
+    const holiday = await within(day("יום ראשון, 06.12.2026")).findByTitle("חנוכה (נר 3)");
+    expect(holiday).toHaveClass("cal-holiday");
+    expect(Array.from(holiday.children).map((c) => c.className)).toEqual(["cal-holiday-names"]);
+    expect(holiday.firstElementChild).toHaveTextContent("חנוכה (נר 3)");
+    expect(holiday.querySelector("[aria-hidden]")).toBeNull();
+    expect(await a11yViolations(view.container)).toEqual([]);
+    // Its width is what the head leaves over (basis 0), so it is measured by itself: under 3em
+    // the names are clipped away, as for a screen reader only (at 640 to 950px it had 4 to 31px,
+    // and showed "ח" or "ו"). The month's names are not measured, and stay as they were.
+    expect(rule(".cal-day-head .cal-holiday")).toMatch(/flex: 1 1 0px;[^}]*container: cal-holiday \/ inline-size;/);
+    expect(calendarCss).toMatch(/@container cal-holiday \(max-width: 3em\) \{\n {2}\.cal-holiday-names \{\n {4}position: absolute;\n {4}width: 1px;\n {4}height: 1px;\n {4}overflow: hidden;\n {4}clip-path: inset\(50%\);/);
+    expect(calendarCss).not.toMatch(/\.cal-holiday-names[^{]*\{[^}]*(display: none|visibility: hidden)/);
+    expect(calendarCss.match(/container: cal-holiday/g)).toHaveLength(1);
+    await user.click(viewRadio("חודש"));
+    const month = await screen.findByRole("table", { name: "דצמבר 2026" });
+    expect(within(month).getAllByTitle("חנוכה (נר 3)")[0]).toHaveClass("cal-holiday", "cal-month-holiday");
+  });
+
+  it("“היום” stays beside “+” on a holiday too: the holiday's name takes the room between the date and it", async () => {
+    vi.setSystemTime(new Date(2026, 11, 7, 10, 0));
+    const { user } = await openCalendar();
+    const parts = (head: Element) => Array.from(head.children).map((c) =>
+      c.tagName === "H3" ? "h3" : c.classList.contains("cal-holiday") ? "חג" : c.classList.contains("chip") ? "היום" : c.classList.contains("cal-day-add") ? "+" : c.className);
+    for (const name of ["שבוע", "יום"]) {
+      await user.click(viewRadio(name));
+      const head = day("יום שני, 07.12.2026").querySelector(".cal-day-head") as HTMLElement;
+      await within(head).findByTitle("חנוכה (נר 4)");
+      // Before, "היום" came right after the date and the growing name pushed it away from "+".
+      expect(parts(head), name).toEqual(["h3", "חג", "היום", "+"]);
+    }
+    // Another day has neither the word nor a place kept for it.
+    await user.click(viewRadio("שבוע"));
+    expect(parts(day("יום שלישי, 08.12.2026").querySelector(".cal-day-head") as HTMLElement)).toEqual(["h3", "חג", "+"]);
+  });
+
+  it("every day of a week has the same width, the first beside the hours too, so a narrow week folds its names together", () => {
+    // The first day had no border: 1px wider than the others, it kept "ראשון 15.11" beside
+    // "ב׳ 16.11" for a few pixels of window. Its border is there now, unseen, under the hours' line.
+    expect(rule(".cal-day")).toContain("border-inline-start: 1px solid var(--line);");
+    expect(rule(".cal-gutter + .cal-day")).toContain("border-inline-start-color: transparent;");
+    expect(rule(".cal-gutter + .cal-day")).not.toMatch(/border-inline-start(-width)?: 0/);
+    expect(rule(".cal-gutter")).toContain("border-inline-end: 1px solid var(--line);");
+    expect(rule(".cal-gutter")).toContain("margin-inline-end: -1px;");
   });
 
   it("today's column is tinted in the dark theme too, with its hour lines and its head seen on the tint, and text on it at 4.5:1", () => {

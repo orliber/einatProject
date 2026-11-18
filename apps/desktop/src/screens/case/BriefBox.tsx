@@ -33,7 +33,14 @@ export function composeWish(chips: readonly BriefChip[], picked: readonly string
   return [...styles, ...(own ? [own] : [])].join(" ");
 }
 
-export function BriefBox({ id, title, hint, placeholder, chips, chipsTitle, recent, initial, keep, sendLabel, foot, busy, autoFocus, needs, onSend, onCancel }: {
+/** What was in the box as it went: her words, the styles pressed, and "keep it for this section". */
+export interface BriefLeft {
+  text: string;
+  picked: string[];
+  keep: boolean;
+}
+
+export function BriefBox({ id, title, hint, placeholder, chips, chipsTitle, recent, initial, picked: firstPicked, keep, sendLabel, foot, busy, autoFocus, needs, describedBy, onSend, onCancel, onGone }: {
   id: string;
   title: string;
   hint: string;
@@ -44,6 +51,8 @@ export function BriefBox({ id, title, hint, placeholder, chips, chipsTitle, rece
   recent?: readonly string[] | undefined;
   /** What the box opens with (a wish kept for the section). */
   initial?: string;
+  /** The styles pressed as it opens (as she left them). */
+  picked?: readonly string[] | undefined;
   /** "Keep it for this section": shown when given, with its first state. */
   keep?: boolean;
   sendLabel: string;
@@ -53,19 +62,46 @@ export function BriefBox({ id, title, hint, placeholder, chips, chipsTitle, rece
   /** When an empty box cannot send (a change, her points): what must be there, and the
    *  sentence said when it is not. Without it, an empty box sends (a new section, as always). */
   needs?: { what: "wish" | "typed"; say: string } | undefined;
-  /** `wish`: the whole request (styles and words); `typed`: her own words only. */
-  onSend: (wish: string, typed: string, keep: boolean) => void;
+  /** A line about the box outside it, said with the box (its id). */
+  describedBy?: string | undefined;
+  /** `wish`: the whole request (styles and words); `typed`: her own words only; `left`: the box
+   *  as she sent from it. */
+  onSend: (wish: string, typed: string, keep: boolean, left: BriefLeft) => void;
   onCancel: () => void;
+  /** The box went, for any reason (folded, its section or the page left, sent, the vault
+   *  locked): what was in it then, and whether she changed any of it since it opened. */
+  onGone?: (left: BriefLeft, changed: boolean) => void;
 }) {
   const box = useRef<LocalTextHandle>(null);
-  const [picked, setPicked] = useState<string[]>([]);
+  const frame = useRef<HTMLDivElement>(null);
+  const [picked, setPicked] = useState<string[]>(() => [...(firstPicked ?? [])]);
   const [keeping, setKeeping] = useState(keep ?? false);
+  /** What it opened with, to tell what she changed. */
+  const [opened] = useState(() => ({ text: initial ?? "", picked: [...(firstPicked ?? [])].sort().join("\n"), keep: keep ?? false }));
   /** Said under the box when Enter or the button found nothing to send. */
   const [missing, setMissing] = useState<string | null>(null);
 
   useEffect(() => {
     if (autoFocus) box.current?.focus();
   }, [autoFocus]);
+  // As the box goes: its words from the box itself (the text lives there, F1a), the styles and
+  // the checkbox as they are then.
+  const latest = useRef({ picked, keeping, onGone });
+  useEffect(() => {
+    latest.current = { picked, keeping, onGone };
+  });
+  useEffect(() => {
+    const el = frame.current;
+    const text = box.current;
+    return () => {
+      // A trial unmount (StrictMode, in development) leaves the box on the page: it has not gone.
+      if (el?.isConnected) return;
+      const now = latest.current;
+      const left = { text: text?.value() ?? "", picked: now.picked, keep: now.keeping };
+      const changed = left.text !== opened.text || [...left.picked].sort().join("\n") !== opened.picked || left.keep !== opened.keep;
+      now.onGone?.(left, changed);
+    };
+  }, [opened]);
 
   const send = () => {
     if (busy) return;
@@ -78,7 +114,7 @@ export function BriefBox({ id, title, hint, placeholder, chips, chipsTitle, rece
       return;
     }
     setMissing(null);
-    onSend(wish, typed.trim(), keeping);
+    onSend(wish, typed.trim(), keeping, { text: typed, picked: [...picked], keep: keeping });
   };
   const toggle = (label: string) => {
     setMissing(null);
@@ -86,14 +122,14 @@ export function BriefBox({ id, title, hint, placeholder, chips, chipsTitle, rece
   };
 
   return (
-    <div className="brief-box" role="group" aria-labelledby={`${id}-title`}
+    <div ref={frame} className="brief-box" role="group" aria-labelledby={`${id}-title`}
       onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); onCancel(); } }}>
       <label className="brief-box-label" htmlFor={id}>
         <span id={`${id}-title`} className="brief-box-title">{title}</span>
         <span className="small muted">{hint}</span>
       </label>
       <LocalText ref={box} id={id} className="textarea brief-box-text" rows={2} resize={fitRows} initial={initial ?? ""} placeholder={placeholder}
-        aria-describedby={missing ? `${id}-missing` : undefined}
+        aria-describedby={[missing ? `${id}-missing` : "", describedBy ?? ""].filter(Boolean).join(" ") || undefined}
         onEmptyChange={(empty) => { if (!empty) setMissing(null); }}
         onKeyDown={(e) => {
           if (e.key !== "Enter" || e.shiftKey || e.nativeEvent.isComposing) return;
