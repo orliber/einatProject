@@ -86,6 +86,31 @@ export function PlusIcon({ size = 17 }: { size?: number }) {
   return <Glyph size={size}><path d="M12 5v14" /><path d="M5 12h14" /></Glyph>;
 }
 
+/** The app's one "?" (the top bar's keyboard help, HelpTip): never copied locally. */
+export function HelpIcon({ size = 18 }: { size?: number }) {
+  return <Glyph size={size}><circle cx="12" cy="12" r="9" /><path d="M9.5 9a2.5 2.5 0 0 1 4.8 1c0 1.7-2.3 2-2.3 3.5" /><path d="M12 17h.01" /></Glyph>;
+}
+
+export function SearchIcon({ size = 18 }: { size?: number }) {
+  return <Glyph size={size}><circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" /></Glyph>;
+}
+
+export function FullPageIcon({ size = 18 }: { size?: number }) {
+  return <Glyph size={size}><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" /></Glyph>;
+}
+
+export function ChatIcon({ size = 18 }: { size?: number }) {
+  return <Glyph size={size}><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z" /></Glyph>;
+}
+
+export function ChevronIcon({ size = 16 }: { size?: number }) {
+  return <Glyph size={size}><path d="m6 9 6 6 6-6" /></Glyph>;
+}
+
+export function CopyIcon({ size = 16 }: { size?: number }) {
+  return <Glyph size={size}><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M5 15V5a2 2 0 0 1 2-2h10" /></Glyph>;
+}
+
 export function EditIcon({ size = 17 }: { size?: number }) {
   return <Glyph size={size}><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" /></Glyph>;
 }

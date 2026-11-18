@@ -128,6 +128,24 @@ p {
   background: transparent;
   color: var(--primary);
 }
+/* A tool in a bar (the case bar's "דף מלא", "חיפוש", "התייעצות"): quiet like .icon-btn, with
+   its name. 44px, as every .btn. */
+.btn-quiet {
+  border-color: transparent;
+  background: transparent;
+  color: var(--ink-muted);
+  padding: 0 12px;
+}
+.btn-quiet:hover:not(:disabled) {
+  background: var(--sand);
+  color: var(--ink);
+}
+.btn-quiet[aria-pressed="true"],
+.btn-quiet[aria-pressed="true"]:hover:not(:disabled) {
+  background: var(--primary-soft);
+  border-color: var(--primary-line);
+  color: var(--primary);
+}
 .btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
@@ -301,6 +319,50 @@ select.select {
 .chip-sand {
   background: var(--sand);
   color: var(--ink-soft);
+}
+
+/* ---------- thin progress bar ---------- */
+/* <progress className="meter">, aria-hidden beside text that says the same numbers. */
+.meter {
+  appearance: none;
+  display: block;
+  width: 100%;
+  height: 6px;
+  border: 0;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--sand-strong);
+}
+.meter::-webkit-progress-bar {
+  background: var(--sand-strong);
+  border-radius: 999px;
+}
+.meter::-webkit-progress-value {
+  background: var(--primary);
+  border-radius: 999px;
+}
+.meter::-moz-progress-bar {
+  background: var(--primary);
+  border-radius: 999px;
+}
+.meter-lg {
+  height: 8px;
+}
+
+/* ---------- step connector ---------- */
+/* Steps joined by a line (the case bar's stages, a card's pathway). Decorative, always
+   aria-hidden: the state is in each step's text. A border, so contrast themes keep it. */
+.step-link {
+  display: block;
+  flex-shrink: 0;
+  align-self: center;
+  height: 0;
+  border-block-start: 2px solid var(--line-strong);
+  border-radius: 1px;
+}
+.step-link-done {
+  border-block-start-color: var(--primary);
+  opacity: 0.45;
 }
 .fmt {
   font: 600 11px var(--font-mono);
@@ -644,8 +706,12 @@ select.select {
   min-height: 32px;
   cursor: pointer;
 }
-.link-btn:hover {
+.link-btn:hover:not(:disabled) {
   color: var(--primary-hover);
+}
+.link-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* ---------- age at assessment (components/AgeField.tsx) ---------- */
