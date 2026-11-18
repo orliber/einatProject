@@ -11,8 +11,10 @@ import type { ClinicRequest } from "../../ipc/generated/ClinicRequest";
 import type { PatientRow } from "../../ipc/generated/PatientRow";
 import type { Visit } from "../../ipc/generated/Visit";
 import type { VisitView } from "../../ipc/generated/VisitView";
+import tokens from "../../styles/tokens.css?raw";
 import { a11yViolations } from "../../test/a11y";
 import { appApi, Host, serve, type Override, type Served } from "../../test/host";
+import calendarCss from "./CalendarTab.css?raw";
 import { ClinicScreen, forgetDiscreet } from "./ClinicScreen";
 
 configure({ asyncUtilTimeout: 5000 });
@@ -468,7 +470,8 @@ describe("moving a visit", () => {
 describe("the day", () => {
   it("shows one day's grid beside its list, without asking again, and the next day is one press away", async () => {
     const { user, asked, view } = await openCalendar();
-    await user.click(screen.getByRole("button", { name: "יום שני 16.11.2026, לתצוגת היום" }));
+    // (jsdom applies no stylesheet: the one letter of a narrow column is in the name here.)
+    await user.click(screen.getByRole("button", { name: /^יום שני (ב׳ )?16\.11\.2026, לתצוגת היום$/ }));
     expect(viewRadio("יום")).toHaveAttribute("aria-checked", "true");
     expect(title()).toBe(MONDAY);
     expect(screen.getAllByRole("region").map((r) => r.getAttribute("aria-label"))).toEqual([MONDAY, null]);
@@ -523,7 +526,8 @@ describe("the day", () => {
     const held = within(row("תמר")).getByRole("button", { name: "התקיימה" });
     expect(held).toHaveClass("btn-primary");
     expect(within(row("תמר")).queryByRole("button", { name: "תזכורת" })).toBeNull();
-    expect(await menuOf(user, row("תמר"))).toEqual(["לכתוב סיכום", "לשלוח תזכורת בוואטסאפ", "לשלוח תזכורת ב-SMS", "לשלוח תזכורת במייל", "להעתיק את התזכורת", "לפתוח את הפגישה"]);
+    // A reminder no longer makes sense once it has begun: none in "⋯" either (D-204 §4).
+    expect(await menuOf(user, row("תמר"))).toEqual(["לכתוב סיכום", "לפתוח את הפגישה"]);
     await user.click(held);
     await waitFor(() => expect(saves()[0]).toMatchObject({ visit: { status: "held" } }));
     await waitFor(() => expect(within(row("תמר")).getByRole("button", { name: "לכתוב סיכום" })).toHaveFocus());
@@ -663,5 +667,161 @@ describe("discreet mode on the calendar", () => {
     const table = await screen.findByRole("table", { name: "נובמבר 2026" });
     expect(within(within(table).getByRole("button", { name: `${SUNDAY}, 4 פגישות` }).closest("td") as HTMLElement).getAllByRole("listitem")[0]).toHaveTextContent("09:00ת.");
     hidden();
+  });
+});
+
+describe("the bar and the height of the calendar", () => {
+  /** The top-level rules of CalendarTab.css for a selector, each from its selector to its closing brace. */
+  const rule = (selector: string) => {
+    const found = calendarCss.split(`\n${selector} {`).slice(1).map((after) => after.slice(0, after.indexOf("}")));
+    expect(found.length, selector).toBeGreaterThan(0);
+    return found.join("\n");
+  };
+
+  it("keeps the “?” beside “פגישה חדשה” in every view: one group at the end of the bar, so they fold together", async () => {
+    const { user } = await openCalendar();
+    for (const [name, help] of [["שבוע", "איך מזיזים פגישה"], ["יום", "איך מזיזים פגישה"], ["חודש", "איך פותחים יום"]] as const) {
+      await user.click(viewRadio(name));
+      const add = screen.getByRole("button", { name: "פגישה חדשה" });
+      const bar = add.closest("header") as HTMLElement;
+      const group = add.parentElement as HTMLElement;
+      // Not loose in the bar, where a narrow window would send one of them to the next line alone.
+      expect(group, name).not.toBe(bar);
+      expect(within(group).getAllByRole("button"), name).toEqual([screen.getByRole("button", { name: help }), add]);
+      expect(bar.lastElementChild, name).toBe(group);
+    }
+  });
+
+  it("a day and a week fill the page under the tabs; the month takes the height it needs", async () => {
+    const { user } = await openCalendar();
+    const cal = () => screen.getByRole("tabpanel").firstElementChild as HTMLElement;
+    expect(cal()).toHaveClass("cal", "cal-fill");
+    await user.click(viewRadio("יום"));
+    expect(cal()).toHaveClass("cal", "cal-fill");
+    await user.click(viewRadio("חודש"));
+    await screen.findByRole("table", { name: "נובמבר 2026" });
+    expect(cal()).toHaveClass("cal");
+    expect(cal()).not.toHaveClass("cal-fill");
+    // By flex: the grid takes what the bar and the legend under it leave. Its floor, for a short
+    // window, starts it at what is left under the tabs, between 300px and 420px (404px on a
+    // laptop at 125%, as before the page was filled); its hours never push the page further.
+    expect(calendarCss).toContain(".clinic-panel:has(> .cal-fill),\n.cal-fill,\n.cal-fill > .cal-stage,\n.cal-fill > .cal-day-view {\n  flex-grow: 1;");
+    expect(rule(".cal-grid")).toContain("flex: 1 0 clamp(300px, calc(100vh / var(--zoom, 1) - 210px), 420px);");
+    expect(rule(".cal-grid")).toContain("max-height: max-content;");
+    expect(rule(".cal-grid")).not.toContain("min-height");
+    // The window's height only after the text size, as the dialogs take it: at 125% a bare
+    // 100vh is 25% taller than the window.
+    const code = calendarCss.replace(/\/\*[\s\S]*?\*\//g, "");
+    expect(code).toContain("100vh / var(--zoom, 1)");
+    expect(code.match(/\d+(vh|dvh|svh|lvh)\b(?! \/ var\(--zoom, 1\))/g)).toBeNull();
+  });
+
+  it("the line under the grid is as tall as the legend; a chosen visit's bar lies over it, so the grid keeps its height", async () => {
+    const { user } = await openCalendar();
+    const foot = () => (legend() as HTMLElement).closest(".cal-foot") as HTMLElement;
+    // No band kept empty for a bar that is not there (it was 54px to 173px, under a 20px legend).
+    expect(rule(".cal-foot")).not.toContain("min-height");
+    expect(calendarCss).not.toContain("@container cal-stage");
+    expect(foot().firstElementChild).toBe(legend());
+    // Chosen: the bar is out of the flow, from the top of the line down, and the legend stays
+    // under it, unseen and unread, to keep the line's height.
+    await user.click(screen.getByRole("button", { name: "הזזת הפגישה של תמר, ראשון 09:00" }));
+    const line = bar().closest(".cal-foot") as HTMLElement;
+    const under = line.firstElementChild as HTMLElement;
+    expect(under).toHaveClass("cal-foot-under");
+    expect(under).toHaveAttribute("aria-hidden", "true");
+    expect(within(under).getAllByRole("listitem", { hidden: true }).map((li) => li.textContent)).toEqual([
+      "פגישת היכרות", "מפגש אבחון", "תצפית", "שיחת משוב", "פגישת טיפול", "זמן שמור",
+    ]);
+    expect(under.nextElementSibling).toBe(bar());
+    expect(legend()).toBeNull();
+    expect(rule(".cal-foot")).toContain("position: relative;");
+    expect(rule(".cal-foot > .cal-move")).toContain("position: absolute;\n  inset-block-start: 0;\n  inset-inline: 0;");
+    expect(rule(".cal-foot-under")).toContain("visibility: hidden;");
+    // Where the day's list is under its grid, the bar takes the legend's place and pushes the list down.
+    expect(calendarCss).toMatch(/@container page \(max-width: 720px\) \{[^@]*\.cal-day-view \.cal-foot > \.cal-move \{\n {4}position: static;[^@]*\.cal-day-view \.cal-foot-under \{\n {4}display: none;/);
+    await user.click(step("סיום"));
+    expect(foot().firstElementChild).toBe(legend());
+    expect(document.querySelector(".cal-foot-under")).toBeNull();
+  });
+
+  it("a narrow column never cuts the date: “היום” steps back first, then the weekday is one letter", async () => {
+    const { user } = await openCalendar();
+    // Each head has its weekday, its weekday in one letter (seen only in a narrow column) and
+    // its date; the screen reader hears the same name as before.
+    const heads = () => screen.getAllByRole("region").map((r) => r.querySelector(".cal-day-name") as HTMLElement);
+    const parts = (name: HTMLElement) => [".cal-day-weekday", ".cal-day-weekday-short", ".num"].map((s) => name.querySelector(s)?.textContent);
+    expect(heads().map(parts)).toEqual([
+      ["ראשון", "א׳", "15.11"], ["שני", "ב׳", "16.11"], ["שלישי", "ג׳", "17.11"], ["רביעי", "ד׳", "18.11"], ["חמישי", "ה׳", "19.11"], ["שישי", "ו׳", "20.11"],
+    ]);
+    // Wide, the one letter is not shown (display: none, below) and the name is as before; narrow,
+    // the letter she sees is in the name too, so saying what she sees finds it (WCAG 2.5.3).
+    const short = heads().map((name) => name.querySelector<HTMLElement>(".cal-day-weekday-short"));
+    for (const x of short) expect(x).not.toHaveAttribute("aria-hidden");
+    for (const x of short) if (x) x.style.display = "none";
+    expect(screen.getByRole("button", { name: "יום שני 16.11.2026, לתצוגת היום" })).toBe(heads()[1]);
+    for (const x of short) if (x) x.style.display = "";
+    expect(screen.getByRole("button", { name: "יום שני ב׳ 16.11.2026, לתצוגת היום" })).toBe(heads()[1]);
+    await user.click(viewRadio("יום"));
+    expect(parts(heads()[0] as HTMLElement)).toEqual(["ראשון", "א׳", "15.11"]);
+    // The head is measured by itself: under 166px "היום" is said only to a screen reader, under
+    // 124px the weekday is one letter. The weekday may take an ellipsis, never the date.
+    expect(rule(".cal-day-head")).toContain("container: cal-day-head / inline-size;");
+    expect(rule(".cal-day-weekday")).toContain("text-overflow: ellipsis;");
+    expect(rule(".cal-day-weekday-short")).toContain("display: none;");
+    expect(calendarCss).toMatch(/@container cal-day-head \(max-width: 166px\) \{\n {2}\.cal-day-head \.chip \{\n {4}position: absolute;[^}]*clip-path: inset\(50%\);/);
+    expect(calendarCss).toMatch(/@container cal-day-head \(max-width: 124px\) \{[^@]*\.cal-day-weekday \{\n {4}position: absolute;[^}]*clip-path: inset\(50%\);\n {2}\}\n {2}\.cal-day-weekday-short \{\n {4}display: inline;/);
+    expect(calendarCss).not.toMatch(/\.num[^{]*\{[^}]*(overflow|ellipsis)/);
+    // A holiday's name beside it gives way first: the name takes its own width (not a share of
+    // what is left, which would cut the weekday by a fraction of a pixel), and the holiday only
+    // what is left over, down to nothing.
+    expect(rule(".cal-day-head h3")).toMatch(/flex: 0 1 auto;[^}]*margin-inline-end: auto;/);
+    expect(rule(".cal-day-head .cal-holiday")).toMatch(/flex: 1 1 0px;\n\s*min-width: 0;/);
+  });
+
+  it("today's column is tinted in the dark theme too, with its hour lines and its head seen on the tint, and text on it at 4.5:1", () => {
+    // The dark colours as Settings choose them (the same as the computer's: theme.test.ts), and the light ones.
+    const block = (selector: string) => {
+      const at = tokens.indexOf(`${selector} {`);
+      expect(at, selector).toBeGreaterThan(-1);
+      return tokens.slice(at, tokens.indexOf("}", at));
+    };
+    const dark = block(':root[data-theme="dark"]');
+    const light = block(":root,\n.a4,\n.mini-page");
+    const color = (theme: string, name: string) => {
+      const m = new RegExp(`--${name}: (#[0-9a-f]{6});`).exec(theme);
+      expect(m, name).not.toBeNull();
+      return (m as RegExpExecArray)[1] as string;
+    };
+    const luminance = (hex: string) => {
+      const [r, g, b] = [1, 3, 5].map((i) => {
+        const c = parseInt(hex.slice(i, i + 2), 16) / 255;
+        return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+      }) as [number, number, number];
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    };
+    const ratio = (a: string, b: string) => {
+      const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x) as [number, number];
+      return (hi + 0.05) / (lo + 0.05);
+    };
+    const wash = color(dark, "primary-wash");
+    expect(rule(".cal-day-today .cal-day-body")).toContain("background-color: var(--primary-wash);");
+    // 1.09:1 (#1b2a28) could hardly be told from the other days.
+    expect(ratio(wash, color(dark, "surface"))).toBeGreaterThanOrEqual(1.15);
+    expect(ratio(color(dark, "ink"), wash)).toBeGreaterThanOrEqual(4.5);
+    expect(ratio(color(dark, "ink-muted"), wash)).toBeGreaterThanOrEqual(4.5);
+    // Its hour lines are seen on the tint as on the other days (--line was 1.11:1 on it, 1.30:1
+    // on the surface), and its head a step above it, as the tint is above the surface (--primary-soft
+    // was 1.08:1). The light theme keeps --line and --primary-soft, already apart from its tint.
+    expect(rule(".cal-day-today .cal-day-body")).toContain("linear-gradient(to bottom, var(--primary-wash-line, var(--line)) 1px, transparent 1px)");
+    expect(rule(".cal-day-today .cal-day-head")).toContain("background: var(--primary-wash-head, var(--primary-soft));");
+    expect(ratio(color(dark, "primary-wash-line"), wash)).toBeGreaterThanOrEqual(ratio(color(dark, "line"), color(dark, "surface")));
+    const head = color(dark, "primary-wash-head");
+    expect(ratio(head, wash)).toBeGreaterThanOrEqual(1.15);
+    for (const ink of ["ink", "ink-muted", "primary", "warn-ink"]) expect(ratio(color(dark, ink), head), ink).toBeGreaterThanOrEqual(4.5);
+    expect(light).not.toContain("--primary-wash-line");
+    expect(light).not.toContain("--primary-wash-head");
+    expect(ratio(color(light, "line"), color(light, "primary-wash"))).toBeGreaterThanOrEqual(1.15);
+    expect(ratio(color(light, "primary-soft"), color(light, "primary-wash"))).toBeGreaterThanOrEqual(1.1);
   });
 });

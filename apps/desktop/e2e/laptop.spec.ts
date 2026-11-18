@@ -85,6 +85,28 @@ for (const [steps, zoom, width, height] of [[2, "1.25", 1093, 614], [3, "1.4", 1
   });
 }
 
+// D-204: on this laptop the section to write starts below the window, more so with the text
+// one step larger. Opening the case from the list brings it into view, with the keyboard on its
+// heading and its "✦ לנסח את הסעיף" under it, not on a heading out of sight.
+for (const [steps, zoom] of [[0, "1"], [2, "1.25"]] as const) {
+  test(`a case opened from the list shows the section in focus, with the keyboard on its heading (text at ${zoom}×)`, async ({ page }) => {
+    await unlock(page, PAGE);
+    for (let i = 0; i < steps; i++) await page.keyboard.press("Control+Equal");
+    await expect(page.locator("html")).toHaveCSS("zoom", zoom);
+    await page.getByRole("button", { name: /בתיק של נועם$/ }).press("Enter");
+    const section = page.locator(".a4-section.is-focus");
+    const heading = section.locator(".a4-heading");
+    await expect(heading).toBeFocused();
+    await expect(heading).toBeInViewport({ ratio: 1 });
+    // Whole too, with room under it (scroll-margin-block-end), not on the window's edge.
+    const draft = section.getByRole("button", { name: "✦ לנסח את הסעיף" });
+    await expect(draft).toBeInViewport({ ratio: 1 });
+    const box = await draft.boundingBox();
+    expect((box?.y ?? 0) + (box?.height ?? 0)).toBeLessThanOrEqual(614 - 8);
+    await page.keyboard.press("Control+Digit0");
+  });
+}
+
 test("with larger text, a dialog keeps its close button and its foot on screen", async ({ page }) => {
   await unlock(page, PAGE);
   // Ctrl + twice: 110 %, then 125 %.

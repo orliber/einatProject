@@ -64,6 +64,29 @@ describe("“מה דורש אותי” by topic", () => {
     expect(toggle("חוב פתוח: 5").querySelector(".clinic-need-count")).toHaveClass("chip-warn");
   });
 
+  it("a toggle's name is one piece of text, “פגישה שלא סומנה: 2”, so no browser puts a space before the colon", () => {
+    show(ALL);
+    // What a screen reader is given, piece by piece: the text outside aria-hidden. Chromium joins
+    // two pieces in separate boxes with a space ("פגישה שלא סומנה : 2"), and a visually hidden
+    // piece is a box of its own; one piece leaves nothing to join.
+    const pieces = (el: Element) => {
+      const out: string[] = [];
+      const walk = (node: Node) => {
+        if (node instanceof Element && node.getAttribute("aria-hidden") === "true") return;
+        if (node.nodeType === Node.TEXT_NODE && (node.textContent ?? "").trim() !== "") out.push(node.textContent ?? "");
+        node.childNodes.forEach(walk);
+      };
+      walk(el);
+      return out;
+    };
+    expect(toggles().map(pieces)).toEqual([["פגישה שלא סומנה: 2"], ["פגישה בלי סיכום: 1"], ["שיחת משוב קרובה: 1"], ["חוב פתוח: 5"], ["המתנה ארוכה: 1"]]);
+    for (const t of toggles()) expect(t).toHaveAccessibleName(pieces(t)[0]);
+    // The eye still sees the count and the label, once each.
+    const first = toggle("פגישה שלא סומנה: 2");
+    expect(first.querySelector(".clinic-need-count")).toHaveTextContent(/^2$/);
+    expect(within(first).getByText("פגישה שלא סומנה")).not.toHaveClass("visually-hidden");
+  });
+
   it("the first toggle is open and the others are folded", () => {
     show(ALL);
     expect(toggles().map((t) => t.getAttribute("aria-expanded"))).toEqual(["true", "false", "false", "false", "false"]);

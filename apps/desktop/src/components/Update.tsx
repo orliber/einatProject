@@ -203,7 +203,9 @@ export function StatusChip({ demo }: { demo: boolean }) {
       </span>
     );
   }
-  const long = demo ? (ready ? "הדגמה · עדכון מוכן" : "הדגמה · יש עדכון") : (ready ? "גרסה חדשה מוכנה" : "יש גרסה חדשה");
+  // The short words are always within the long ones (the button's name), so what she sees is
+  // what a voice command or a screen reader hears (WCAG 2.5.3).
+  const long = demo ? (ready ? "הדגמה · עדכון מוכן" : "הדגמה · עדכון חדש") : (ready ? "גרסה חדשה מוכנה" : "יש גרסה חדשה");
   const short = demo ? "הדגמה · עדכון" : "גרסה חדשה";
   return (
     <>

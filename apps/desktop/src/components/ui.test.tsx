@@ -1,6 +1,6 @@
 // Shared pieces: filter text is shown as text, errors offer the next step, dialogs trap the
 // keyboard's attention. All names are invented.
-import { useState } from "react";
+import { StrictMode, useState } from "react";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AppContext, type AppApi } from "../App";
@@ -315,6 +315,47 @@ describe("Dialog", () => {
     expect(screen.getByRole("dialog")).toHaveFocus();
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("dialog")).toBeNull();
+    expect(opener).toHaveFocus();
+  });
+
+  it("with a field that takes the focus as it opens, focus still goes back to the opener (F5-r)", async () => {
+    const user = userEvent.setup();
+    function Host() {
+      const [open, setOpen] = useState(false);
+      return (
+        <>
+          <button type="button" onClick={() => setOpen(true)}>שינוי שם</button>
+          {open && <Dialog title="שם חדש" onClose={() => setOpen(false)}><input aria-label="השם" autoFocus /></Dialog>}
+        </>
+      );
+    }
+    render(<Host />);
+    const opener = screen.getByRole("button", { name: "שינוי שם" });
+    opener.focus();
+    await user.keyboard("{Enter}");
+    expect(screen.getByLabelText("השם")).toHaveFocus();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(opener).toHaveFocus();
+  });
+
+  it("in StrictMode a field marked autoFocus keeps the focus, and closing returns it to the opener", async () => {
+    const user = userEvent.setup();
+    function Host() {
+      const [open, setOpen] = useState(false);
+      return (
+        <>
+          <button type="button" onClick={() => setOpen(true)}>פתיחה</button>
+          {open && <Dialog title="d" onClose={() => setOpen(false)}><input aria-label="השם" autoFocus /></Dialog>}
+        </>
+      );
+    }
+    render(<StrictMode><Host /></StrictMode>);
+    const opener = screen.getByRole("button", { name: "פתיחה" });
+    opener.focus();
+    await user.keyboard("{Enter}");
+    expect(screen.getByLabelText("השם")).toHaveFocus();
+    await user.keyboard("{Escape}");
     expect(opener).toHaveFocus();
   });
 

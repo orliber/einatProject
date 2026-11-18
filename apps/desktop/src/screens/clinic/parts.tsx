@@ -394,6 +394,7 @@ export function AlertGroups({ alerts, onVisit, holdOf, empty }: {
     <div className="clinic-need-groups">
       {groups.map((g, i) => {
         const n = g.alerts.length;
+        const label = ALERT_KIND_LABEL[g.kind] ?? "דורש תשומת לב";
         const open = folds[g.kind] ?? i === 0;
         const bodyId = `${base}-${g.kind}`;
         return (
@@ -403,8 +404,12 @@ export function AlertGroups({ alerts, onVisit, holdOf, empty }: {
                 ref={(el) => { if (el) toggles.current.set(g.kind, el); else toggles.current.delete(g.kind); }}
                 onClick={() => setFolds((f) => ({ ...f, [g.kind]: !open }))}>
                 <span className={UPCOMING.includes(g.kind) ? "chip clinic-need-count" : "chip chip-warn clinic-need-count"} aria-hidden="true">{n}</span>
-                <span className="grow">{ALERT_KIND_LABEL[g.kind] ?? "דורש תשומת לב"}</span>
-                <span className="visually-hidden">: {n}</span>
+                {/* The name is one piece of text, "פגישה שלא סומנה: 2": a browser joins pieces in
+                    separate boxes with a space ("… : 2"), and a hidden piece is a box of its own. */}
+                <span className="grow">
+                  <span aria-hidden="true">{label}</span>
+                  <span className="visually-hidden">{`${label}: ${n}`}</span>
+                </span>
                 <span className="clinic-need-chevron"><ChevronIcon /></span>
               </button>
             </h3>
@@ -452,6 +457,9 @@ export function VisitRow({ view, actions, onOpen, showDate = false, quietPlanned
   const span = formatSpan(v.start, v.minutes);
   const who = v.kind === "block" ? (v.title || VISIT_KIND_LABEL.block) : shown(view.patient_name);
   const time = <span className="num clinic-visit-time" dir="ltr">{span}</span>;
+  // A space between the date and the hours: they stand one above the other, and the text she
+  // sees ("15.11.2026 09:00–09:50") is the start of the button's name, not "15.11.202609:00".
+  const date = showDate && <><span>{formatDate(v.date)}</span>{" "}</>;
   const openName = `${showDate ? `${formatDate(v.date)} ` : ""}${span}, פתיחת הפגישה של ${who}`;
   // What happened, in her words, may say more than a list should while a family looks on: in
   // discreet mode it stays in the visit's dialog.
@@ -459,8 +467,8 @@ export function VisitRow({ view, actions, onOpen, showDate = false, quietPlanned
   return (
     <li className={v.status === "cancelled" ? "clinic-visit clinic-visit-off" : "clinic-visit"} data-status={v.status} data-kind={v.kind}>
       {onOpen
-        ? <button type="button" className="clinic-visit-when clinic-visit-open" aria-label={openName} onClick={onOpen}>{showDate && <span>{formatDate(v.date)}</span>}{time}</button>
-        : <span className="clinic-visit-when">{showDate && <span>{formatDate(v.date)}</span>}{time}</span>}
+        ? <button type="button" className="clinic-visit-when clinic-visit-open" aria-label={openName} onClick={onOpen}>{date}{time}</button>
+        : <span className="clinic-visit-when">{date}{time}</span>}
       <div className="grow stack clinic-visit-body">
         <span className="row clinic-visit-head">
           {v.kind === "block"

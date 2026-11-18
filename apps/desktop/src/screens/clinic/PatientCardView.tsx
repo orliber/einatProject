@@ -45,8 +45,11 @@ import { PathwayDialog } from "./PathwayDialog";
 import { PatientDialog } from "./PatientDialog";
 import { VisitDialog } from "./VisitDialog";
 import { SendMenu } from "./SendMenu";
-import { VisitActions } from "./VisitActions";
+import { focusLost, VisitActions } from "./VisitActions";
 import "./PatientCardView.css";
+
+/** The visits that were, shown a page at a time. */
+const PAST_PAGE = 8;
 
 /** What is open over the card: one dialog at a time. */
 type Open =
@@ -159,7 +162,32 @@ function CardBody({ card, today, now, back, onBack }: { card: PatientCard; today
     [card.visits, today],
   );
   const earlier = useMemo(() => card.visits.filter((v) => !(v.visit.status === "planned" && v.visit.date >= today)), [card.visits, today]);
-  const past = usePaged(earlier, 8);
+  const past = usePaged(earlier, PAST_PAGE);
+
+  // A visit marked here moves to the other list ("פגישות שהיו", and back on the vault's
+  // refusal), where its row is a new one: the focus on the button she pressed would fall to the
+  // page (WCAG 2.4.3). The new row takes it (`follow` of `VisitActions`) until she presses a key
+  // or clicks; on another page of the visits that were, that page opens first.
+  const [marked, setMarked] = useState<string | null>(null);
+  useEffect(() => {
+    if (marked === null) return;
+    const done = () => setMarked(null);
+    document.addEventListener("keydown", done, true);
+    document.addEventListener("pointerdown", done, true);
+    return () => {
+      document.removeEventListener("keydown", done, true);
+      document.removeEventListener("pointerdown", done, true);
+    };
+  }, [marked]);
+  useEffect(() => {
+    if (marked === null || !focusLost()) return;
+    const at = earlier.findIndex((v) => v.visit.id === marked);
+    if (at >= 0 && Math.floor(at / PAST_PAGE) !== past.page) past.setPage(Math.floor(at / PAST_PAGE));
+  });
+  const markVisit = (visit: Visit, status: VisitStatus) => {
+    setMarked(visit.id);
+    void mark({ visit, status });
+  };
 
   /** Copies a phone number through the protected clipboard only (it identifies the family). */
   async function copyPhone(phone: string) {
@@ -199,9 +227,9 @@ function CardBody({ card, today, now, back, onBack }: { card: PatientCard; today
     const v = view.visit;
     if (v.date > today || v.status === "cancelled") return null;
     return (
-      <VisitActions view={view} patientId={p.id} now={now} reminders={false} onCard
-        onHold={(x) => void mark({ visit: x, status: "held" })}
-        onNoShow={(x) => void mark({ visit: x, status: "no_show" })}
+      <VisitActions view={view} patientId={p.id} now={now} reminders={false} onCard follow={marked === v.id}
+        onHold={(x) => markVisit(x, "held")}
+        onNoShow={(x) => markVisit(x, "no_show")}
         onNote={(x) => setOpen({ kind: "note", visit: x })}
         onOpen={() => setOpen({ kind: "visit", view })} />
     );
@@ -230,7 +258,9 @@ function CardBody({ card, today, now, back, onBack }: { card: PatientCard; today
     <div className="stack pcard">
       {back}
 
-      <header className="card pcard-head">
+      {/* A plain box and not a <header>: the dialogs of the case cell open inside it, with a
+          header and a footer of their own, which must not land in a banner. */}
+      <div className="card pcard-head">
         <div className="pcard-head-top">
           <div className="pcard-who">
             <h2 className="pcard-name"><PatientName name={p.name} strong /></h2>
@@ -285,7 +315,7 @@ function CardBody({ card, today, now, back, onBack }: { card: PatientCard; today
           <CaseBox patient={p} link={card.case} />
           {p.notes && <AboutCell wide label="הערות" text={p.notes} hiddenText="מוסתרות במצב דיסקרטי" />}
         </div>
-      </header>
+      </div>
 
       <Section title="מסלול האבחון" aside={p.status === "closed" ? undefined : (
         <div className="row pcard-plan">
@@ -586,7 +616,7 @@ function NoteItem({ note, visit, caseCode, onEdit }: { note: SessionNote; visit:
         <span className="chip chip-sand">{visit ? VISIT_KIND_LABEL[visit.kind] : "שיחה, לא צמודה לפגישה"}</span>
         {note.case_input_id !== null && <span className="chip chip-ok">{caseCode ? `הועבר לתיק ${caseCode}` : "הועבר לתיק"}</span>}
         <span className="grow" />
-        <button type="button" className="btn btn-small" aria-label={`עריכת הסיכום מיום ${when}`} onClick={onEdit}>עריכה</button>
+        <button type="button" className="btn btn-small" aria-label={`עריכה של הסיכום מיום ${when}`} onClick={onEdit}>עריכה</button>
       </div>
 
       {record === "" ? <p className="muted clinic-quiet">לא נכתבה רשומה.</p> : discreet ? <p className="muted small">הרשומה מוסתרת במצב דיסקרטי.</p> : (
@@ -888,7 +918,7 @@ function TasksBox({ card, today, onTick }: { card: PatientCard; today: string; o
                       {t.note && !discreet && <span>{t.note}</span>}
                     </span>
                   </div>
-                  <button type="button" className="btn btn-small" aria-label={`עריכת המעקב: ${t.title}`} onClick={() => setEditing(t)}>עריכה</button>
+                  <button type="button" className="btn btn-small" aria-label={`עריכה של המעקב: ${t.title}`} onClick={() => setEditing(t)}>עריכה</button>
                 </li>
               );
             })}

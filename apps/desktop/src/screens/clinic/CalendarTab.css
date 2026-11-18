@@ -28,6 +28,32 @@
   margin: 0;
   font-size: var(--text-md);
 }
+/* The "?" and the new visit, at the end of the bar: one group that never parts, so when the bar
+   folds in a narrow window they go down together, still at the end (D-204). */
+.cal-actions {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: var(--space-3);
+  margin-inline-start: auto;
+}
+
+/* ---------- the height of a day and of a week ---------- */
+/* They fill the page under the tabs (D-204): the tab's panel, the calendar and the grid's stage
+   grow to the window's height, and the grid takes what is left once the bar (one line or two)
+   and the legend under the grid have theirs. So the hours reach down to the legend and the page
+   itself does not scroll. A short window keeps the grid's floor (.cal-grid) and scrolls the
+   page instead. The month takes the height it needs. */
+.clinic-panel:has(> .cal-fill),
+.cal-fill,
+.cal-fill > .cal-stage,
+.cal-fill > .cal-day-view {
+  flex-grow: 1;
+}
+/* The day's grid beside its list: as tall as the page allows, or as the list when it is longer. */
+.cal-day-view > .cal-stage {
+  align-self: stretch;
+}
 
 /* ---------- under the grid: the chosen visit's bar, or the legend ---------- */
 .cal-stage {
@@ -36,17 +62,30 @@
   gap: var(--space-3);
   min-width: 0;
 }
-/* Its height is kept whatever it holds (the bar of the visit chosen for moving, the legend, or
-   how to start on an empty page), so choosing a visit never moves anything under the pointer.
-   A plain box, never a region. */
+/* The line under the grid is as tall as what it says: the legend, or how to start on an empty
+   page. The bar of a visit chosen for moving lies over it, from its top down, out of the flow:
+   so choosing a visit never changes the grid's height nor moves anything under the pointer. A
+   bar taller than the legend (it folds in the day view, and in a week under about 1000px) reaches into the page's margin, and
+   further down the page scrolls. The legend stays under the bar, unseen and unread, to keep the
+   line's height (CalendarTab.tsx). A plain box, never a region. */
+/* With a day or a week on the page, room for the page's scrollbar is kept even when there is
+   none: a bar that reaches below the window adds one, and on Windows a scrollbar takes width,
+   which would move the visit under the pointer sideways (D-204 §5). */
+html:has(.cal-fill) {
+  scrollbar-gutter: stable;
+}
 .cal-foot {
-  min-height: 54px;
+  position: relative;
   display: flex;
   flex-direction: column;
-  justify-content: flex-start;
 }
-.cal-foot-month {
-  min-height: 0;
+.cal-foot > .cal-move {
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline: 0;
+}
+.cal-foot-under {
+  visibility: hidden;
 }
 .cal-move {
   margin: 0;
@@ -155,20 +194,18 @@
 /* ---------- the time grid ---------- */
 /* The grid scrolls inside itself, both ways: the page never scrolls sideways, and the names
    of the days and the hours stay in sight. */
-/* Its height. In a tall window: what is left around it, so the page itself does not scroll
-   (measured at 1280x900, D-204). About 415px go to the top bar (64), the tabs (46), the page's
-   padding (40 above, 40 below), the calendar's bar (44, or 100 when it wraps in a narrow
-   window), and the line under the grid with its gaps (12 + 54 + 12, or 98 when the bar of a
-   chosen visit wraps): even then, choosing a visit never brings a scrollbar that would move the
-   grid. In a short window that would leave only the 300px floor, four and a half hours on a
-   laptop at 125% (1093x614). So there the grid takes what is left under the tabs (about 210px
-   once the page is scrolled to them: the tabs, the bar, and the line under the grid), up to
-   420px: 404px at 614px high, 08:00 to 14:00 in sight with the tabs, the bar and the legend.
-   Never under 300px (850x480). */
+/* Its height: what the stage leaves it (above), and never more than its hours. Its floor, in a
+   short window: what is left under the tabs once the page is scrolled to them (the tabs, the
+   bar on one line or two, and the legend take about 210px), up to 420px and never under 300px:
+   404px at 1093x614 (a laptop at 125%), 08:00 to 14:00 in sight with the bar and the legend;
+   300px at 850x480. The window's height is taken after the text size (100vh / --zoom, as in the
+   dialogs), so the floor holds at every text size. Its hours do not push the page down: the
+   floor is where it starts, not its content. */
 .cal-grid {
   display: grid;
+  flex: 1 0 clamp(300px, calc(100vh / var(--zoom, 1) - 210px), 420px);
+  max-height: max-content;
   overflow: auto;
-  max-height: clamp(300px, max(calc(100vh - 415px), min(calc(100vh - 210px), 420px)), 960px);
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-lg);
   background: var(--surface);
@@ -220,9 +257,13 @@
   padding: 0 var(--space-2);
 }
 .cal-day-head h3 {
-  flex: 1;
+  /* Its own width, not a share of what is left: a holiday's name beside it takes only what is
+     left over (below), so it gives way before the weekday or the date, even by a fraction of a
+     pixel (an ellipsis shows for any overflow). The margin keeps "+" at the end. */
+  flex: 0 1 auto;
   min-width: 0;
   margin: 0;
+  margin-inline-end: auto;
   font-size: var(--text-base);
 }
 .cal-day-name {
@@ -246,14 +287,64 @@ button.cal-day-name {
 button.cal-day-name:hover {
   color: var(--primary);
 }
+/* A narrow column (a narrow window, or a long week) never cuts the date (D-204). First "היום"
+   steps back (said only to a screen reader; the tint and the line show it), then the weekday is
+   one letter ("ג׳ 17.11"). Measured inside the head's padding: the longest name, "היום" and the
+   "+" take 162px, the name and the "+" 120px (a few px more here, for another font's widths);
+   the narrowest column (112px) holds "ג׳ 17.11" and the "+" with 8px to spare. The weekday,
+   never the date, takes an ellipsis if anything is still short. The query is on the head
+   itself, so the column around the visits stays as it was. */
+.cal-day-head {
+  container: cal-day-head / inline-size;
+}
+.cal-day-weekday {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cal-day-weekday-short {
+  display: none;
+}
+@container cal-day-head (max-width: 166px) {
+  .cal-day-head .chip {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+}
+@container cal-day-head (max-width: 124px) {
+  .cal-day-name {
+    gap: var(--space-1);
+    padding-inline: 0;
+  }
+  .cal-day-weekday {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+  .cal-day-weekday-short {
+    display: inline;
+  }
+}
 .cal-day-add.cal-day-add {
   width: 32px;
   height: 32px;
   min-height: 32px;
 }
+/* Today's head: a step above its column's tint (in dark, its own token: --primary-soft is hardly
+   seen over --primary-wash there). */
 .cal-day-today .cal-day-head {
-  background: var(--primary-soft);
+  background: var(--primary-wash-head, var(--primary-soft));
   box-shadow: inset 0 -3px 0 var(--primary);
+}
+/* Its "היום" is the word on the head's own tint, not a pill of another one. */
+.cal-day-today .cal-day-head .chip {
+  background: transparent;
 }
 /* Each hour a line, each half hour a fainter one. 56px is HOUR_PX of calendarLayout.ts. */
 .cal-day-body {
@@ -263,9 +354,11 @@ button.cal-day-name:hover {
   background-image: linear-gradient(to bottom, var(--line) 1px, transparent 1px), linear-gradient(to bottom, var(--sand) 1px, transparent 1px);
   background-size: 100% 56px, 100% 28px;
 }
-/* Today's column is tinted; the closed day's stripes, below, win over it (D-196). */
+/* Today's column is tinted; in dark its hour lines are a step stronger on the tint, so they show
+   as on the other days. The closed day's stripes, below, win over it (D-196). */
 .cal-day-today .cal-day-body {
   background-color: var(--primary-wash);
+  background-image: linear-gradient(to bottom, var(--primary-wash-line, var(--line)) 1px, transparent 1px), linear-gradient(to bottom, var(--sand) 1px, transparent 1px);
 }
 .cal-day-visits {
   list-style: none;
@@ -434,6 +527,15 @@ button.cal-day-name:hover {
 @container page (max-width: 720px) {
   .cal-day-view {
     grid-template-columns: minmax(0, 1fr);
+    align-content: start;
+  }
+  /* The day's list is under its grid now: the bar takes the legend's place in the flow and
+     pushes the list down, instead of lying over it. The grid keeps its floor above. */
+  .cal-day-view .cal-foot > .cal-move {
+    position: static;
+  }
+  .cal-day-view .cal-foot-under {
+    display: none;
   }
 }
 
@@ -543,7 +645,14 @@ button.cal-day-name:hover {
   color: var(--ink-muted);
 }
 
-/* Israel's holidays (D-196): the name in the day's head; a day the clinic is closed is shaded. */
+/* Israel's holidays (D-196): the name in the day's head; a day the clinic is closed is shaded.
+   In a narrow head the holiday's name is the first to give way (its full name stays in its
+   title, and the closed day's shade still shows it): never the weekday or the date (D-204). */
+.cal-day-head .cal-holiday {
+  flex: 1 1 0px;
+  min-width: 0;
+  text-align: end;
+}
 .cal-holiday {
   font-size: var(--text-xs, 12px);
   color: var(--ink-muted);

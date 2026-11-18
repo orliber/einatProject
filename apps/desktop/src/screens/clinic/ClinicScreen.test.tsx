@@ -84,7 +84,6 @@ async function menuOf(user: ReturnType<typeof userEvent.setup>, row: HTMLElement
 /** The afternoon of the board (ClinicToday.dc.html): תמר's and איתי's visits are over and not
  *  marked, her own time ended at 15:00, and מאיה's is at 16:00. */
 const afternoon = () => vi.setSystemTime(new Date(2026, 10, 15, 15, 12));
-const REMINDERS = ["לשלוח תזכורת בוואטסאפ", "לשלוח תזכורת ב-SMS", "לשלוח תזכורת במייל", "להעתיק את התזכורת"];
 const NAMES = ["תמר", "איתי", "מאיה", "נועם", "יובל", "עומר", "יעל"];
 
 describe("the clinic's page", () => {
@@ -344,8 +343,9 @@ describe("the front page by the time (D-204)", () => {
     expect(own.querySelector(".clinic-visit-actions")).toBeNull();
     expect(own).toHaveTextContent("זמן שמור");
 
-    // What is not the step waits in "⋯", always ending with the visit itself.
-    expect(await menuOf(user, rowOf("תמר"))).toEqual(["לכתוב סיכום", ...REMINDERS, "לפתוח את הפגישה"]);
+    // What is not the step waits in "⋯", always ending with the visit itself; a visit that has
+    // begun offers no reminder there either.
+    expect(await menuOf(user, rowOf("תמר"))).toEqual(["לכתוב סיכום", "לפתוח את הפגישה"]);
     expect(await menuOf(user, rowOf("מאיה"))).toEqual(["התקיימה", "לכתוב סיכום", "לפתוח את הפגישה"]);
     await fromMenu(user, rowOf("מאיה"), "לפתוח את הפגישה");
     const dialog = await screen.findByRole("dialog", { name: "פרטי הפגישה" });
@@ -392,7 +392,7 @@ describe("the front page by the time (D-204)", () => {
     expect(within(todays()).getAllByRole("listitem").map((li) => within(li).queryAllByRole("button")[0]?.textContent ?? li.textContent))
       .toEqual(["09:00–10:30", "11:30–12:30", "עכשיו 12:45", "13:00–15:00", "16:00–16:50"]);
     expect(within(todays()).getByText("4 בלוח · 2 אחרי עכשיו")).toBeInTheDocument();
-    expect(rowOf("מאיה")).toHaveTextContent("בעוד 3:15 שעות");
+    expect(rowOf("מאיה")).toHaveTextContent("בעוד 3 שעות ו-15 דקות");
     expect(within(todays()).getAllByRole("listitem").filter((li) => li.textContent?.includes("בעוד"))).toEqual([rowOf("מאיה")]);
   });
 
@@ -424,6 +424,24 @@ describe("the front page by the time (D-204)", () => {
     const tamar = within(needs).getByRole("button", { name: "תמר" }).closest("li") as HTMLElement;
     await user.click(within(tamar).getByRole("button", { name: "לכתוב סיכום" }));
     expect(await screen.findByRole("dialog", { name: "סיכום מפגש אבחון" })).toHaveTextContent("תמר · 15.11.2026, 09:00");
+  });
+
+  it("a note saved from “לכתוב סיכום” takes that step off the row, and the focus goes to the row's “⋯”, not to the page", async () => {
+    afternoon();
+    const { user } = await openClinic();
+    await within(todays()).findByRole("button", { name: "תמר" });
+    // Marked held, the same button asks for the note; Enter opens it.
+    const step = within(rowOf("תמר")).getByRole("button", { name: "התקיימה" });
+    await user.click(step);
+    expect(step).toHaveAccessibleName("לכתוב סיכום");
+    await user.keyboard("{Enter}");
+    const dialog = await screen.findByRole("dialog", { name: "סיכום מפגש אבחון" });
+    await user.type(await within(dialog).findByLabelText("רשומה"), "שיתפה פעולה לאורך המפגש.");
+    await user.click(within(dialog).getByRole("button", { name: "שמירה" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await within(rowOf("תמר")).findByText("יש סיכום");
+    expect(within(rowOf("תמר")).queryByRole("button", { name: "לכתוב סיכום" })).toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(moreOf(rowOf("תמר"))));
   });
 
   it("groups “מה דורש אותי” by topic, the first open, with “N דברים” beside the title; passes the accessibility check open and closed", async () => {
@@ -517,7 +535,7 @@ describe("the front page by the time (D-204)", () => {
     expect(within(rowOf("איתי")).getByRole("button", { name: "התקיימה" })).toBeInTheDocument();
   });
 
-  it("in discreet mode every “⋯” is named by initials, no aria-label or title carries a full name, and a WhatsApp reminder from “⋯” toasts initials", async () => {
+  it("in discreet mode every “⋯” is named by initials, no aria-label or title carries a full name, and a WhatsApp reminder from “תזכורת” toasts initials", async () => {
     afternoon();
     const { user, notes, calls } = await openClinic();
     await within(todays()).findByRole("button", { name: "תמר" });
@@ -530,9 +548,11 @@ describe("the front page by the time (D-204)", () => {
     for (const name of NAMES) expect(named, name).not.toContain(name);
     for (const name of NAMES) expect(screen.getByRole("tabpanel"), name).not.toHaveTextContent(name);
 
-    await fromMenu(user, rowOf("ת."), "לשלוח תזכורת בוואטסאפ");
+    // מאיה's visit is still ahead: "תזכורת" is its step.
+    await user.click(within(rowOf("מ.")).getByRole("button", { name: "תזכורת" }));
+    await user.click(await screen.findByRole("menuitem", { name: "לשלוח בוואטסאפ" }));
     await waitFor(() => expect(notes).toHaveLength(1));
-    expect(notes[0]).toBe("וואטסאפ נפתח מול י. התזכורת בלוח המוגן: מדביקים (Ctrl+V) ושולחים. יימחק מהלוח בעוד דקה.");
+    expect(notes[0]).toBe("וואטסאפ נפתח מול ה. התזכורת בלוח המוגן: מדביקים (Ctrl+V) ושולחים. יימחק מהלוח בעוד דקה.");
     expect(calls.filter((c) => c.cmd === "send_message").map((c) => c.args)).toEqual([expect.objectContaining({ kind: "reminder", channel: "whatsapp", contact: null })]);
     expect(calls.some((c) => c.cmd === "copy_secret")).toBe(false);
   });

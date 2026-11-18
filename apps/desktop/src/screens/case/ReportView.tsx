@@ -77,17 +77,24 @@ export function ReportView({ api, current, focus, onPick }: {
     return () => clearTimeout(t);
   }, [focus]);
 
-  // Arriving at the page with a draft waiting: the keyboard is on it, so Enter approves it.
+  // Arriving at the page, the section in focus comes into view (nothing moves when it already
+  // is), with the keyboard on it: with a draft waiting, on its heading, so Enter approves it.
+  // Any other section's heading took the keyboard itself when nothing else had it (D-204, the
+  // brief folded), and that heading must not be below the window either. It waits for her
+  // wishes to be read, so the section is measured with its own row ("✦ לנסח את הסעיף", or the
+  // box), not with the short line in its place before them, and comes into view whole.
+  const briefs = useQuery({ queryKey: ["draftBriefs"], queryFn: ipc.draftBriefs, staleTime: 60_000 });
+  const briefsRead = briefs.data !== undefined || briefs.isError;
   const arrived = useRef(false);
   useEffect(() => {
-    if (arrived.current || focus?.move || !current) return;
+    if (arrived.current || focus?.move || !current || !briefsRead) return;
     arrived.current = true;
-    const s = detail.sections.find((x) => x.key === current);
-    if (!s?.paragraphs.some((p) => p.status === "proposed")) return;
     const el = document.getElementById(`sec-${current}`);
-    el?.scrollIntoView({ block: "nearest" });
-    el?.querySelector<HTMLElement>(".a4-heading")?.focus({ preventScroll: true });
-  }, [current, detail.sections, focus]);
+    if (!el) return;
+    el.scrollIntoView({ block: "nearest" });
+    const s = detail.sections.find((x) => x.key === current);
+    if (s?.paragraphs.some((p) => p.status === "proposed")) el.querySelector<HTMLElement>(".a4-heading")?.focus({ preventScroll: true });
+  }, [current, detail.sections, focus, briefsRead]);
 
   const child = detail.identities.find((i) => i.role === "child")?.value ?? "";
   const childLabel = detail.meta.child_gender === "female" ? "שם הילדה" : detail.meta.child_gender === "male" ? "שם הילד" : "שם הילד/ה";
@@ -304,6 +311,14 @@ function A4Section({ api, section: s, focused, onPick, onNext }: {
   // A wish kept for the section, or one she wrote before, opens it by itself: a wish is never
   // sent unseen, nor dropped without her seeing it.
   const [briefAsked, setBriefAsked] = useState(false);
+  /** What was in the box when it last went (folded by "ביטול" or Escape, the section left, her
+   *  own writing opened): not sent and not kept anywhere, only here, and in the box again when
+   *  it opens, ahead of an older wish (sent or kept) and also when she emptied it. null: the box
+   *  has not gone since the last send, so it opens with the wish as the vault has it. The folded
+   *  "✦ לנסח את הסעיף" never sends it (a wish is never sent unseen). */
+  const [briefDraft, setBriefDraft] = useState<string | null>(null);
+  /** Sent from the box: its text went with the request, so none of it comes back. */
+  const briefSent = useRef(false);
   const briefToggle = useRef<HTMLButtonElement>(null);
   /** Folded back by "ביטול" or Escape: the keyboard goes back to the line that opened it. */
   const backToToggle = useRef(false);
@@ -333,6 +348,20 @@ function A4Section({ api, section: s, focused, onPick, onNext }: {
   const mine = s.mode === "self";
   const canWrite = !mine && (s.source_count > 0 || !s.sortable);
   const busy = preparing || job !== undefined;
+  const waiting = pending.length > 0;
+  // D-204: with the brief folded, the section in focus may have nothing that takes the keyboard:
+  // opened from the cases list, its "✦ לנסח" line pressed (it goes away under the click), or
+  // "✦ לנסח את הסעיף" pressed (it goes away while the request is prepared, and the draft comes
+  // in its place). Then the keyboard lands on its heading instead of being lost on the page, so
+  // Enter goes on from there: on to "✦ לנסח את הסעיף", or, once the draft is in, approving it.
+  // Only when it is nowhere: where she is typing or reading keeps it, and the box is not focused
+  // from here. Nothing scrolls for it (the page brings a section into view when it arrives).
+  useEffect(() => {
+    if (!focused) return;
+    const at = document.activeElement;
+    if (at && at !== document.body && at !== document.documentElement && at.isConnected) return;
+    heading.current?.focus({ preventScroll: true });
+  }, [focused, busy, waiting]);
   const sources = detail.routing
     .filter((r) => r.feeds.includes(s.key))
     .map((r) => detail.inputs.find((i) => i.id === r.input_id))
@@ -383,6 +412,8 @@ function A4Section({ api, section: s, focused, onPick, onNext }: {
    *  if it fails, the draft is still written. */
   function sendBrief(wish: string, typed: string, keep: boolean) {
     setBrief(typed);
+    setBriefDraft(null);
+    briefSent.current = true;
     void ipc.keepDraftBrief(s.key, typed, keep).then((b) => qc.setQueryData(["draftBriefs"], b), () => undefined);
     void write(draftRequest(s.key, wish));
   }
@@ -616,6 +647,18 @@ function A4Section({ api, section: s, focused, onPick, onNext }: {
   ];
   const empty = s.paragraphs.length === 0;
   const state = mine ? "mine" : pending.length > 0 ? "draft" : empty ? "empty" : "approved";
+  // The box before the first draft is open (the branch for a new section, below).
+  const briefOpen = empty && !job && !editing && !preparing && !mine && focused && canWrite && !briefWaiting && briefShown;
+  // Whenever the box goes, for any reason, what is in it then is what it opens with next time:
+  // always her newest text, also when she emptied it, and nothing once it was sent. Read from
+  // the box as it goes, not on every key, so typing never re-renders the section (F1a).
+  useEffect(() => {
+    if (!briefOpen) return;
+    briefSent.current = false;
+    const box = document.getElementById(`brief-${s.key}`);
+    if (!(box instanceof HTMLTextAreaElement)) return;
+    return () => setBriefDraft(briefSent.current ? null : box.value);
+  }, [briefOpen, s.key]);
 
   return (
     <div id={`sec-${s.key}`} className={`a4-section a4-st-${state}${focused ? " is-focus" : ""}${pending.length ? " has-pending" : ""}`}
@@ -785,12 +828,13 @@ function A4Section({ api, section: s, focused, onPick, onNext }: {
               <BriefBox id={`brief-${s.key}`} title="איך לנסח את הסעיף? (לא חובה)" chips={STYLE_CHIPS} chipsTitle="סגנון"
                 hint="כתבי מה חשוב לך, או בחרי סגנון. בלי כלום הסעיף ינוסח כמו תמיד, מתוך החומרים."
                 placeholder="למשל: להתחיל מהקשר עם הצוות בגן, ובלי מונחים מקצועיים"
-                recent={briefs.data?.recent} initial={keptBrief || brief} keep={keptBrief !== ""}
+                recent={briefs.data?.recent} initial={briefDraft ?? (keptBrief || brief)} keep={keptBrief !== ""}
                 sendLabel="✦ לנסח" busy={busy} autoFocus={briefAsked || s.key !== "diagnoses"}
                 onSend={sendBrief}
                 onCancel={() => {
                   // With a wish the box stays open (its words are hers to see); else it folds
-                  // back, and the keyboard returns to the line that opened it.
+                  // back, and the keyboard returns to the line that opened it. "ביטול" folds,
+                  // it does not erase: what she typed is there when she opens it again.
                   if (hasWish) heading.current?.focus();
                   else {
                     backToToggle.current = true;

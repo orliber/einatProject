@@ -195,17 +195,22 @@ export function Dialog(props: {
   });
   const closable = onClose !== undefined;
   const footer = typeof props.footer === "function" ? props.footer(close ?? (() => undefined)) : props.footer;
+  // What had the keyboard when the dialog was asked for, read while it first renders: by its
+  // effect, a field marked autoFocus inside has already taken it (React applies autoFocus as it
+  // mounts), and that field goes with the dialog (F5-r of 18.11.2026).
+  const [opener] = useState(() => document.activeElement);
   useEffect(() => {
-    // A field marked autoFocus inside has already taken focus (React applies it before effects):
-    // keep it there, so she can type at once. Otherwise the frame takes focus.
+    // A field marked autoFocus inside has already taken focus: keep it there, so she can type
+    // at once. Otherwise the frame takes focus.
     const frame = ref.current;
-    const opener = document.activeElement;
-    if (frame && !frame.contains(opener)) frame.focus();
+    if (frame && !frame.contains(document.activeElement)) frame.focus();
     return () => {
+      // A trial unmount (StrictMode, in development) leaves the frame on the page: not closed.
+      if (frame?.isConnected) return;
       // Focus goes back to whatever opened the dialog, if it is still on the page.
       if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
     };
-  }, []);
+  }, [opener]);
   useEffect(() => {
     const frame = ref.current;
     if (!frame) return;

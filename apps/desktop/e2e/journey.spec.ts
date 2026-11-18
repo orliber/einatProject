@@ -146,6 +146,14 @@ test("the report page writes and approves the section in focus with the keyboard
   await expect(report).toBeVisible();
   const section = report.locator(".a4-section.is-focus");
   await expect(section).toHaveCount(1);
+  // Opened from the cases list with the brief folded, the keyboard is on the heading of the
+  // section in focus, not lost on the page; and what it will be written from is shown, with the
+  // pointer away and nothing focused in it (D-204).
+  const heading = page.locator(".a4-section.is-focus .a4-heading");
+  await expect(heading).toBeFocused();
+  await page.mouse.move(0, 0);
+  await heading.blur();
+  await expect(section.locator(".a4-sources")).toHaveCSS("opacity", "1");
   // The brief waits behind its quiet line (D-204).
   await section.getByRole("button", { name: "איך לנסח? (לא חובה)" }).click();
   const brief = section.getByRole("textbox", { name: /^איך לנסח את הסעיף/ });

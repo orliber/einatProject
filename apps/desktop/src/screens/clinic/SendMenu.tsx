@@ -22,6 +22,11 @@ const OPENED: Record<Exclude<Channel, "unknown">, string> = {
   email: "תוכנת המייל נפתחה",
 };
 
+/** What the core says in place of a contact who has no name on the card (`contact_label` in
+ *  crates/dv-domain/src/clinic/channels.rs; the browser preview's stand-in says the same). It
+ *  is no name: the toast shows it as it is, never as initials ("א. ה."), also in discreet mode. */
+export const NAMELESS_CONTACT = "איש הקשר";
+
 /** What the message is, as the toasts name it. */
 const WHAT: Record<MessageKind, string> = {
   reminder: "התזכורת",
@@ -29,10 +34,10 @@ const WHAT: Record<MessageKind, string> = {
 };
 
 /**
- * Sending a message to the family, for a menu that offers it ("תזכורת", "הודעת תשלום", and the
- * reminder lines of a visit's "⋯"). The toast names the contact as the screen may show it now:
- * initials in discreet mode (D-192; a gap since D-201, closed in D-204). It never carries the
- * message itself.
+ * Sending a message to the family, for a menu that offers it ("תזכורת", "הודעת תשלום"). The
+ * toast names the contact as the screen may show it now: initials in discreet mode (D-192; a gap
+ * since D-201, closed in D-204), and "איש הקשר" as it is (`NAMELESS_CONTACT`). It never carries
+ * the message itself.
  */
 export function useSend(kind: MessageKind, patientId: string, visitId: string | null = null): {
   send: (channel: Exclude<Channel, "unknown">) => Promise<void>;
@@ -44,7 +49,7 @@ export function useSend(kind: MessageKind, patientId: string, visitId: string | 
   async function send(channel: Exclude<Channel, "unknown">) {
     try {
       const handed = await ipc.sendMessage(kind, patientId, visitId, channel, null);
-      const to = shownName(handed.to, isDiscreet());
+      const to = handed.to === NAMELESS_CONTACT ? NAMELESS_CONTACT : shownName(handed.to, isDiscreet());
       // Initials end with their own full stop ("י. ל."): the sentence does not add a second one.
       notify(`${OPENED[channel]} מול ${to}${to.endsWith(".") ? "" : "."} ${WHAT[kind]} בלוח המוגן: מדביקים (Ctrl+V) ושולחים. ${clearsIn(handed.clears_in)}.`);
     } catch (e) {

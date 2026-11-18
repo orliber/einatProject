@@ -57,6 +57,9 @@ function HolidayNames({ date, className }: { date: string; className: string }) 
 
 const isClosed = (map: Map<string, Holiday[]>, date: string) => (map.get(date) ?? NO_HOLIDAYS).some((h) => h.closed);
 
+/** The weekday in one letter, as a narrow column of the grid shows it: "א׳" for Sunday. */
+const SHORT_DAY_NAMES = ["א׳", "ב׳", "ג׳", "ד׳", "ה׳", "ו׳", "ש׳"];
+
 const VIEWS: { value: CalendarView; label: string }[] = [{ value: "day", label: "יום" }, { value: "week", label: "שבוע" }, { value: "month", label: "חודש" }];
 const PREVIOUS: Record<CalendarView, string> = { day: "היום הקודם", week: "השבוע הקודם", month: "החודש הקודם" };
 const NEXT: Record<CalendarView, string> = { day: "היום הבא", week: "השבוע הבא", month: "החודש הבא" };
@@ -274,7 +277,7 @@ export function CalendarTab() {
     body = (
       <>
         <MonthGrid anchor={anchor} days={days} today={now.date} onDay={(date) => show("day", date)} />
-        <div className="cal-foot cal-foot-month">
+        <div className="cal-foot">
           {views.length === 0
             ? <p className="muted cal-empty">אין פגישות בחודש הזה. לחיצה על יום פותחת אותו, ושם אפשר לקבוע פגישה.</p>
             : <KindLegend kinds={legendKinds} />}
@@ -288,17 +291,22 @@ export function CalendarTab() {
         {...(view === "week" ? { onDay: (date: string) => show("day", date) } : {})} />
     );
     const empty = shown.every((d) => (days.get(d) ?? NO_VISITS).length === 0);
-    // Under the grid, in a slot of its own height: the chosen visit's bar, or else what the
-    // colours mean (or, on an empty page, how to start). Choosing a visit never moves the grid.
+    // Under the grid: what the colours mean (or, on an empty page, how to start). The chosen
+    // visit's bar lies over that line, which stays under it unseen and unread to keep its height:
+    // choosing a visit never moves the grid (CalendarTab.css).
+    const line = empty
+      ? <p className="muted cal-empty">{`אין פגישות ${view === "day" ? "ביום" : "בשבוע"} הזה. כדי לקבוע פגישה לוחצים על שעה ביומן.`}</p>
+      : <KindLegend kinds={legendKinds} />;
     const foot = picked ? (
-      <MoveBar picked={picked} scope={chosen?.scope ?? null}
-        onStep={(by) => step(picked, by, false)}
-        onScope={() => setOpen({ kind: "scope", view: picked, by: null, refocus: false })}
-        onOpen={() => setOpen({ kind: "visit", view: picked })}
-        onDone={() => setChosen(null)} />
-    ) : empty ? (
-      <p className="muted cal-empty">{`אין פגישות ${view === "day" ? "ביום" : "בשבוע"} הזה. כדי לקבוע פגישה לוחצים על שעה ביומן.`}</p>
-    ) : <KindLegend kinds={legendKinds} />;
+      <>
+        <div className="cal-foot-under" aria-hidden="true">{line}</div>
+        <MoveBar picked={picked} scope={chosen?.scope ?? null}
+          onStep={(by) => step(picked, by, false)}
+          onScope={() => setOpen({ kind: "scope", view: picked, by: null, refocus: false })}
+          onOpen={() => setOpen({ kind: "visit", view: picked })}
+          onDone={() => setChosen(null)} />
+      </>
+    ) : line;
     const stage = <div className="cal-stage">{timeGrid}<div className="cal-foot">{foot}</div></div>;
     body = view === "week" ? stage : (
       <div className="cal-day-view">
@@ -310,7 +318,8 @@ export function CalendarTab() {
   }
 
   return (
-    <div className="cal" ref={root}>
+    // A day or a week fills the page under the tabs, the month only takes the height it needs.
+    <div className={view === "month" ? "cal" : "cal cal-fill"} ref={root}>
       <header className="cal-bar">
         <Segmented label="תצוגת היומן" value={view} options={VIEWS} onChange={(next) => show(next, anchor)} />
         <div className="row cal-nav">
@@ -319,17 +328,19 @@ export function CalendarTab() {
           <button type="button" className="btn icon-btn" aria-label={NEXT[view]} title={NEXT[view]} onClick={() => show(view, shiftAnchor(view, anchor, 1))}><Arrow to="left" /></button>
         </div>
         <h2 className="cal-title" aria-live="polite">{rangeTitle(view, anchor)}</h2>
-        <span className="grow" />
-        <HelpTip key={view === "month" ? "month" : "grid"} label={view === "month" ? "איך פותחים יום" : "איך מזיזים פגישה"}>
-          {view === "month" ? <p>לחיצה על יום פותחת אותו, ושם אפשר לקבוע פגישה.</p> : (
-            <>
-              <p>כדי להזיז פגישה בלי לפתוח אותה, מצביעים עליה ולוחצים על החצים שבפינה שלה.</p>
-              <p>מהמקלדת: עומדים על הפגישה ולוחצים Alt עם החצים.</p>
-              <p>כדי לקבוע פגישה לוחצים על שעה ביומן.</p>
-            </>
-          )}
-        </HelpTip>
-        <button type="button" className="btn btn-primary" onClick={() => (view === "day" ? newOn(anchor) : setOpen({ kind: "new" }))}><PlusIcon /> פגישה חדשה</button>
+        {/* The "?" and the new visit are one group: when the bar folds in a narrow window, they go down together. */}
+        <div className="cal-actions">
+          <HelpTip key={view === "month" ? "month" : "grid"} label={view === "month" ? "איך פותחים יום" : "איך מזיזים פגישה"}>
+            {view === "month" ? <p>לחיצה על יום פותחת אותו, ושם אפשר לקבוע פגישה.</p> : (
+              <>
+                <p>כדי להזיז פגישה בלי לפתוח אותה, מצביעים עליה ולוחצים על החצים שבפינה שלה.</p>
+                <p>מהמקלדת: עומדים על הפגישה ולוחצים Alt עם החצים.</p>
+                <p>כדי לקבוע פגישה לוחצים על שעה ביומן.</p>
+              </>
+            )}
+          </HelpTip>
+          <button type="button" className="btn btn-primary" onClick={() => (view === "day" ? newOn(anchor) : setOpen({ kind: "new" }))}><PlusIcon /> פגישה חדשה</button>
+        </div>
       </header>
 
       <HolidaysOf.Provider value={holidays}>{body}</HolidaysOf.Provider>
@@ -471,11 +482,15 @@ function DayColumn({ date, visits, hours, height, today, nowAt, chosenId, action
   const placed = useMemo(() => new Map(placeDay(visits.map((v) => v.visit), hours).map((p) => [p.id, p])), [visits, hours]);
   const long = formatDateLong(date);
   const closed = isClosed(useContext(HolidaysOf), date);
-  // Seen: "ראשון 15.11". Read out: "יום ראשון 15.11.2026".
+  // Seen: "ראשון 15.11", or "א׳ 15.11" in a narrow column, where the date is never cut
+  // (CalendarTab.css). Read out: "יום ראשון 15.11.2026"; in a narrow column with the letter she
+  // sees too, "יום ראשון א׳ 15.11.2026", so the name holds what is on screen (WCAG 2.5.3).
+  const wd = weekday(date);
   const name = (
     <>
-      {weekday(date) !== 6 && <span className="visually-hidden">יום</span>}{" "}
-      <span>{dayName(date)}</span>{" "}
+      {wd !== 6 && <span className="visually-hidden">יום</span>}{" "}
+      <span className="cal-day-weekday">{dayName(date)}</span>{" "}
+      {wd !== null && <span className="cal-day-weekday-short">{SHORT_DAY_NAMES[wd]}</span>}{" "}
       <span className="num muted small" dir="ltr">{formatDateShort(date)}</span>
       <span className="visually-hidden">.{date.slice(0, 4)}</span>
     </>

@@ -111,6 +111,7 @@ describe("times", () => {
 
   it("a visit's span and length", () => {
     expect(formatSpan(540, 90)).toBe("09:00–10:30");
+    expect(formatLength(1)).toBe("דקה");
     expect(formatLength(50)).toBe("50 דקות");
     expect(formatLength(60)).toBe("שעה");
     expect(formatLength(90)).toBe("שעה וחצי");
@@ -174,9 +175,28 @@ describe("the time of a visit", () => {
     expect(todayCountWords(4, 0)).toBe("4 בלוח");
   });
 
-  it("says how long until a visit", () => {
-    expect(untilWords(48)).toBe("בעוד 48 דקות");
-    expect(untilWords(60)).toBe("בעוד שעה");
+  it("says how long until a visit, in plain Hebrew (never “1 דקות” or “2:35 שעות”)", () => {
+    const said: [number, string][] = [
+      [1, "בעוד דקה"],
+      [2, "בעוד 2 דקות"],
+      [48, "בעוד 48 דקות"],
+      [59, "בעוד 59 דקות"],
+      [60, "בעוד שעה"],
+      [61, "בעוד שעה ודקה"],
+      [75, "בעוד שעה ו-15 דקות"],
+      [119, "בעוד שעה ו-59 דקות"],
+      [120, "בעוד שעתיים"],
+      [121, "בעוד שעתיים ודקה"],
+      [155, "בעוד שעתיים ו-35 דקות"],
+      [180, "בעוד 3 שעות"],
+      [181, "בעוד 3 שעות ודקה"],
+      [195, "בעוד 3 שעות ו-15 דקות"],
+      [600, "בעוד 10 שעות"],
+    ];
+    for (const [minutes, words] of said) expect(untilWords(minutes), String(minutes)).toBe(words);
+    // The front page never asks for no time at all; if it did, it is now.
+    expect(untilWords(0)).toBe("עכשיו");
+    expect(untilWords(-5)).toBe("עכשיו");
   });
 });
 

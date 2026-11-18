@@ -165,7 +165,7 @@ describe("the daily check and the chip", () => {
 describe("the one status badge in the top bar", () => {
   it("demo mode and a ready version are one button, “הדגמה · עדכון מוכן”, that opens “גרסה 0.9.3 מוכנה”; passes the accessibility check", async () => {
     const { user, calls, view } = await show(<StatusChip demo />, (cmd) => (cmd === "check_update" ? UPDATE : undefined));
-    expect(await screen.findByRole("button", { name: /^הדגמה · (יש עדכון|עדכון מוכן)$/ })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /^הדגמה · (עדכון חדש|עדכון מוכן)$/ })).toBeInTheDocument();
     await waitFor(() => expect(calls.some((c) => c.cmd === "prepare_update")).toBe(true));
     const badge = await screen.findByRole("button", { name: "הדגמה · עדכון מוכן" });
     // One badge: demo mode is not a second one beside it.
@@ -177,6 +177,25 @@ describe("the one status badge in the top bar", () => {
     expect(await a11yViolations(view.container)).toEqual([]);
     await user.click(badge);
     expect(await screen.findByRole("dialog", { name: "גרסה 0.9.3 מוכנה" })).toBeInTheDocument();
+  });
+
+  // WCAG 2.5.3 (label in name): in a narrow bar the badge shows its short words, so they are
+  // within its name in every state; a voice command that says what she sees reaches it.
+  it.each([
+    { demo: true, ready: true, name: "הדגמה · עדכון מוכן", short: "הדגמה · עדכון" },
+    { demo: true, ready: false, name: "הדגמה · עדכון חדש", short: "הדגמה · עדכון" },
+    { demo: false, ready: true, name: "גרסה חדשה מוכנה", short: "גרסה חדשה" },
+    { demo: false, ready: false, name: "יש גרסה חדשה", short: "גרסה חדשה" },
+  ])("demo $demo, ready $ready: the name “$name” holds both the long and the short words", async ({ demo, ready, name, short }) => {
+    const { calls } = await show(<StatusChip demo={demo} />, (cmd) => (cmd === "check_update" ? UPDATE : cmd === "prepare_update" ? ready : undefined));
+    await waitFor(() => expect(calls.some((c) => c.cmd === "prepare_update")).toBe(true));
+    const badge = await screen.findByRole("button", { name });
+    const long = badge.querySelector(".topbar-status-long")?.textContent ?? "";
+    const narrow = badge.querySelector(".topbar-status-short")?.textContent ?? "";
+    expect(long).toBe(name);
+    expect(narrow).toBe(short);
+    expect(badge).toHaveAccessibleName(expect.stringContaining(long));
+    expect(badge).toHaveAccessibleName(expect.stringContaining(narrow));
   });
 
   it("demo mode alone is the quiet text “מצב הדגמה”, not a button, and the daily check is still asked", async () => {

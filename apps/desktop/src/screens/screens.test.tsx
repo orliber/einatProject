@@ -208,7 +208,7 @@ describe("main screens", () => {
     expect(bar.querySelector(".topbar-status, .update-chip, .case-demo")).toBeNull();
     // The top bar outside the case tells both, in one badge.
     await user.click(within(bar).getByRole("button", { name: "→ תיקים" }));
-    expect(await screen.findByRole("button", { name: /^הדגמה · (יש עדכון|עדכון מוכן)$/ })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /^הדגמה · (עדכון חדש|עדכון מוכן)$/ })).toBeInTheDocument();
   });
 
   it("“דף מלא”, “חיפוש” and “התייעצות” each carry an icon, and “דף מלא” is a pressed toggle", async () => {

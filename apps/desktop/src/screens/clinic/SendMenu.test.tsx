@@ -5,7 +5,7 @@ import { configure, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { forgetDiscreet, setDiscreet } from "../../discreet";
 import { appApi, Host, serve, type Override } from "../../test/host";
-import { SendMenu } from "./SendMenu";
+import { NAMELESS_CONTACT, SendMenu } from "./SendMenu";
 
 configure({ asyncUtilTimeout: 5000 });
 
@@ -13,16 +13,17 @@ afterEach(() => {
   forgetDiscreet();
 });
 
-/** The chat opens with an invented parent; the window never sees the text. */
-const opened: Override = (cmd) => (cmd === "send_message" ? { to: "יעל לדוגמה", clears_in: 20 } : undefined);
+/** The chat opens with an invented parent (or, with `to`, what the core says in place of
+ *  one); the window never sees the text. */
+const openedWith = (to: string): Override => (cmd) => (cmd === "send_message" ? { to, clears_in: 20 } : undefined);
 
-async function show() {
-  const served = await serve(opened);
+async function show(to = "יעל לדוגמה") {
+  const served = await serve(openedWith(to));
   const notes: string[] = [];
   const app = appApi({ notify: (text: string) => void notes.push(text) });
   const user = userEvent.setup();
-  render(<Host app={app}><SendMenu kind="reminder" patientId="p-invented" visitId="v-invented" label="תזכורת" /></Host>);
-  return { ...served, notes, user };
+  const view = render(<Host app={app}><SendMenu kind="reminder" patientId="p-invented" visitId="v-invented" label="תזכורת" /></Host>);
+  return { ...served, notes, user, view };
 }
 
 describe("a message to the family", () => {
@@ -46,5 +47,19 @@ describe("a message to the family", () => {
     await user.click(await screen.findByRole("menuitem", { name: "לשלוח בוואטסאפ" }));
     await waitFor(() => expect(notes).toHaveLength(1));
     expect(notes[0]).toBe("וואטסאפ נפתח מול יעל לדוגמה. התזכורת בלוח המוגן: מדביקים (Ctrl+V) ושולחים. יימחק מהלוח בעוד 20 שניות.");
+  });
+
+  it("a contact with no name is “איש הקשר” in the toast, never initials, in discreet mode and out of it", async () => {
+    // The core's own words (`contact_label` in crates/dv-domain/src/clinic/channels.rs).
+    expect(NAMELESS_CONTACT).toBe("איש הקשר");
+    for (const discreet of [true, false]) {
+      setDiscreet(discreet);
+      const { user, notes, view } = await show(NAMELESS_CONTACT);
+      await user.click(screen.getByRole("button", { name: "תזכורת" }));
+      await user.click(await screen.findByRole("menuitem", { name: "לשלוח בוואטסאפ" }));
+      await waitFor(() => expect(notes).toHaveLength(1));
+      expect(notes[0], String(discreet)).toBe("וואטסאפ נפתח מול איש הקשר. התזכורת בלוח המוגן: מדביקים (Ctrl+V) ושולחים. יימחק מהלוח בעוד 20 שניות.");
+      view.unmount();
+    }
   });
 });

@@ -4,6 +4,7 @@
 import { configure, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
+import { Dialog } from "../../components/ui";
 import { forgetDiscreet, setDiscreet } from "../../discreet";
 import type { Today } from "../../ipc/generated/Today";
 import type { Visit } from "../../ipc/generated/Visit";
@@ -81,8 +82,6 @@ async function menuOf(user: ReturnType<typeof userEvent.setup>): Promise<string[
   return words;
 }
 
-const REMINDERS = ["לשלוח תזכורת בוואטסאפ", "לשלוח תזכורת ב-SMS", "לשלוח תזכורת במייל", "להעתיק את התזכורת"];
-
 describe("one action by the time, the rest under “⋯”", () => {
   it("a planned visit under way shows a plain “התקיימה”; once it is over, the same button is the primary", async () => {
     const { view, rerender } = await show(viewOf());
@@ -131,19 +130,37 @@ describe("one action by the time, the rest under “⋯”", () => {
     expect(await menuOf(user)).toEqual(["לפתוח את הפגישה"]);
   });
 
-  it("menu order: “התקיימה”, “לכתוב סיכום”, the four reminder items, “לפתוח את הפגישה”", async () => {
-    // A planned visit offers either "התקיימה" (later today) or the reminders (once it has begun)
-    // in its "⋯", never both: each menu keeps its part of the one order.
+  it("menu order: “התקיימה”, “לכתוב סיכום”, “לפתוח את הפגישה”; no reminder in “⋯”", async () => {
     const { user, rerender } = await show(viewOf({ start: 660 }));
     expect(await menuOf(user)).toEqual(["התקיימה", "לכתוב סיכום", "לפתוח את הפגישה"]);
     rerender(viewOf());
-    expect(await menuOf(user)).toEqual(["לכתוב סיכום", ...REMINDERS, "לפתוח את הפגישה"]);
+    expect(await menuOf(user)).toEqual(["לכתוב סיכום", "לפתוח את הפגישה"]);
   });
 
-  it("the reminder in “⋯” opens the chat for this visit", async () => {
-    const { user, notes, calls } = await show(viewOf());
-    await user.click(more());
-    await user.click(await screen.findByRole("menuitem", { name: "לשלוח תזכורת בוואטסאפ" }));
+  it("once the visit has begun no reminder is offered, not as its step and not in “⋯” (D-204 §4)", async () => {
+    // Just begun (10:00 sharp), under way, over, and a day that is past.
+    const cases: [Partial<Visit>, Today][] = [
+      [{ start: 600 }, NOW],
+      [{}, NOW],
+      [{}, { ...NOW, minute: 700 }],
+      [{ date: "2026-11-14" }, NOW],
+    ];
+    const { user, view, rerender } = await show(viewOf());
+    for (const [over, at] of cases) {
+      rerender(viewOf(over), at);
+      const name = JSON.stringify([over, at]);
+      expect(within(view.container).queryByRole("button", { name: "תזכורת" }), name).toBeNull();
+      expect((await menuOf(user)).filter((w) => w.includes("תזכורת")), name).toEqual([]);
+    }
+    // A minute before it begins, "תזכורת" is its step.
+    rerender(viewOf({ start: 601 }));
+    expect(within(view.container).getByRole("button", { name: "תזכורת" })).toBeInTheDocument();
+  });
+
+  it("“תזכורת” of a visit still ahead opens the chat for this visit", async () => {
+    const { user, view, notes, calls } = await show(viewOf({ start: 660 }));
+    await user.click(within(view.container).getByRole("button", { name: "תזכורת" }));
+    await user.click(await screen.findByRole("menuitem", { name: "לשלוח בוואטסאפ" }));
     await waitFor(() => expect(notes).toHaveLength(1));
     expect(notes[0]).toMatch(/^וואטסאפ נפתח מול יעל לדוגמה\. התזכורת בלוח המוגן/);
     const sent = calls.filter((c) => c.cmd === "send_message");
@@ -187,5 +204,90 @@ describe("one action by the time, the rest under “⋯”", () => {
     await user.click(more());
     await screen.findByRole("menu");
     expect(await a11yViolations(document.body)).toEqual([]);
+  });
+});
+
+/** A list row whose "לכתוב סיכום" opens a dialog, as the clinic's screens do. "שמירה" saves the
+ *  note: the dialog closes before the row hears of the note (`closeFirst`), or after. */
+function NoteHarness({ initial, closeFirst }: { initial: VisitView; closeFirst: boolean }) {
+  const [view, setView] = useState(initial);
+  const [open, setOpen] = useState(false);
+  const noted = () => setView((w) => ({ ...w, has_note: true }));
+  const save = () => {
+    if (closeFirst) {
+      setOpen(false);
+      window.setTimeout(noted, 0);
+    } else {
+      noted();
+      window.setTimeout(() => setOpen(false), 0);
+    }
+  };
+  return (
+    <>
+      {/* The note saved from elsewhere (another screen, or the line in "מה דורש אותי"). */}
+      <button type="button" onClick={noted}>סיכום ממקום אחר</button>
+      <div className="row">
+        <VisitActions view={view} patientId="p-invented" now={NOW}
+          onHold={(v) => setView((w) => ({ ...w, visit: { ...v, status: "held" } }))}
+          onNote={() => setOpen(true)} onOpen={() => undefined} />
+      </div>
+      {open && (
+        <Dialog title="סיכום בדוי" onClose={() => setOpen(false)}
+          footer={<button type="button" className="btn btn-primary" onClick={save}>שמירה</button>}>
+          <p>טקסט בדוי</p>
+        </Dialog>
+      )}
+    </>
+  );
+}
+
+async function showNote(initial: VisitView, closeFirst = true) {
+  await serve(opened);
+  const user = userEvent.setup();
+  const view = render(<Host app={appApi()}><NoteHarness initial={initial} closeFirst={closeFirst} /></Host>);
+  return { user, view };
+}
+
+describe("when the step is done and its button goes, the focus goes to the row's “⋯” (WCAG 2.4.3)", () => {
+  it.each([true, false])("a note saved from “לכתוב סיכום” (the dialog closes first: %s)", async (closeFirst) => {
+    const { user } = await showNote(viewOf({ status: "held" }), closeFirst);
+    await user.click(screen.getByRole("button", { name: "לכתוב סיכום" }));
+    const dialog = await screen.findByRole("dialog", { name: "סיכום בדוי" });
+    await user.click(within(dialog).getByRole("button", { name: "שמירה" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() => expect(screen.queryByRole("button", { name: "לכתוב סיכום" })).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(more()));
+    expect(document.activeElement).not.toBe(document.body);
+  });
+
+  it("“התקיימה” for a visit whose note was written ahead: the step has nothing left to offer", async () => {
+    const { user } = await showNote(viewOf({}, true));
+    await user.click(screen.getByRole("button", { name: "התקיימה" }));
+    expect(screen.queryByRole("button", { name: "התקיימה" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "לכתוב סיכום" })).toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(more()));
+  });
+
+  it("a dialog closed without saving gives the focus back to “לכתוב סיכום”, which is still there", async () => {
+    const { user } = await showNote(viewOf({ status: "held" }));
+    const step = screen.getByRole("button", { name: "לכתוב סיכום" });
+    await user.click(step);
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(step).toHaveFocus();
+  });
+
+  it("never takes the focus from where she moved it", async () => {
+    const { user } = await showNote(viewOf({ status: "held" }));
+    await user.click(screen.getByRole("button", { name: "לכתוב סיכום" }));
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(screen.getByRole("button", { name: "לכתוב סיכום" })).toHaveFocus();
+    // She goes elsewhere, and the note is saved from there: the step goes, her focus stays.
+    const elsewhere = screen.getByRole("button", { name: "סיכום ממקום אחר" });
+    await user.click(elsewhere);
+    expect(screen.queryByRole("button", { name: "לכתוב סיכום" })).toBeNull();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(elsewhere).toHaveFocus();
   });
 });

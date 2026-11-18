@@ -3,7 +3,9 @@
 // failure paths with their rollback, discreet mode and accessibility. Every name is invented;
 // the clock is held at a Sunday morning so the demo clinic's dates are the same on every run.
 import { configure, screen, waitFor, within } from "@testing-library/react";
+import type { ClinicRequest } from "../../ipc/generated/ClinicRequest";
 import { a11yViolations } from "../../test/a11y";
+import type { Override } from "../../test/host";
 import { forgetDiscreet } from "./ClinicScreen";
 import { ask, cardOf, openCard, openOn, refusing, rowsOf } from "./patientsTestKit";
 
@@ -29,7 +31,7 @@ describe("the patient's card", () => {
   it("reads like the child's story: who, how to reach the family, where the assessment stands", async () => {
     const { view } = await openCard("נועם");
     expect(await screen.findByRole("heading", { name: "נועם" })).toBeInTheDocument();
-    const head = screen.getByRole("heading", { name: "נועם" }).closest("header") as HTMLElement;
+    const head = screen.getByRole("heading", { name: "נועם" }).closest(".pcard-head") as HTMLElement;
     expect(head).toHaveTextContent("בתהליך");
     expect(head).toHaveTextContent(/בן 5 שנים/);
     expect(head).toHaveTextContent("גן חצב");
@@ -63,6 +65,46 @@ describe("the patient's card", () => {
     expect(await a11yViolations(view.container)).toEqual([]);
   });
 
+  it("the head is a plain box, not a <header>: the case cell's dialogs, with a header and a footer of their own, open inside it", async () => {
+    const { user } = await openCard("איתי");
+    const head = (await screen.findByRole("heading", { name: "איתי" })).closest(".pcard-head") as HTMLElement;
+    expect(head.tagName).toBe("DIV");
+    expect(head.closest("header")).toBeNull();
+    expect(screen.queryAllByRole("banner").filter((b) => b.contains(head))).toEqual([]);
+    // The picker of cases opens in the band, inside the head: its own header is the only one.
+    await user.click(within(head).getByRole("button", { name: "לקשר לתיק קיים" }));
+    const picker = await screen.findByRole("dialog");
+    expect(head).toContainElement(picker);
+    expect([...head.querySelectorAll("header")].every((h) => picker.contains(h))).toBe(true);
+  });
+
+  it("every button that shows a word is named starting with that word", async () => {
+    const { user } = await openCard("נועם");
+    // "עריכה" of a note and of a follow-up says what it edits after the word she sees.
+    const notes = await region("סיכומי פגישות");
+    const tasks = await region("מעקבים");
+    const edits = [...within(notes).getAllByRole("button", { name: /^עריכה/ }), ...within(tasks).queryAllByRole("button", { name: /^עריכה/ })];
+    expect(edits.length).toBeGreaterThan(0);
+    for (const b of [...notes.querySelectorAll("button"), ...tasks.querySelectorAll("button")].filter((b) => b.textContent === "עריכה")) {
+      expect(edits).toContain(b);
+    }
+    expect(within(notes).getByRole("button", { name: "עריכה של הסיכום מיום 25.10.2026" })).toHaveTextContent(/^עריכה$/);
+    await user.click(within(tasks).getByRole("button", { name: "מעקב חדש" }));
+    const add = await screen.findByRole("dialog", { name: "מעקב חדש" });
+    await user.type(within(add).getByLabelText("מה צריך לעשות"), "לבקש סיכום מהגננת");
+    await user.click(within(add).getByRole("button", { name: "הוספה" }));
+    expect(await within(tasks).findByRole("button", { name: "עריכה של המעקב: לבקש סיכום מהגננת" })).toHaveTextContent(/^עריכה$/);
+    // A visit's time shows its date above its hours; the name starts with both, as she sees them.
+    const visits = await region("פגישות");
+    const times = within(visits).getAllByRole("button", { name: /פתיחת הפגישה/ });
+    expect(times.length).toBeGreaterThan(1);
+    for (const time of times) {
+      const seen = time.textContent ?? "";
+      expect(seen).toMatch(/^\d\d\.\d\d\.\d{4} \d\d:\d\d–\d\d:\d\d$/);
+      expect(time.getAttribute("aria-label")).toMatch(new RegExp(`^${seen.replace(/[.]/g, "\\.")}, `));
+    }
+  });
+
   it("shows the shape of the card while it loads, and says so when the card is not there", async () => {
     const { user, went } = await openOn({ name: "clinic", tab: "patients", patientId: "patient-nowhere" });
     expect(await screen.findByRole("heading", { name: "הכרטיס לא נמצא" })).toBeInTheDocument();
@@ -80,7 +122,7 @@ describe("the patient's card", () => {
   it("the header's actions: a new visit for this child, editing the details, closing and reopening", async () => {
     const served = await openCard("איתי");
     const { user, requests, notes, id } = served;
-    const head = (await screen.findByRole("heading", { name: "איתי" })).closest("header") as HTMLElement;
+    const head = (await screen.findByRole("heading", { name: "איתי" })).closest(".pcard-head") as HTMLElement;
 
     await user.click(within(head).getByRole("button", { name: "פגישה חדשה" }));
     const visit = await screen.findByRole("dialog", { name: "פגישה חדשה" });
@@ -118,7 +160,7 @@ describe("the patient's card", () => {
 
   it("a card with no one who referred has no “מי הפנה”", async () => {
     await openCard("מאיה");
-    const head = (await screen.findByRole("heading", { name: "מאיה" })).closest("header") as HTMLElement;
+    const head = (await screen.findByRole("heading", { name: "מאיה" })).closest(".pcard-head") as HTMLElement;
     // An empty detail is left out of the band, not shown as a blank cell.
     expect(within(head).getAllByRole("heading", { level: 3 }).map((h) => h.textContent)).toEqual(["אנשי קשר", "סיבת הפנייה", "תיק האבחון"]);
     expect(head).not.toHaveTextContent("מי הפנה");
@@ -132,7 +174,7 @@ describe("the patient's card", () => {
       const { patient } = await cardOf(served, id);
       await ask(served, { op: "save_patient", patient: { ...patient, reason: long } }, "patient");
     });
-    const head = (await screen.findByRole("heading", { name: "נועם" })).closest("header") as HTMLElement;
+    const head = (await screen.findByRole("heading", { name: "נועם" })).closest(".pcard-head") as HTMLElement;
     const cell = within(head).getByRole("heading", { name: "סיבת הפנייה" }).parentElement as HTMLElement;
     const text = within(cell).getByText(/שורה 1 בסיבת הפנייה/);
     expect(text).toHaveClass("pcard-note-folded");
@@ -149,7 +191,7 @@ describe("the patient's card", () => {
 
   it("passes the accessibility check with the header's menu open", async () => {
     const { user } = await openCard("נועם");
-    const head = (await screen.findByRole("heading", { name: "נועם" })).closest("header") as HTMLElement;
+    const head = (await screen.findByRole("heading", { name: "נועם" })).closest(".pcard-head") as HTMLElement;
     const more = within(head).getByRole("button", { name: "עוד פעולות לכרטיס, כמו סגירת הכרטיס" });
     await user.click(more);
     expect(await screen.findByRole("menuitem", { name: "סגירת הכרטיס" })).toBeInTheDocument();
@@ -334,6 +376,109 @@ describe("visits on the card", () => {
     expect(within(await region("פגישות")).queryByRole("button", { name: /תזכורת/ })).toBeNull();
   });
 
+  it("a note saved from “לכתוב סיכום” takes that step off the row, and the focus goes to the row's “⋯”", async () => {
+    const { user } = await openCard("נועם");
+    await user.click(within(await visitOn("01.11.2026")).getByRole("button", { name: "לכתוב סיכום" }));
+    const note = await screen.findByRole("dialog", { name: "סיכום מפגש אבחון" });
+    await user.type(await within(note).findByLabelText("רשומה"), "המשך המבחן הקוגניטיבי.");
+    await user.click(within(note).getByRole("button", { name: "שמירה" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(async () => expect(within(await visitOn("01.11.2026")).queryByRole("button", { name: "לכתוב סיכום" })).toBeNull());
+    const more = within(await visitOn("01.11.2026")).getByRole("button", { name: "עוד פעולות לפגישה מיום 01.11.2026, 09:00" });
+    await waitFor(() => expect(document.activeElement).toBe(more));
+  });
+
+  describe("a visit marked on the card moves to the other list, and the focus goes with it", () => {
+    /** The group of the card's visits under `heading`. */
+    const group = async (heading: string) => within(await region("פגישות")).getByRole("heading", { name: heading }).parentElement as HTMLElement;
+    const MORE = "עוד פעולות לפגישה מיום 15.11.2026, 09:00";
+
+    it("Enter on “התקיימה” of a visit that has begun: the focus is on its step in “פגישות שהיו”, now “לכתוב סיכום”", async () => {
+      vi.setSystemTime(new Date(2026, 10, 15, 9, 30));
+      const { user } = await openCard("תמר");
+      within(await visitOn("15.11.2026")).getByRole("button", { name: "התקיימה" }).focus();
+      await user.keyboard("{Enter}");
+      await waitFor(async () => expect(await group("פגישות שהיו")).toHaveTextContent("15.11.2026"));
+      const moved = await visitOn("15.11.2026");
+      expect(await group("פגישות שהיו")).toContainElement(moved);
+      await waitFor(() => expect(document.activeElement).toBe(within(moved).getByRole("button", { name: "לכתוב סיכום" })));
+      // It stays there after the vault's answer, and Enter goes on to the note.
+      await new Promise((r) => setTimeout(r, 50));
+      expect(document.activeElement).toBe(within(await visitOn("15.11.2026")).getByRole("button", { name: "לכתוב סיכום" }));
+      await user.keyboard("{Enter}");
+      expect(await screen.findByRole("dialog", { name: "סיכום מפגש אבחון" })).toBeInTheDocument();
+    });
+
+    it("with its note written ahead the row has no step left: the focus is on its “⋯”", async () => {
+      vi.setSystemTime(new Date(2026, 10, 15, 9, 30));
+      const { user } = await openCard("תמר", undefined, async (served, id) => {
+        const visit = (await cardOf(served, id)).visits.find((v) => v.visit.date === "2026-11-15")?.visit;
+        if (!visit) throw new Error("no visit today in the demo core");
+        await ask(served, { op: "save_note", note: { id: "", patient_id: id, visit_id: visit.id, date: visit.date, record: "הכנה למפגש", personal: "", case_input_id: null } }, "note");
+      });
+      within(await visitOn("15.11.2026")).getByRole("button", { name: "התקיימה" }).focus();
+      await user.keyboard("{Enter}");
+      await waitFor(async () => expect(await group("פגישות שהיו")).toHaveTextContent("15.11.2026"));
+      const moved = await visitOn("15.11.2026");
+      expect(within(moved).queryByRole("button", { name: "לכתוב סיכום" })).toBeNull();
+      await waitFor(() => expect(document.activeElement).toBe(within(moved).getByRole("button", { name: MORE })));
+    });
+
+    it("“לא הגיעו” from “⋯”: the focus is on the moved row's “⋯”", async () => {
+      const { user } = await openCard("תמר");
+      within(await visitOn("15.11.2026")).getByRole("button", { name: MORE }).focus();
+      await user.keyboard("{Enter}");
+      const item = await screen.findByRole("menuitem", { name: "לא הגיעו" });
+      item.focus();
+      await user.keyboard("{Enter}");
+      await waitFor(async () => expect(await group("פגישות שהיו")).toHaveTextContent("15.11.2026"));
+      await waitFor(async () => expect(document.activeElement).toBe(within(await visitOn("15.11.2026")).getByRole("button", { name: MORE })));
+      await new Promise((r) => setTimeout(r, 50));
+      expect(document.activeElement).toBe(within(await visitOn("15.11.2026")).getByRole("button", { name: MORE }));
+    });
+
+    it("marked while the visits that were show another page: the page that holds the row opens, and the focus is on it", async () => {
+      vi.setSystemTime(new Date(2026, 10, 15, 9, 30));
+      const { user } = await openCard("תמר", undefined, async (served, id) => {
+        // Nine more visits that were, in September: the list of the visits that were has two pages.
+        for (let day = 1; day <= 9; day++) {
+          await ask(served, {
+            op: "save_visit", repeat: null, scope: "one",
+            visit: {
+              id: "", patient_id: id, kind: "assessment", title: "", date: `2026-09-0${day}`, start: 600, minutes: 50, place: "", status: "held",
+              status_note: "", fee: 0, charge_missed: false, series_id: null, note: "",
+            },
+          }, "saved");
+        }
+      });
+      const was = await group("פגישות שהיו");
+      await user.click(within(was).getByRole("button", { name: "הבא" }));
+      await waitFor(async () => expect(within(await group("פגישות שהיו")).getByRole("status")).toHaveTextContent(/^עמוד 2 מתוך/));
+      within(await visitOn("15.11.2026")).getByRole("button", { name: "התקיימה" }).focus();
+      await user.keyboard("{Enter}");
+      await waitFor(async () => expect(within(await group("פגישות שהיו")).getByRole("status")).toHaveTextContent(/^עמוד 1 מתוך/));
+      await waitFor(async () => expect(document.activeElement).toBe(within(await visitOn("15.11.2026")).getByRole("button", { name: "לכתוב סיכום" })));
+    });
+
+    it("a mark the vault refuses moves the row back, and the focus with it, on “התקיימה”", async () => {
+      vi.setSystemTime(new Date(2026, 10, 15, 9, 30));
+      // The refusal comes a moment later, as from the vault: the row has moved by then.
+      const refuse = refusing("save_visit", "הפגישה לא נשמרה.");
+      const late: Override = async (cmd, args, core) => {
+        if (cmd === "clinic" && (args.request as ClinicRequest).op === "save_visit") await new Promise((r) => setTimeout(r, 300));
+        return refuse(cmd, args, core);
+      };
+      const { user, notes } = await openCard("תמר", late);
+      within(await visitOn("15.11.2026")).getByRole("button", { name: "התקיימה" }).focus();
+      await user.keyboard("{Enter}");
+      await waitFor(async () => expect(await group("פגישות שהיו")).toHaveTextContent("15.11.2026"));
+      await waitFor(async () => expect(document.activeElement).toBe(within(await visitOn("15.11.2026")).getByRole("button", { name: "לכתוב סיכום" })));
+      await waitFor(() => expect(notes).toContain("הפגישה לא נשמרה."));
+      await waitFor(async () => expect(await group("הפגישות הקרובות")).toHaveTextContent("15.11.2026"));
+      await waitFor(async () => expect(document.activeElement).toBe(within(await visitOn("15.11.2026")).getByRole("button", { name: "התקיימה" })));
+    });
+  });
+
   it("the time opens the visit, “לכתוב סיכום” opens its note, and an alert leads to the same note", async () => {
     const { user } = await openCard("נועם");
     await user.click(within(await visitOn("20.11.2026")).getByRole("button", { name: /פתיחת הפגישה/ }));
@@ -391,7 +536,7 @@ describe("session notes on the card", () => {
     const served = await openCard("נועם");
     const { user, requests } = served;
     const notes = await region("סיכומי פגישות");
-    await user.click(within(notes).getByRole("button", { name: "עריכת הסיכום מיום 25.10.2026" }));
+    await user.click(within(notes).getByRole("button", { name: "עריכה של הסיכום מיום 25.10.2026" }));
     const dialog = await screen.findByRole("dialog", { name: "סיכום מפגש אבחון" });
     expect(await within(dialog).findByLabelText("רשומה")).toHaveValue("כלים שהועברו: מבחן קוגניטיבי, חלק ראשון.\n\nהתנהגות במפגש: שיתף פעולה, נזקק להפסקות קצרות.");
     await user.click(within(dialog).getByRole("button", { name: "להעביר לחומרי התיק" }));
@@ -607,7 +752,7 @@ describe("follow-ups on the card", () => {
     expect(notes).toContain("המעקב נוסף");
     expect(await within(tasks).findByLabelText("לתאם תצפית עם הגננת")).not.toBeChecked();
 
-    await user.click(within(tasks).getByRole("button", { name: "עריכת המעקב: לתאם תצפית עם הגננת" }));
+    await user.click(within(tasks).getByRole("button", { name: "עריכה של המעקב: לתאם תצפית עם הגננת" }));
     const edit = await screen.findByRole("dialog", { name: "עריכת מעקב" });
     const title = within(edit).getByLabelText("מה צריך לעשות");
     await user.clear(title);
@@ -722,7 +867,7 @@ describe("discreet mode on the card", () => {
 
   it("in discreet mode the reason says “מוסתרת במצב דיסקרטי” and the needs show no initials", async () => {
     const { user } = await openCard("נועם");
-    const head = (await screen.findByRole("heading", { name: "נועם" })).closest("header") as HTMLElement;
+    const head = (await screen.findByRole("heading", { name: "נועם" })).closest(".pcard-head") as HTMLElement;
     const needs = await region("מה דורש אותי");
     await user.click(screen.getByRole("switch", { name: "מצב דיסקרטי" }));
     const cell = (label: string) => within(head).getByRole("heading", { name: label }).parentElement as HTMLElement;

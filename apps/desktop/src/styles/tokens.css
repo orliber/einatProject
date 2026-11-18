@@ -167,7 +167,10 @@
     --kind-guidance: #e9a3c0;
     --kind-guidance-soft: #37222c;
     --kind-guidance-line: #5e3a4a;
-    --primary-wash: #1b2a28;
+    --primary-wash: #1d302d;
+    /* On today's tint, its hour line and its head a step stronger (light keeps --line, --primary-soft). */
+    --primary-wash-line: #34423f;
+    --primary-wash-head: #203d39;
     /* The case column is dark in both. Around the report page: */
     --paper-sand: #262d2b;
     --overlay: rgba(0, 0, 0, 0.6);
@@ -226,7 +229,10 @@
     --kind-guidance: #e9a3c0;
     --kind-guidance-soft: #37222c;
     --kind-guidance-line: #5e3a4a;
-    --primary-wash: #1b2a28;
+    --primary-wash: #1d302d;
+    /* On today's tint, its hour line and its head a step stronger (light keeps --line, --primary-soft). */
+    --primary-wash-line: #34423f;
+    --primary-wash-head: #203d39;
     /* The case column is dark in both. Around the report page: */
     --paper-sand: #262d2b;
     --overlay: rgba(0, 0, 0, 0.6);

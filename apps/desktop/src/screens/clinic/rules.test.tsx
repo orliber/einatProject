@@ -68,7 +68,7 @@ describe("a value of a later version (D-178)", () => {
 
   it("is shown in plain words on the card, and nothing breaks", async () => {
     await openCard("נועם", later);
-    const head = (await screen.findByRole("heading", { name: "נועם" })).closest("header") as HTMLElement;
+    const head = (await screen.findByRole("heading", { name: "נועם" })).closest(".pcard-head") as HTMLElement;
     expect(head).toHaveTextContent("מצב לא מוכר");
     expect(within(head).getByRole("list", { name: "אנשי קשר" })).toHaveTextContent("קשר לא מוכר");
     expect(within(await visitOn("20.11.2026")).getByText("סוג לא מוכר")).toBeInTheDocument();
