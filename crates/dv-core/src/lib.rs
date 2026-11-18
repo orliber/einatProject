@@ -26,6 +26,7 @@ mod history;
 mod instruments;
 mod intake;
 mod library;
+mod live;
 pub mod name_model;
 mod notes;
 mod own;
@@ -107,6 +108,7 @@ pub use jobs::{
 };
 pub use layers::SecurityLayer;
 pub use library::TRASH_DAYS;
+pub use live::LiveView;
 pub use name_model::{HintJob, HintsRead};
 pub use notes::{NoteKind, ParagraphNote, SectionNotes};
 pub use own::SectionModeView;
@@ -136,7 +138,7 @@ pub use views::{
     ReviewPart, SectionResult, SectionView, SortResult, SourceExcerpt, StagedBackup, StyleHint,
     StyleMark, SuspectDecision, TemplateView, UiError,
 };
-pub use views::{ErrorAction, PingResponse, IPC_VERSION};
+pub use views::{ErrorAction, PingResponse, SendProgress, IPC_VERSION};
 
 const API_KEY: &str = "anthropic_api_key";
 
@@ -891,6 +893,8 @@ pub struct Outgoing {
     /// The approved bytes went out a second time in this send (one more try of an answer that
     /// could not be used, D-143): said in the log.
     again: std::sync::atomic::AtomicBool,
+    /// How to show the answer while it is written: a section or a consultation (D-203).
+    live: Option<std::sync::Arc<LiveView>>,
 }
 
 impl std::fmt::Debug for Outgoing {
@@ -906,10 +910,24 @@ impl Outgoing {
     /// local demo.
     /// Returns the answer and whether it came from demo mode.
     pub fn transmit(&self) -> Result<(Value, bool), CoreError> {
-        self.transmit_with(&|_| {})
+        self.transmit_with(&|_, _| {})
     }
 
-    /// The same, with the number of words Claude has written so far, as they arrive.
+    /// How to show this answer while it is written, for a section or a consultation (D-203);
+    /// `None` for every other request, which shows only the number of words.
+    #[must_use]
+    pub fn live(&self) -> Option<std::sync::Arc<LiveView>> {
+        self.live.clone()
+    }
+
+    /// [`Outgoing::live`], taken out: the caller then holds the only copy, and dropping it
+    /// wipes the names at once (on a lock) rather than when the answer comes.
+    pub fn take_live(&mut self) -> Option<std::sync::Arc<LiveView>> {
+        self.live.take()
+    }
+
+    /// The same, with the number of words Claude has written so far and the text itself (still
+    /// tagged), as they arrive.
     ///
     /// An answer cut at the output ceiling, or JSON that does not read, is asked for once more
     /// with the same approved bytes (D-143), as a busy service is (`dv-egress::retry`): the
@@ -917,7 +935,10 @@ impl Outgoing {
     /// step can use. A larger ceiling would be bytes she did not approve, so the ceiling of the
     /// first request is already the large one. Both answers count toward the month. If the
     /// second try fails on the way, the first answer is what the step reads (and says so).
-    pub fn transmit_with(&self, progress: &dyn Fn(u32)) -> Result<(Value, bool), CoreError> {
+    pub fn transmit_with(
+        &self,
+        progress: dv_egress::sse::Progress<'_>,
+    ) -> Result<(Value, bool), CoreError> {
         let first = self.send_once(progress)?;
         let (answer, demo) = &first;
         let sent = serde_json::from_slice::<Value>(self.pending.payload.body()).ok();
@@ -934,7 +955,10 @@ impl Outgoing {
         }
     }
 
-    fn send_once(&self, progress: &dyn Fn(u32)) -> Result<(Value, bool), CoreError> {
+    fn send_once(
+        &self,
+        progress: dv_egress::sse::Progress<'_>,
+    ) -> Result<(Value, bool), CoreError> {
         if let Some(t) = &self.transport {
             return Ok((t.send_streaming(&self.pending.payload, progress)?, false));
         }

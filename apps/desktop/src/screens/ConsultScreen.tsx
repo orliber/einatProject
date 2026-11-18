@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { useDiscreet, useShownName } from "../discreet";
 import { getKept, useKept } from "../kept";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -7,7 +7,7 @@ import { TopBar } from "../components/TopBar";
 import { ReviewDialog } from "../components/ReviewDialog";
 import { CasePicker } from "../components/CasePicker";
 import { ErrorLine, CloseIcon } from "../components/ui";
-import { clock as elapsedClock, estimateMs, learned, leftText, recordDuration, timed, useWords, WaitLine, wordsSoFar } from "../components/Progress";
+import { clock as elapsedClock, estimateMs, learned, leftText, LiveText, recordDuration, timed, useLive, WaitLine, wordsSoFar } from "../components/Progress";
 import { useHoldUnsaved } from "../components/Unsaved";
 import { LocalText, type LocalTextHandle } from "../components/LocalText";
 import { plainText, RichText } from "../components/RichText";
@@ -69,11 +69,16 @@ function titleOf(turns: Turn[]): string {
   return first.length > 40 ? `${first.slice(0, 40).trimEnd()}…` : first;
 }
 
-/** "Claude is writing…" with the seconds waited, so a long answer never looks stuck. */
-function Typing({ since, approval }: { since: number; approval: string | null }) {
+/** "Claude is writing…" with the seconds waited, so a long answer never looks stuck; and the
+ *  answer itself as it is written, with the names put back on this computer (D-203). */
+function Typing({ since, approval, follow }: { since: number; approval: string | null; follow?: () => void }) {
   const ai = useAi();
   const { status } = useApp();
-  const words = useWords(approval ?? undefined);
+  const { words, text } = useLive(approval ?? undefined);
+  // The conversation follows the answer down as it grows, like any chat.
+  useEffect(() => {
+    if (text) follow?.();
+  }, [text, follow]);
   // About how long an answer takes here, at this answer speed (measured on this computer).
   const [estimate] = useState(() => estimateMs("consult", status.speed, status.demo_mode));
   const [known] = useState(() => status.demo_mode || learned("consult", status.speed));
@@ -86,8 +91,9 @@ function Typing({ since, approval }: { since: number; approval: string | null })
   return (
     <div className="chat-row chat-row-ai" role="status">
       <span className="chat-avatar" aria-hidden="true">{ai.charAt(0)}</span>
-      <div className="chat-bubble chat-bubble-ai chat-typing">
-        <span className="dots" aria-hidden="true"><i /><i /><i /></span>
+      <div className={text ? "chat-bubble chat-bubble-ai chat-live" : "chat-bubble chat-bubble-ai chat-typing"}>
+        <LiveText text={text} className="live-text-chat serif" rich />
+        {!text && <span className="dots" aria-hidden="true"><i /><i /><i /></span>}
         <span className="muted small">
           {ai} כותב{elapsed >= 2000 ? ` · ${elapsedClock(elapsed)} · ${leftText(elapsed, estimate, known)}` : "…"}{words >= 5 ? ` · ${wordsSoFar(words)}` : ""}
         </span>
@@ -154,6 +160,7 @@ export function ConsultScreen({ caseId }: { caseId?: string | undefined }) {
   // name: in discreet mode it is "שיחה" and the date.
   const historyTitle = (c: { title: string }) => (discreet ? "שיחה" : c.title || "שיחה");
 
+  const followDown = useCallback(() => end.current?.scrollIntoView({ block: "end" }), []);
   // Follow the conversation down, like any chat.
   useEffect(() => {
     end.current?.scrollIntoView({ block: "end", behavior: "smooth" });
@@ -378,7 +385,7 @@ export function ConsultScreen({ caseId }: { caseId?: string | undefined }) {
                 </div>
               ),
             )}
-            {waitingSince && <Typing since={waitingSince} approval={sending} />}
+            {waitingSince && <Typing since={waitingSince} approval={sending} follow={followDown} />}
             {busy && !waitingSince && !review && (
               <div className="chat-row chat-row-ai">
                 <span className="chat-avatar" aria-hidden="true">{ai.charAt(0)}</span>

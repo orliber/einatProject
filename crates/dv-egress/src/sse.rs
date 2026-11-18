@@ -1,7 +1,8 @@
 //! A streamed answer (server-sent events) put back together into the same message the
 //! non-streamed API returns, while counting the words as they arrive. Streaming changes
-//! nothing about what is sent; it only lets the program show real progress and keeps a long
-//! answer from running into a timeout.
+//! nothing about what is sent; it only lets the program show real progress (and, for a draft
+//! or a consultation, the words themselves, D-203) and keeps a long answer from running into
+//! a timeout.
 
 use std::io::BufRead;
 
@@ -9,9 +10,14 @@ use serde_json::{json, Map, Value};
 
 use crate::{EgressError, MAX_ANSWER_BYTES};
 
-/// Rebuild the final message from the event stream. `progress` gets the number of words
-/// written so far (text only, not the model's thinking).
-pub fn assemble(reader: impl BufRead, progress: &dyn Fn(u32)) -> Result<Value, EgressError> {
+/// What the model has written so far: the number of words and the text itself (text only,
+/// never its thinking), from the start of this answer. Each answer begins with nothing
+/// written, so a second try of the same request starts again from an empty text.
+pub type Progress<'a> = &'a dyn Fn(u32, &str);
+
+/// Rebuild the final message from the event stream. `progress` is told what was written so
+/// far after every piece of text, and once with nothing at the start.
+pub fn assemble(reader: impl BufRead, progress: Progress<'_>) -> Result<Value, EgressError> {
     let mut message: Option<Map<String, Value>> = None;
     let mut blocks: Vec<Value> = Vec::new();
     let mut partial_json: Vec<String> = Vec::new();
@@ -19,6 +25,9 @@ pub fn assemble(reader: impl BufRead, progress: &dyn Fn(u32)) -> Result<Value, E
     let mut in_word = false;
     let mut data = String::new();
     let mut done = false;
+    // Every text piece in order, across blocks: what the window may show while it is written.
+    let mut written = String::new();
+    progress(0, "");
 
     let mut handle = |data: &str,
                       message: &mut Option<Map<String, Value>>,
@@ -72,7 +81,8 @@ pub fn assemble(reader: impl BufRead, progress: &dyn Fn(u32)) -> Result<Value, E
                             in_word = !space;
                         }
                         append(block, "text", piece);
-                        progress(words);
+                        written.push_str(piece);
+                        progress(words, &written);
                     }
                     "thinking_delta" => append(
                         block,
@@ -249,7 +259,21 @@ mod tests {
             json!({"type": "message_stop"}),
         ]);
         let seen = Cell::new(0);
-        let m = assemble(s.as_bytes(), &|w| seen.set(w)).unwrap_or_else(|e| panic!("{e}"));
+        let texts = std::cell::RefCell::new(Vec::<String>::new());
+        let m = assemble(s.as_bytes(), &|w, t| {
+            seen.set(w);
+            texts.borrow_mut().push(t.to_owned());
+        })
+        .unwrap_or_else(|e| panic!("{e}"));
+        // D-203: the text so far, from nothing at the start, never the thinking.
+        assert_eq!(
+            texts.into_inner(),
+            vec![
+                String::new(),
+                "{\"reply\": \"שלום ".to_owned(),
+                "{\"reply\": \"שלום עולם\"}".to_owned(),
+            ]
+        );
         assert_eq!(m["content"][1]["text"], "{\"reply\": \"שלום עולם\"}");
         assert_eq!(m["content"][0]["thinking"], "חושב");
         assert_eq!(m["content"][0]["signature"], "abc");
@@ -277,7 +301,7 @@ mod tests {
             ]);
             assert!(
                 matches!(
-                    assemble(s.as_bytes(), &|_| {}),
+                    assemble(s.as_bytes(), &|_, _| {}),
                     Err(EgressError::Protocol(_))
                 ),
                 "{block}"
@@ -297,7 +321,7 @@ mod tests {
             json!({"type": "message_stop"}),
         ]);
         assert!(matches!(
-            assemble(s.as_bytes(), &|_| {}),
+            assemble(s.as_bytes(), &|_, _| {}),
             Err(EgressError::Protocol(m)) if m.contains("twice")
         ));
         // The same for a text block: the first half is not quietly kept.
@@ -310,7 +334,7 @@ mod tests {
             json!({"type": "message_stop"}),
         ]);
         assert!(matches!(
-            assemble(s.as_bytes(), &|_| {}),
+            assemble(s.as_bytes(), &|_, _| {}),
             Err(EgressError::Protocol(_))
         ));
     }
@@ -322,7 +346,7 @@ mod tests {
             json!({"type": "error", "error": {"type": "overloaded_error", "message": "busy"}}),
         ]);
         assert_eq!(
-            assemble(s.as_bytes(), &|_| {}),
+            assemble(s.as_bytes(), &|_, _| {}),
             Err(EgressError::Overloaded)
         );
         let s = stream(&[
@@ -331,7 +355,7 @@ mod tests {
             json!({"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "חצי"}}),
         ]);
         assert!(matches!(
-            assemble(s.as_bytes(), &|_| {}),
+            assemble(s.as_bytes(), &|_, _| {}),
             Err(EgressError::Interrupted(_))
         ));
     }

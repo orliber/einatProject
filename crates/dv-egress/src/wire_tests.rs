@@ -141,7 +141,7 @@ fn a_refused_request_opens_no_connection() {
         let payload = cleared(&body).unwrap();
         let got = t.send(&payload);
         assert!(matches!(got, Err(EgressError::Policy(_))), "{why}: {got:?}");
-        let got = t.send_streaming(&payload, &|_| {});
+        let got = t.send_streaming(&payload, &|_, _| {});
         assert!(matches!(got, Err(EgressError::Policy(_))), "{why}: {got:?}");
     }
     assert!(
@@ -169,7 +169,7 @@ fn an_open_breaker_opens_no_connection_and_says_how_long() {
     }
     t.breaker = Box::leak(Box::new(Mutex::new(open)));
     let payload = cleared(&ok_body()).unwrap();
-    let got = t.send_streaming(&payload, &|_| {});
+    let got = t.send_streaming(&payload, &|_, _| {});
     assert!(
         matches!(got, Err(EgressError::CircuitOpen(s)) if (1..=60).contains(&s)),
         "{got:?}"
@@ -186,7 +186,7 @@ fn an_allowed_request_does_reach_the_listener() {
     let (listener, t) = aimed_at_listener(build_client().unwrap());
     listener.set_nonblocking(false).unwrap();
     let server = std::thread::spawn(move || listener.accept().is_ok());
-    let got = t.post_once(cleared(&ok_body()).unwrap().body(), &|_| {});
+    let got = t.post_once(cleared(&ok_body()).unwrap().body(), &|_, _| {});
     assert!(server.join().unwrap(), "no connection arrived");
     // The listener speaks no TLS: the hardened client must not treat that as an answer.
     assert!(

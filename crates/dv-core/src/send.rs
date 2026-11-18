@@ -170,6 +170,12 @@ impl Core {
             .pending
             .remove(approval_id)
             .ok_or_else(|| CoreError::NotFound("האישור פג. יש להכין את הבקשה מחדש.".to_owned()))?;
+        // What cannot be read for the preview only leaves it out: the request goes as approved.
+        let live = self
+            .live_view(&pending.kind)
+            .ok()
+            .flatten()
+            .map(std::sync::Arc::new);
         Ok(Outgoing {
             pending,
             model,
@@ -178,6 +184,7 @@ impl Core {
             session: self.session,
             epoch: self.pending_epoch,
             again: std::sync::atomic::AtomicBool::new(false),
+            live,
         })
     }
 

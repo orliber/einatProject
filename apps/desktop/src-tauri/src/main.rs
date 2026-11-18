@@ -37,8 +37,10 @@ struct AppState {
     clipboard: secret_clipboard::SecretClipboard,
     /// The app's data folder: the vault, and the verified installer of an update (D-033).
     dir: PathBuf,
-    /// Words Claude has written so far, per request on its way (D-035). Counts only.
-    progress: Arc<Mutex<std::collections::HashMap<String, u32>>>,
+    /// What the AI has written so far, per request on its way (D-035): the number of words,
+    /// and for a section or a consultation the text itself (D-203). In memory only, dropped
+    /// when the answer arrives.
+    progress: Arc<Mutex<std::collections::HashMap<String, Written>>>,
     /// A newer version fetched and verified in the background, waiting for her click (D-038).
     /// Held while it is being fetched, so two fetches never run at once.
     prepared: Arc<Mutex<Option<dv_core::update::Downloaded>>>,
@@ -48,7 +50,17 @@ struct AppState {
     model_progress: Arc<Mutex<Option<(u64, u64)>>>,
 }
 
-/// Send outside the core's lock, counting the words as the answer arrives.
+/// One answer on its way: how many words, and what was written (still tagged, as it came)
+/// when it is a section or a consultation, with how to show it.
+#[derive(Default)]
+struct Written {
+    words: u32,
+    text: zeroize::Zeroizing<String>,
+    view: Option<Arc<dv_core::LiveView>>,
+}
+
+/// Send outside the core's lock, counting the words (and, for a section or a consultation,
+/// keeping the text) as the answer arrives.
 async fn transmit(
     state: &AppState,
     approval_id: String,
@@ -60,12 +72,35 @@ async fn transmit(
     let progress = Arc::clone(&state.progress);
     let done = Arc::clone(&state.progress);
     let id = approval_id.clone();
+    let mut out = out;
+    // The view is held only here, so a lock drops (and wipes) it at once (`send_progress`).
+    if let Some(view) = out.take_live() {
+        if let Ok(mut p) = state.progress.lock() {
+            p.insert(
+                approval_id.clone(),
+                Written {
+                    view: Some(view),
+                    ..Written::default()
+                },
+            );
+        }
+    }
     // Writing the whole report takes many minutes: the laptop must not sleep meanwhile (D-141).
     let _awake = win_platform::keep_awake();
     let result = tauri::async_runtime::spawn_blocking(move || {
-        let report = |words: u32| {
+        let report = |words: u32, text: &str| {
             if let Ok(mut p) = progress.lock() {
-                p.insert(id.clone(), words);
+                let w = p.entry(id.clone()).or_default();
+                w.words = words;
+                if w.view.is_some() {
+                    // Only what is new is added; an answer that starts again starts empty.
+                    if text.len() < w.text.len() {
+                        w.text.clear();
+                    }
+                    if let Some(new) = text.get(w.text.len()..) {
+                        w.text.push_str(new);
+                    }
+                }
             }
         };
         let r = out.transmit_with(&report);
@@ -79,15 +114,49 @@ async fn transmit(
     result
 }
 
-/// How many words the AI has written so far for a request on its way.
+/// How far a request on its way is: the words so far, and for a section or a consultation
+/// the text with the case's names put back (D-203). Nothing is shown once the vault was
+/// locked after it left, or while the core is busy for a moment (the next ask shows it).
 #[tauri::command]
-fn send_progress(state: tauri::State<'_, AppState>, approval_id: String) -> u32 {
-    state
-        .progress
-        .lock()
-        .ok()
-        .and_then(|p| p.get(&approval_id).copied())
-        .unwrap_or(0)
+fn send_progress(state: tauri::State<'_, AppState>, approval_id: String) -> dv_core::SendProgress {
+    let Ok(mut p) = state.progress.lock() else {
+        return dv_core::SendProgress::default();
+    };
+    let Some(w) = p.get_mut(&approval_id) else {
+        return dv_core::SendProgress::default();
+    };
+    let words = w.words;
+    let Some(view) = w.view.clone() else {
+        return dv_core::SendProgress {
+            words,
+            ..Default::default()
+        };
+    };
+    let open = match state.core.try_lock() {
+        Ok(c) => c.is_session(view.session()),
+        Err(std::sync::TryLockError::WouldBlock) => {
+            return dv_core::SendProgress {
+                words,
+                text: String::new(),
+                busy: true,
+            };
+        }
+        Err(std::sync::TryLockError::Poisoned(_)) => false,
+    };
+    if !open {
+        // Locked since it left: the names and the text go now, not when the answer comes.
+        w.view = None;
+        w.text.clear();
+        return dv_core::SendProgress {
+            words,
+            ..Default::default()
+        };
+    }
+    dv_core::SendProgress {
+        words,
+        text: view.show(&w.text),
+        busy: false,
+    }
 }
 
 type Res<T> = Result<T, UiError>;

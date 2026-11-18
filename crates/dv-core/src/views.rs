@@ -362,6 +362,18 @@ pub struct SectionResult {
     pub demo: bool,
 }
 
+/// How far an answer on its way is (D-035, D-203): the words written so far, and for a section
+/// or a consultation the text itself, with the case's names put back. Shown, never kept.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct SendProgress {
+    pub words: u32,
+    pub text: String,
+    /// The core was busy for a moment, so `text` was not worked out: what was shown stays.
+    /// Otherwise an empty `text` means nothing is to be shown (also after a lock).
+    pub busy: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct ConsultResult {

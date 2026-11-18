@@ -58,7 +58,15 @@ fn run(bytes: &[u8], sizes: &[usize], cap: usize) -> (Result<Value, EgressError>
             turn: 0,
         },
     );
-    let out = assemble(reader, &|w| seen.borrow_mut().push(w));
+    let started = std::cell::Cell::new(false);
+    let out = assemble(reader, &|w, t: &str| {
+        // The call at the start says nothing was written yet; it is not a text delta (D-203).
+        if started.replace(true) {
+            seen.borrow_mut().push(w);
+        } else {
+            assert_eq!((w, t), (0, ""), "an answer starts from nothing written");
+        }
+    });
     (out, seen.into_inner())
 }
 

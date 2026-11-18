@@ -309,6 +309,9 @@ export class FakeCore {
   private sampleId: string | null = null;
   private folderList: Folder[] = [];
   private pending = new Map<string, Pending>();
+  /** An answer "being written" in the preview (D-203): its whole text and when it started, so
+   *  `send_progress` gives more of it each time, as the real stream does. */
+  private live = new Map<string, { text: string; started: number; ms: number }>();
   /** Approvals dropped because their material changed, with the line said at the send. */
   private withdrawn = new Set<string>();
   /** D-193: the finish page's notes she left as they are, by case (kept like the vault keeps them). */
@@ -909,11 +912,31 @@ export class FakeCore {
     return result;
   }
 
-  private sendSection(p: Extract<Pending, { type: "section" }>): SectionResult {
-    const c = this.find(p.caseId);
-    const paragraphs = p.points !== undefined
+  /** Wait as if the answer were written word by word, shown meanwhile by `send_progress`: over
+   *  `browserMs` in the browser preview, so it can be watched; over the usual `ms` in tests. */
+  private async writeSlowly(approval: string, text: string, ms: number, browserMs: number): Promise<void> {
+    const wait = import.meta.env.MODE === "test" ? ms : browserMs;
+    this.live.set(approval, { text, started: Date.now(), ms: wait });
+    await new Promise((r) => setTimeout(r, wait));
+    this.live.delete(approval);
+  }
+
+  /** The paragraphs a section's demo answer holds (nothing stored yet). */
+  private sectionParagraphs(p: Extract<Pending, { type: "section" }>) {
+    return p.points !== undefined
       ? [{ text: p.points.split("\n").map((l) => l.trim()).filter(Boolean).join(" "), source_refs: [] as string[], warnings: [] as string[], guide: 0 }].filter((x) => x.text)
       : p.refs.slice(0, 3).map((r) => ({ text: sentences(r.tagged, 2), source_refs: [r.sid], warnings: [] as string[], guide: 0 })).filter((x) => x.text);
+  }
+
+  /** What the demo answer "writes" while it is on its way, with the names back (D-203). */
+  private sectionWriting(p: Extract<Pending, { type: "section" }>): string {
+    const c = this.find(p.caseId);
+    return this.sectionParagraphs(p).map((x) => restore(x.text, c.people, this.practitioner)).join("\n\n");
+  }
+
+  private sendSection(p: Extract<Pending, { type: "section" }>): SectionResult {
+    const c = this.find(p.caseId);
+    const paragraphs = this.sectionParagraphs(p);
     const approvedTarget = p.replaces ? c.drafts.find((d) => d.id === p.replaces && d.status === "approved") : undefined;
     const target = p.replaces ? c.drafts.find((d) => d.id === p.replaces && d.status === "proposed") : undefined;
     if (approvedTarget && paragraphs.length) {
@@ -1543,10 +1566,10 @@ export class FakeCore {
         const p = this.pending.get(String(a.approvalId));
         if (p?.type !== "section") return this.expired(String(a.approvalId));
         this.pending.delete(String(a.approvalId));
-        await new Promise((r) => setTimeout(r, 2500));
         const c = this.find(p.caseId);
         const asked = p.instruction.trim() ? [`הבקשה שלך\n${this.filterFor(c, p.instruction).tagged}`] : [];
         this.keepSent(p.caseId, p.section, [...p.refs.map((r) => `${r.label}\n${r.tagged}`), ...asked].join("\n\n"));
+        await this.writeSlowly(String(a.approvalId), this.sectionWriting(p), 2500, 7000);
         return this.sendSection(p);
       }
       case "prepare_sort":
@@ -1661,9 +1684,9 @@ export class FakeCore {
         const p = this.pending.get(String(a.approvalId));
         if (p?.type !== "consult") return this.expired(String(a.approvalId));
         this.pending.delete(String(a.approvalId));
-        await new Promise((r) => setTimeout(r, 1400));
         // Shaped like a real answer (headings, bold, a list), so the layout of answers is seen in the demo.
         const answer = `מצב הדגמה: כאן תופיע תשובה מקצועית של ${this.ai}, שמבחינה בין **ידע מבוסס** לדעה ומציינת אי-ודאות.\n\n## מה כדאי לבדוק\n1. מה הילד כן עושה, עם דוגמה מהמפגש.\n2. מה הממצא אומר **ביום-יום**, לא רק המספר.\n- חולשה יחסית, או קושי שדורש התערבות?\n\nההחלטה המקצועית נשארת שלך.`;
+        await this.writeSlowly(String(a.approvalId), answer, 1400, 6000);
         const at = now();
         let conv = p.conversationId ? this.convs.find((x) => x.id === p.conversationId) : undefined;
         if (!conv) {
@@ -1766,8 +1789,14 @@ export class FakeCore {
         return this.status();
       case "forget_backup":
         return null;
-      case "send_progress":
-        return 0;
+      case "send_progress": {
+        const w = this.live.get(String(a.approvalId));
+        if (!w) return { words: 0, text: "", busy: false };
+        const words = w.text.split(/(\s+)/);
+        const share = Math.min(1, (Date.now() - w.started) / w.ms);
+        const text = words.slice(0, Math.ceil(words.length * share)).join("");
+        return { words: text.split(/\s+/).filter(Boolean).length, text, busy: false };
+      }
       case "check_update":
         return {
           ...(this.newerVersion ? { version: this.newerVersion, current: "0.8.1" } : { version: "0.2.0", current: "0.1.0" }),

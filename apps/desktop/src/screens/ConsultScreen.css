@@ -366,3 +366,15 @@
 .chat-hint {
   padding-inline: 12px;
 }
+/* The answer as it is written (D-203): it grows in its bubble, like the finished answer. */
+.chat-live {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.live-text.live-text-chat {
+  background: none;
+  padding: 0;
+  max-height: none;
+  overflow: visible;
+}

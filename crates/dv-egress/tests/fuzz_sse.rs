@@ -135,7 +135,7 @@ fn seed_stream() -> Vec<u8> {
 fn damaged_streams_never_panic_or_hang() {
     let original = seed_stream();
     assert!(
-        dv_egress::sse::assemble(original.as_slice(), &|_| {}).is_ok(),
+        dv_egress::sse::assemble(original.as_slice(), &|_, _| {}).is_ok(),
         "the undamaged stream must read"
     );
     let seed0 = seed0();
@@ -145,7 +145,7 @@ fn damaged_streams_never_panic_or_hang() {
         let bytes = mutate(&mut rng, &original, b"\n:{}[]\",0123456789 ");
         let started = Instant::now();
         let result = catch_unwind(AssertUnwindSafe(|| {
-            dv_egress::sse::assemble(bytes.as_slice(), &|_| {})
+            dv_egress::sse::assemble(bytes.as_slice(), &|_, _| {})
         }));
         assert!(
             result.is_ok(),
@@ -191,7 +191,7 @@ fn hostile_indexes_and_shapes_are_refused_without_a_panic() {
     ] {
         let bytes = stream(&events);
         let result = catch_unwind(AssertUnwindSafe(|| {
-            dv_egress::sse::assemble(bytes.as_slice(), &|_| {})
+            dv_egress::sse::assemble(bytes.as_slice(), &|_, _| {})
         }));
         assert!(result.is_ok(), "panic on {events:?}");
     }
@@ -217,7 +217,7 @@ fn an_answer_that_does_not_end_is_refused() {
     }
     bytes.extend_from_slice(&end);
     let started = Instant::now();
-    let result = dv_egress::sse::assemble(bytes.as_slice(), &|_| {});
+    let result = dv_egress::sse::assemble(bytes.as_slice(), &|_, _| {});
     assert!(
         matches!(result, Err(dv_egress::EgressError::Protocol(_))),
         "{:?}",
@@ -280,7 +280,7 @@ fn events_with_the_wrong_shapes_never_panic() {
         }
         let bytes = stream(&events);
         let result = catch_unwind(AssertUnwindSafe(|| {
-            dv_egress::sse::assemble(bytes.as_slice(), &|_| {})
+            dv_egress::sse::assemble(bytes.as_slice(), &|_, _| {})
         }));
         assert!(
             result.is_ok(),
