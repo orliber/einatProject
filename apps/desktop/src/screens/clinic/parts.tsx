@@ -300,7 +300,8 @@ export function alertGroups(alerts: Alert[]): { kind: AlertKind; alerts: Alert[]
  * "מה דורש אותי": each alert as a line, the patient's name as a button that opens the card,
  * then the sentence the clinic wrote (which never carries the name). `onVisit` and `onTask`
  * add a step right on the line, when the tab has one to offer. `onCard`: the list is shown on
- * this patient's own card, so their name is plain text there, not a link to where she is.
+ * this patient's own card, so their name is left out: it is the page's heading (D-203), and a
+ * link to where she already is would lead nowhere.
  * An alert about no patient (rows that were not read, D-178) has no name at all.
  * `grouped`: the list sits under its kind's heading (`AlertGroups`), so a line has no icon and
  * no kind of its own, and the sentence is quiet. `holdOf`: the step that marks the visit of a
@@ -328,7 +329,7 @@ export function AlertList({ alerts, onVisit, onTask, empty, onCard, grouped = fa
             <div className="grow stack clinic-alert-body">
               {(a.patient_id !== null || !grouped) && (
                 <span className="row clinic-alert-head">
-                  {a.patient_id !== null && <PatientName name={a.patient_name} id={a.patient_id === onCard ? null : a.patient_id} strong />}
+                  {a.patient_id !== null && a.patient_id !== onCard && <PatientName name={a.patient_name} id={a.patient_id} strong />}
                   {!grouped && <span className="chip chip-warn">{ALERT_KIND_LABEL[a.kind]}</span>}
                 </span>
               )}

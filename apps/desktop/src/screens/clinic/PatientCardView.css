@@ -10,52 +10,74 @@
   min-height: 32px;
 }
 
-/* ---------- who ---------- */
+/* ---------- who: one line, then the band of details (D-203) ---------- */
+/* The band's own corners are the card's. The dialogs of the case cell are fixed to the page,
+   so this never clips them. */
 .pcard-head {
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
-  padding: var(--space-5);
+  padding: 0;
+  gap: 0;
+  overflow: hidden;
 }
 .pcard-head-top {
   display: flex;
-  align-items: flex-start;
-  gap: var(--space-4);
+  align-items: center;
+  justify-content: space-between;
   flex-wrap: wrap;
+  gap: var(--space-3) var(--space-4);
+  padding: var(--space-4) var(--space-5);
 }
 .pcard-who {
-  gap: var(--space-2);
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
   min-width: 0;
 }
 .pcard-name {
   font-family: var(--font-display);
   font-size: var(--text-3xl);
-  line-height: 1.2;
+  line-height: 1.1;
   overflow-wrap: anywhere;
-}
-.pcard-facts {
-  flex-wrap: wrap;
-  gap: var(--space-3);
 }
 .pcard-actions {
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: var(--space-2);
 }
-.pcard-contacts {
-  flex-direction: row;
+/* The 1px gap over the line colour draws the dividers, also when the cells wrap. */
+.pcard-band {
+  display: flex;
   flex-wrap: wrap;
-  gap: var(--space-3);
+  gap: 1px;
+  background: var(--line);
+  border-top: 1px solid var(--line);
+}
+.pcard-band-cell {
+  flex: 1 1 210px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-4) var(--space-5);
+  background: var(--surface-alt);
+}
+.pcard-band-wide {
+  flex-basis: 100%;
+}
+.pcard-band-label {
+  margin: 0 0 var(--space-1);
+  font-size: var(--text-sm);
+  font-weight: 700;
+  color: var(--ink-muted);
+}
+.pcard-contacts {
+  gap: var(--space-2);
 }
 .pcard-contact {
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
-  min-width: 220px;
-  padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
-  background: var(--surface-alt);
 }
 .pcard-contact-who {
   display: inline-flex;
@@ -63,55 +85,40 @@
   gap: var(--space-2);
 }
 .pcard-phone {
-  gap: var(--space-3);
+  gap: var(--space-1);
 }
-.pcard-about {
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-}
-.pcard-about > div {
-  display: grid;
-  grid-template-columns: 110px minmax(0, 1fr);
-  gap: var(--space-3);
-}
-.pcard-about dt {
-  color: var(--ink-muted);
-  font-size: var(--text-base);
-}
-.pcard-about dd {
-  margin: 0;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  line-height: 1.5;
-}
-
-/* ---------- the way of the assessment ---------- */
-.pcard-steps {
-  flex-direction: row;
-  flex-wrap: wrap;
-  gap: var(--space-3);
-}
-.pcard-step {
-  flex: 1 1 150px;
-  display: flex;
-  align-items: flex-start;
-  gap: var(--space-2);
-  padding: var(--space-3);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
-  background: var(--surface);
-}
-.pcard-step-body {
-  gap: 2px;
-  min-width: 0;
-}
-.pcard-step-label {
+.pcard-case-code {
   font-weight: 600;
 }
+.pcard-case-actions {
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-4);
+}
+
+/* ---------- the way of the assessment: one joined bar ---------- */
+.pcard-steps {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: var(--space-4) 0;
+}
+.pcard-step {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.pcard-step-track {
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+.pcard-step-track .step-link {
+  flex: 1 1 auto;
+  margin-inline: var(--space-2);
+}
 .pcard-step-mark {
-  flex-shrink: 0;
+  flex: none;
   width: 24px;
   height: 24px;
   display: inline-grid;
@@ -121,43 +128,40 @@
   font-weight: 700;
   line-height: 1;
 }
-/* Done: a full circle with a tick. Now: a ring with a full dot, and a marked frame.
-   To come: an empty dashed ring. Form and colour say the same thing. */
+.pcard-step-label {
+  font-weight: 700;
+}
+.pcard-step-detail {
+  font-size: var(--text-sm);
+  color: var(--ink-muted);
+  overflow-wrap: anywhere;
+}
+/* Done: a full circle with a tick. Now: a ring with a full dot, and its detail in the main
+   colour. To come: an empty dashed ring, in --ink-muted so it holds 3:1 (WCAG 1.4.11). Form
+   and colour say the same thing. */
 .pcard-step-done .pcard-step-mark {
   background: var(--ok);
   color: var(--surface);
 }
-.pcard-step-now {
-  border-color: var(--primary);
-  background: var(--primary-soft);
-}
 .pcard-step-now .pcard-step-mark {
   border: 2px solid var(--primary);
+  background: var(--primary-soft);
   color: var(--primary);
 }
-.pcard-step-todo .pcard-step-mark {
-  border: 2px dashed var(--line-strong);
+.pcard-step-now .pcard-step-detail {
+  color: var(--primary);
+  font-weight: 600;
 }
-.pcard-step-todo .pcard-step-label {
-  color: var(--ink-muted);
+.pcard-step-todo .pcard-step-mark {
+  border: 2px dashed var(--ink-muted);
 }
 
-/* ---------- what needs her, and the case ---------- */
+/* ---------- the visits beside what needs her ---------- */
 .pcard-columns {
   display: grid;
   grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
   gap: var(--space-4);
   align-items: start;
-}
-.pcard-case {
-  gap: var(--space-3);
-}
-.pcard-case-code {
-  font-weight: 600;
-}
-.pcard-case-actions {
-  flex-wrap: wrap;
-  gap: var(--space-2);
 }
 
 /* ---------- visits ---------- */
@@ -324,6 +328,10 @@
 @container page (max-width: 1000px) {
   .pcard-columns {
     grid-template-columns: minmax(0, 1fr);
+  }
+  /* The steps may wrap here: a line that ends at the window's edge would point nowhere. */
+  .pcard-step-track .step-link {
+    display: none;
   }
   .pcard-balance {
     grid-template-columns: minmax(0, 1fr);

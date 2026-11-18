@@ -3,12 +3,13 @@
 // notes, the money and the follow-ups; and, quietly at the bottom, erasing the card.
 // Everything shown is plain text. Every name goes through `PatientName` / `useShownName`, so
 // discreet mode holds; in discreet mode phone numbers and personal notes are not shown at all.
-import { useId, useMemo, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useApp } from "../../App";
 import { ageOf } from "../../components/AgeField";
 import { DateField } from "../../components/DateField";
-import { Dialog, ErrorLine, PlusIcon, Skeleton } from "../../components/ui";
+import { ActionsMenu } from "../../components/Menu";
+import { CopyIcon, Dialog, ErrorLine, PlusIcon, Skeleton } from "../../components/ui";
 import { asUiError, ipc } from "../../ipc/client";
 import { clinicApi } from "../../ipc/clinic";
 import type { Alert } from "../../ipc/generated/Alert";
@@ -23,6 +24,7 @@ import type { ProcessStep } from "../../ipc/generated/ProcessStep";
 import type { SessionNote } from "../../ipc/generated/SessionNote";
 import type { StepState } from "../../ipc/generated/StepState";
 import type { TaskKind } from "../../ipc/generated/TaskKind";
+import type { Today } from "../../ipc/generated/Today";
 import type { Visit } from "../../ipc/generated/Visit";
 import type { VisitStatus } from "../../ipc/generated/VisitStatus";
 import type { VisitView } from "../../ipc/generated/VisitView";
@@ -43,6 +45,7 @@ import { PathwayDialog } from "./PathwayDialog";
 import { PatientDialog } from "./PatientDialog";
 import { VisitDialog } from "./VisitDialog";
 import { SendMenu } from "./SendMenu";
+import { VisitActions } from "./VisitActions";
 import "./PatientCardView.css";
 
 /** What is open over the card: one dialog at a time. */
@@ -97,10 +100,10 @@ export function PatientCardView({ patientId, onBack }: { patientId: string; onBa
       </div>
     );
   }
-  return <CardBody card={card.data} today={now.date} back={back} onBack={onBack} />;
+  return <CardBody card={card.data} today={now.date} now={now} back={back} onBack={onBack} />;
 }
 
-function CardBody({ card, today, back, onBack }: { card: PatientCard; today: string; back: ReactNode; onBack: () => void }) {
+function CardBody({ card, today, now, back, onBack }: { card: PatientCard; today: string; now: Today; back: ReactNode; onBack: () => void }) {
   const p = card.patient;
   const { notify, fail } = useApp();
   const discreet = useDiscreet();
@@ -108,7 +111,22 @@ function CardBody({ card, today, back, onBack }: { card: PatientCard; today: str
   const save = useSavePatient();
   const [open, setOpen] = useState<Open>(null);
   const starter = useStarterTasks();
+  const contactsId = useId();
   const key = clinicKeys.card(p.id, today);
+
+  // The menu item that opened "סגירת הכרטיס" is gone once the menu closes, so the dialog cannot
+  // give the focus back to it: when it closes, the focus goes to the header's "⋯" (WCAG 2.4.3).
+  const actionsRef = useRef<HTMLDivElement>(null);
+  const backToMore = useRef(false);
+  useEffect(() => {
+    if (open !== null || !backToMore.current) return;
+    backToMore.current = false;
+    actionsRef.current?.querySelector<HTMLElement>(".menu-trigger")?.focus();
+  }, [open]);
+  const closeToMore = () => {
+    backToMore.current = true;
+    setOpen(null);
+  };
 
   /** The starter kit (D-199): the questionnaires and documents every family is asked for. */
   async function openStarter() {
@@ -174,15 +192,18 @@ function CardBody({ card, today, back, onBack }: { card: PatientCard; today: str
     if (task) void tick({ task, done: true });
   }
 
+  // One step by the time and the rest under "⋯" (`VisitActions`, D-203), as on the front page;
+  // on the card there is no reminder, "לא הגיעו" is offered, and the "⋯" is named by the date.
+  // A visit still ahead, or a cancelled one, offers nothing here: its time opens it.
   const actionsOf = (view: VisitView) => {
     const v = view.visit;
-    const due = v.date <= today;
+    if (v.date > today || v.status === "cancelled") return null;
     return (
-      <>
-        {v.status === "planned" && due && <button type="button" className="btn btn-small" onClick={() => void mark({ visit: v, status: "held" })}>התקיימה</button>}
-        {v.status === "planned" && due && <button type="button" className="btn btn-small" onClick={() => void mark({ visit: v, status: "no_show" })}>לא הגיעו</button>}
-        {v.status !== "cancelled" && due && <button type="button" className="btn btn-small" onClick={() => setOpen({ kind: "note", visit: v })}>סיכום</button>}
-      </>
+      <VisitActions view={view} patientId={p.id} now={now} reminders={false} onCard
+        onHold={(x) => void mark({ visit: x, status: "held" })}
+        onNoShow={(x) => void mark({ visit: x, status: "no_show" })}
+        onNote={(x) => setOpen({ kind: "note", visit: x })}
+        onOpen={() => setOpen({ kind: "visit", view })} />
     );
   };
   const rows = (views: VisitView[]) => (
@@ -192,7 +213,18 @@ function CardBody({ card, today, back, onBack }: { card: PatientCard; today: str
   );
 
   const contacts = p.contacts.filter((c) => c.name !== "" || c.phone !== "" || c.email !== "");
-  const age = ageOf(card.age, p.gender);
+  const born = p.gender === "male" ? "נולד" : p.gender === "female" ? "נולדה" : "תאריך לידה";
+  // Who the child is, in one quiet line: the age, the setting (not in discreet mode), the birth date.
+  const facts: { key: string; node: ReactNode }[] = [
+    { key: "age", node: ageOf(card.age, p.gender) },
+    { key: "framework", node: discreet ? "" : p.framework },
+    { key: "born", node: p.birth_date ? <>{born} <span className="num" dir="ltr">{formatDate(p.birth_date)}</span></> : "" },
+  ].filter((f) => f.node !== "");
+  // The rare step of the header (D-203): one "⋯" for every status, so the button never leaves the
+  // page and the dialog it opened gives the focus back to it.
+  const more = p.status === "closed"
+    ? { label: "עוד פעולות לכרטיס, כמו פתיחה מחדש", items: [{ label: "פתיחה מחדש", run: () => void reopen(), disabled: save.isPending }] }
+    : { label: "עוד פעולות לכרטיס, כמו סגירת הכרטיס", items: [{ label: "סגירת הכרטיס", run: () => setOpen({ kind: "close" }) }] };
 
   return (
     <div className="stack pcard">
@@ -200,59 +232,59 @@ function CardBody({ card, today, back, onBack }: { card: PatientCard; today: str
 
       <header className="card pcard-head">
         <div className="pcard-head-top">
-          <div className="stack pcard-who">
+          <div className="pcard-who">
             <h2 className="pcard-name"><PatientName name={p.name} strong /></h2>
-            <span className="row pcard-facts">
-              <span className={p.status === "active" ? "chip chip-ok" : "chip chip-sand"}>{PATIENT_STATUS_LABEL[p.status]}</span>
-              {p.status === "waiting" && p.urgent && <span className="chip chip-warn">דחוף</span>}
-              {age && <span>{age}</span>}
-              {p.birth_date && <span className="muted small">תאריך לידה: <span className="num" dir="ltr">{formatDate(p.birth_date)}</span></span>}
-              {p.framework && !discreet && <span className="muted">{p.framework}</span>}
-            </span>
+            <span className={p.status === "active" ? "chip chip-ok" : "chip chip-sand"}>{PATIENT_STATUS_LABEL[p.status]}</span>
+            {p.status === "waiting" && p.urgent && <span className="chip chip-warn">דחוף</span>}
+            {facts.length > 0 && (
+              <span className="muted pcard-facts">
+                {facts.map((f, i) => <Fragment key={f.key}>{i > 0 && <span aria-hidden="true"> · </span>}{f.node}</Fragment>)}
+              </span>
+            )}
           </div>
-          <span className="grow" />
-          <div className="row pcard-actions">
+          <div ref={actionsRef} className="row pcard-actions">
             <button type="button" className="btn btn-primary" onClick={() => setOpen({ kind: "visit" })}><PlusIcon /> פגישה חדשה</button>
             <button type="button" className="btn" onClick={() => setOpen({ kind: "edit" })}>עריכת הפרטים</button>
-            {p.status === "closed"
-              ? <button type="button" className="btn" disabled={save.isPending} onClick={() => void reopen()}>פתיחה מחדש</button>
-              : <button type="button" className="btn" onClick={() => setOpen({ kind: "close" })}>סגירת הכרטיס</button>}
+            <ActionsMenu label={more.label} items={more.items} />
           </div>
         </div>
 
-        {contacts.length === 0
-          ? <p className="muted clinic-quiet">עוד אין אנשי קשר בכרטיס. אפשר להוסיף אותם ב"עריכת הפרטים".</p>
-          : (
-            <ul className="clinic-list pcard-contacts" aria-label="אנשי קשר">
-              {contacts.map((c, i) => (
-                <li key={i} className="pcard-contact">
-                  <span className="pcard-contact-who">
-                    <span className="muted">{CONTACT_ROLE_LABEL[c.role]}</span>
-                    {c.name !== "" && <span className="clinic-name clinic-name-strong">{shown(c.name)}</span>}
-                  </span>
-                  {c.phone !== "" && (
-                    <span className="row pcard-phone">
-                      {discreet ? <span className="muted small">הטלפון מוסתר במצב דיסקרטי</span> : <span className="num" dir="ltr">{c.phone}</span>}
-                      <button type="button" className="btn btn-small" aria-label={`העתקת הטלפון של ${CONTACT_ROLE_LABEL[c.role]}${c.name !== "" ? ` ${shown(c.name)}` : ""}`}
-                        onClick={() => void copyPhone(c.phone)}>העתקה</button>
-                    </span>
-                  )}
-                  {c.email !== "" && !discreet && <span className="muted small num" dir="ltr">{c.email}</span>}
-                </li>
-              ))}
-            </ul>
-          )}
-
-        {(p.reason || p.referred_by || p.notes) && discreet && (
-          <p className="muted small">סיבת הפנייה וההערות מוסתרות במצב דיסקרטי.</p>
-        )}
-        {(p.reason || p.referred_by || p.notes) && !discreet && (
-          <dl className="pcard-about">
-            {p.reason && <div><dt>סיבת הפנייה</dt><dd>{p.reason}</dd></div>}
-            {p.referred_by && <div><dt>מי הפנה</dt><dd>{p.referred_by}</dd></div>}
-            {p.notes && <div><dt>הערות</dt><dd>{p.notes}</dd></div>}
-          </dl>
-        )}
+        {/* The details in one band: an empty one is left out, a long one folds. */}
+        <div className="pcard-band">
+          <div className="pcard-band-cell">
+            <h3 id={contactsId} className="pcard-band-label">אנשי קשר</h3>
+            {contacts.length === 0
+              ? <p className="muted">עוד אין אנשי קשר בכרטיס. אפשר להוסיף אותם ב"עריכת הפרטים".</p>
+              : (
+                <ul className="clinic-list pcard-contacts" aria-labelledby={contactsId}>
+                  {contacts.map((c, i) => {
+                    const copyLabel = `העתקת הטלפון של ${CONTACT_ROLE_LABEL[c.role]}${c.name !== "" ? ` ${shown(c.name)}` : ""}`;
+                    return (
+                      <li key={i} className="pcard-contact">
+                        <span className="pcard-contact-who">
+                          <span className="muted">{CONTACT_ROLE_LABEL[c.role]}</span>
+                          {c.name !== "" && <span className="clinic-name clinic-name-strong">{shown(c.name)}</span>}
+                        </span>
+                        {c.phone !== "" && (
+                          <span className="row pcard-phone">
+                            {discreet ? <span className="muted">הטלפון מוסתר במצב דיסקרטי</span> : <span className="num" dir="ltr">{c.phone}</span>}
+                            <button type="button" className="btn btn-small icon-btn" aria-label={copyLabel} title={copyLabel} onClick={() => void copyPhone(c.phone)}>
+                              <CopyIcon />
+                            </button>
+                          </span>
+                        )}
+                        {c.email !== "" && !discreet && <span className="muted num" dir="ltr">{c.email}</span>}
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+          </div>
+          {p.reason && <AboutCell label="סיבת הפנייה" text={p.reason} hiddenText="מוסתרת במצב דיסקרטי" />}
+          {p.referred_by && <AboutCell label="מי הפנה" text={p.referred_by} hiddenText="מוסתר במצב דיסקרטי" />}
+          <CaseBox patient={p} link={card.case} />
+          {p.notes && <AboutCell wide label="הערות" text={p.notes} hiddenText="מוסתרות במצב דיסקרטי" />}
+        </div>
       </header>
 
       <Section title="מסלול האבחון" aside={p.status === "closed" ? undefined : (
@@ -266,30 +298,29 @@ function CardBody({ card, today, back, onBack }: { card: PatientCard; today: str
         <ProcessSteps steps={card.process} />
       </Section>
 
+      {/* The visits beside what needs her; the child's name is the heading, so the needs leave it out. */}
       <div className="pcard-columns">
+        <Section title="פגישות" aside={<button type="button" className="btn btn-small" onClick={() => setOpen({ kind: "visit" })}><PlusIcon /> פגישה חדשה</button>}>
+          {card.visits.length === 0 ? <p className="muted clinic-quiet">עוד לא נקבעה פגישה. אפשר לקבוע את הראשונה כבר עכשיו.</p> : (
+            <>
+              <div className="stack pcard-group">
+                <h3>הפגישות הקרובות</h3>
+                {upcoming.length === 0 ? <p className="muted clinic-quiet">אין פגישה מתוכננת ביומן.</p> : rows(upcoming)}
+              </div>
+              {earlier.length > 0 && (
+                <div className="stack pcard-group">
+                  <h3>פגישות שהיו</h3>
+                  {rows(past.shown)}
+                  <Pager page={past.page} pages={past.pages} onPage={past.setPage} label="עמודי הפגישות שהיו" />
+                </div>
+              )}
+            </>
+          )}
+        </Section>
         <Section title="מה דורש אותי" aside={card.alerts.length > 0 ? <span className="chip chip-warn">{card.alerts.length}</span> : undefined}>
           <AlertList alerts={card.alerts} onVisit={openAlertVisit} onTask={finishAlertTask} onCard={p.id} empty="אין כרגע שום דבר שמחכה בכרטיס הזה." />
         </Section>
-        <CaseBox patient={p} link={card.case} />
       </div>
-
-      <Section title="פגישות" aside={<button type="button" className="btn btn-small" onClick={() => setOpen({ kind: "visit" })}><PlusIcon /> פגישה חדשה</button>}>
-        {card.visits.length === 0 ? <p className="muted clinic-quiet">עוד לא נקבעה פגישה. אפשר לקבוע את הראשונה כבר עכשיו.</p> : (
-          <>
-            <div className="stack pcard-group">
-              <h3>הפגישות הקרובות</h3>
-              {upcoming.length === 0 ? <p className="muted clinic-quiet">אין פגישה מתוכננת ביומן.</p> : rows(upcoming)}
-            </div>
-            {earlier.length > 0 && (
-              <div className="stack pcard-group">
-                <h3>פגישות שהיו</h3>
-                {rows(past.shown)}
-                <Pager page={past.page} pages={past.pages} onPage={past.setPage} label="עמודי הפגישות שהיו" />
-              </div>
-            )}
-          </>
-        )}
-      </Section>
 
       <NotesBox card={card} onNew={() => setOpen({ kind: "note" })} onEdit={(noteId) => setOpen({ kind: "note", noteId })} />
       <MoneyBox card={card} today={today} />
@@ -311,11 +342,11 @@ function CardBody({ card, today, back, onBack }: { card: PatientCard; today: str
       {open?.kind === "edit" && <PatientDialog patient={p} onClose={() => setOpen(null)} />}
       {open?.kind === "pathway" && <PathwayDialog patientId={p.id} patientName={p.name} onClose={() => setOpen(null)} />}
       {open?.kind === "close" && (
-        <ConfirmDialog title="סגירת הכרטיס" action="לסגור את הכרטיס" onClose={() => setOpen(null)}
+        <ConfirmDialog title="סגירת הכרטיס" action="לסגור את הכרטיס" onClose={closeToMore}
           onConfirm={async () => {
             await save.mutateAsync({ ...p, status: "closed", urgent: false });
             notify("הכרטיס נסגר, ונשמר תחת \"הסתיים\"");
-            setOpen(null);
+            closeToMore();
           }}>
           <p>הכרטיס של <PatientName name={p.name} strong /> יעבור ל"הסתיים", ויצא מהרשימה הפעילה.</p>
           <p className="muted">שום דבר לא נמחק: הפגישות, הסיכומים והתשלומים נשארים שמורים, ואפשר לפתוח את הכרטיס מחדש בכל רגע.</p>
@@ -329,24 +360,40 @@ function CardBody({ card, today, back, onBack }: { card: PatientCard; today: str
   );
 }
 
+// ------------------------------------------------------------------ the details
+
+/** One cell of the band: a label, and the text, folded when long. Her words about the family
+ *  are not shown in discreet mode; the cell says so in their place. */
+function AboutCell({ label, text, hiddenText, wide = false }: { label: string; text: string; hiddenText: string; wide?: boolean }) {
+  const discreet = useDiscreet();
+  return (
+    <div className={wide ? "pcard-band-cell pcard-band-wide" : "pcard-band-cell"}>
+      <h3 className="pcard-band-label">{label}</h3>
+      {discreet ? <p className="muted">{hiddenText}</p> : <FoldedText text={text} more="להציג הכל" less="לקצר" />}
+    </div>
+  );
+}
+
 // ------------------------------------------------------------------ the way of the assessment
 
 const STEP_WORD: Record<StepState, string> = { done: "הושלם", now: "עכשיו", todo: "בהמשך" };
 const STEP_MARK: Record<StepState, string> = { done: "✓", now: "●", todo: "" };
 
-/** The assessment as a row of steps. Each state has its own form (a tick, a full dot, an empty
- *  dashed ring) and its own word for a screen reader, so it never rests on colour alone. */
+/** The assessment as one joined bar of steps (D-203). Each state has its own form (a tick, a
+ *  full dot, an empty dashed ring) and its own word for a screen reader, so it never rests on
+ *  colour alone; the line between two steps is decoration. */
 function ProcessSteps({ steps }: { steps: ProcessStep[] }) {
   if (steps.length === 0) return <p className="muted clinic-quiet">המסלול יופיע כאן אחרי שתיקבע הפגישה הראשונה.</p>;
   return (
     <ol className="clinic-list pcard-steps" aria-label="שלבי האבחון">
-      {steps.map((s) => (
+      {steps.map((s, i) => (
         <li key={s.key} className={`pcard-step pcard-step-${s.state}`} aria-current={s.state === "now" ? "step" : undefined}>
-          <span className="pcard-step-mark" aria-hidden="true">{STEP_MARK[s.state]}</span>
-          <span className="stack pcard-step-body">
-            <span className="pcard-step-label">{s.label}<span className="visually-hidden">: {STEP_WORD[s.state]}</span></span>
-            <span className="muted small">{s.detail}</span>
+          <span className="pcard-step-track" aria-hidden="true">
+            <span className="pcard-step-mark">{STEP_MARK[s.state]}</span>
+            {i < steps.length - 1 && <span className={s.state === "done" ? "step-link step-link-done" : "step-link"} />}
           </span>
+          <span className="pcard-step-label">{s.label}<span className="visually-hidden">: {STEP_WORD[s.state]}</span></span>
+          <span className="pcard-step-detail">{s.detail}</span>
         </li>
       ))}
     </ol>
@@ -355,7 +402,8 @@ function ProcessSteps({ steps }: { steps: ProcessStep[] }) {
 
 // ------------------------------------------------------------------ the diagnostic case
 
-/** The link to the diagnostic case: open it, unlink it; or open a new one, or link one that exists. */
+/** The link to the diagnostic case: open it, unlink it; or open a new one, or link one that exists.
+ *  In discreet mode it shows only the case's code, which carries no name. */
 function CaseBox({ patient, link }: { patient: Patient; link: CaseLink | null }) {
   const { go, notify } = useApp();
   const create = useCreateCase();
@@ -376,31 +424,35 @@ function CaseBox({ patient, link }: { patient: Patient; link: CaseLink | null })
     }
   }
 
-  const unlink = <button type="button" className="btn btn-small" onClick={() => setUnlinking(true)}>לנתק</button>;
+  const headingId = useId();
+  const unlink = <button type="button" className="link-btn" onClick={() => setUnlinking(true)}>לנתק</button>;
+  const startOne = (
+    <span className="row pcard-case-actions">
+      <button type="button" className="link-btn" disabled={create.isPending} onClick={() => void openNew()}>לפתוח תיק</button>
+      <button type="button" className="link-btn" onClick={() => setPicking(true)}>לקשר לתיק קיים</button>
+    </span>
+  );
+  // A cell of the card's band (D-203), still the region "תיק האבחון"; its steps are quiet links.
   return (
-    <Section title="תיק האבחון">
+    <section className="pcard-band-cell pcard-case" aria-labelledby={headingId}>
+      <h3 id={headingId} className="pcard-band-label">תיק האבחון</h3>
       {link === null ? (
-        <div className="stack pcard-case">
-          <p className="clinic-quiet">
-            {patient.case_id !== null
-              ? "התיק שהיה מקושר לכרטיס כבר לא קיים. אפשר לפתוח תיק חדש, או לקשר לתיק אחר."
-              : "לכרטיס הזה עוד אין תיק אבחון. בתיק נכתב הדוח, ואליו אפשר להעביר סיכומי פגישות."}
-          </p>
-          <span className="row pcard-case-actions">
-            <button type="button" className="btn btn-primary btn-small" disabled={create.isPending} onClick={() => void openNew()}>לפתוח תיק אבחון</button>
-            <button type="button" className="btn btn-small" onClick={() => setPicking(true)}>לקשר לתיק קיים</button>
-          </span>
-        </div>
+        <>
+          {patient.case_id !== null
+            ? <p className="clinic-quiet">התיק שהיה מקושר לכרטיס כבר לא קיים. אפשר לפתוח תיק חדש, או לקשר לתיק אחר.</p>
+            : <p className="clinic-quiet">עוד אין תיק.</p>}
+          {startOne}
+        </>
       ) : link.in_trash ? (
-        <div className="stack pcard-case">
+        <>
           <p className="note-warn clinic-quiet">התיק <span className="num">{link.code}</span> נמצא בסל המחזור. אפשר לשחזר אותו ברשימת התיקים, או לנתק אותו מהכרטיס.</p>
           <span className="row pcard-case-actions">
-            <button type="button" className="btn btn-small" onClick={() => go({ name: "cases" })}>לרשימת התיקים</button>
+            <button type="button" className="link-btn" onClick={() => go({ name: "cases" })}>לרשימת התיקים</button>
             {unlink}
           </span>
-        </div>
+        </>
       ) : (
-        <div className="stack pcard-case">
+        <>
           {opened === link.id && <p className="note-sand clinic-quiet" role="status">התיק נפתח, והוא מקושר לכרטיס. מעכשיו אפשר להעביר אליו סיכומי פגישות.</p>}
           <p className="clinic-quiet">
             <span className="pcard-case-code num">{link.code}</span>
@@ -409,12 +461,12 @@ function CaseBox({ patient, link }: { patient: Patient; link: CaseLink | null })
           </p>
           <span className="row pcard-case-actions">
             {/* As the case list opens a case: its materials while nothing is written, the report after. */}
-            <button type="button" className="btn btn-primary btn-small" onClick={() => go({ name: "case", id: link.id, view: link.approved > 0 ? "report" : "materials" })}>
+            <button type="button" className="link-btn" onClick={() => go({ name: "case", id: link.id, view: link.approved > 0 ? "report" : "materials" })}>
               {opened === link.id ? "לעבור לתיק" : "לפתוח את התיק"}
             </button>
             {unlink}
           </span>
-        </div>
+        </>
       )}
       <ErrorLine error={error} />
 
@@ -430,7 +482,7 @@ function CaseBox({ patient, link }: { patient: Patient; link: CaseLink | null })
           <p className="muted">התיק עצמו לא נמחק ולא משתנה, וסיכומים שכבר הועברו אליו נשארים בו. אפשר לקשר אותו שוב בכל רגע.</p>
         </ConfirmDialog>
       )}
-    </Section>
+    </section>
   );
 }
 
@@ -484,13 +536,30 @@ function CasePicker({ patientId, onClose }: { patientId: string; onClose: () => 
 /** From how much text a record is folded to a few lines. */
 const LONG_RECORD = 260;
 
+/** Plain text that folds to four lines when it is long, with the link that opens it whole. */
+function FoldedText({ text, more, less }: { text: string; more: string; less: string }) {
+  const [whole, setWhole] = useState(false);
+  const id = useId();
+  const long = text.length > LONG_RECORD || text.split("\n").length > 4;
+  return (
+    <>
+      <p id={id} className={long && !whole ? "pcard-note-text pcard-note-folded" : "pcard-note-text"}>{text}</p>
+      {long && (
+        <button type="button" className="link-btn" aria-expanded={whole} aria-controls={id} onClick={() => setWhole((w) => !w)}>
+          {whole ? less : more}
+        </button>
+      )}
+    </>
+  );
+}
+
 function NotesBox({ card, onNew, onEdit }: { card: PatientCard; onNew: () => void; onEdit: (noteId: string) => void }) {
   const paged = usePaged(card.notes, 5);
   const visits = useMemo(() => new Map(card.visits.map((v) => [v.visit.id, v.visit])), [card.visits]);
   return (
     <Section title="סיכומי פגישות" aside={<button type="button" className="btn btn-small" onClick={onNew}><PlusIcon /> סיכום שיחה</button>}>
       {card.notes.length === 0
-        ? <p className="muted clinic-quiet">עוד אין סיכומים. סיכום של פגישה נכתב מהשורה שלה, בלחיצה על "סיכום".</p>
+        ? <p className="muted clinic-quiet">עוד אין סיכומים. סיכום של פגישה נכתב מהשורה שלה, בלחיצה על "לכתוב סיכום".</p>
         : (
           <ul className="clinic-list pcard-notes">
             {paged.shown.map((n) => <NoteItem key={n.id} note={n} visit={n.visit_id === null ? null : (visits.get(n.visit_id) ?? null)} caseCode={card.case?.code ?? null} onEdit={() => onEdit(n.id)} />)}
@@ -505,12 +574,9 @@ function NotesBox({ card, onNew, onEdit }: { card: PatientCard; onNew: () => voi
  *  personal note exists. Its text is shown only when she asks, and never in discreet mode. */
 function NoteItem({ note, visit, caseCode, onEdit }: { note: SessionNote; visit: Visit | null; caseCode: string | null; onEdit: () => void }) {
   const discreet = useDiscreet();
-  const [whole, setWhole] = useState(false);
   const [personal, setPersonal] = useState(false);
-  const recordId = useId();
   const personalId = useId();
   const record = note.record.trim();
-  const long = record.length > LONG_RECORD || record.split("\n").length > 4;
   const showPersonal = personal && !discreet;
   const when = formatDate(note.date);
   return (
@@ -525,12 +591,7 @@ function NoteItem({ note, visit, caseCode, onEdit }: { note: SessionNote; visit:
 
       {record === "" ? <p className="muted clinic-quiet">לא נכתבה רשומה.</p> : discreet ? <p className="muted small">הרשומה מוסתרת במצב דיסקרטי.</p> : (
         <div className="stack pcard-note-record">
-          <p id={recordId} className={long && !whole ? "pcard-note-text pcard-note-folded" : "pcard-note-text"}>{record}</p>
-          {long && (
-            <button type="button" className="link-btn" aria-expanded={whole} aria-controls={recordId} onClick={() => setWhole((w) => !w)}>
-              {whole ? "לקצר" : "להציג את כל הרשומה"}
-            </button>
-          )}
+          <FoldedText text={record} more="להציג את כל הרשומה" less="לקצר" />
         </div>
       )}
 

@@ -355,6 +355,19 @@ in the month "איך פותחים יום"). A visit chosen for moving gets its b
 legend's fixed-height slot, so the grid never moves under the pointer. Today is a tinted column
 (`--primary-wash`, a closed holiday's stripes win), with the now line only there. The day list
 uses `VisitActions`, as the front page does.
+The patient card (`PatientCardView.tsx`, D-203) has a one-line header (the name as its h2, the
+status, the facts in one muted line) with "+ פגישה חדשה", "עריכת הפרטים" and one `ActionsMenu`
+for the rare step ("סגירת הכרטיס", or "פתיחה מחדש" on a closed card); the menu stays mounted in
+every status, and closing its dialog puts the focus back on it. Under the header, one band of
+cells: contacts (the phone copied through `ipc.copySecret` only), the reason, who referred, the
+case (`CaseBox`, still the region "תיק האבחון", its steps as link buttons), and the notes; an
+empty cell is left out, long text folds (`FoldedText`, shared with the session notes), and in
+discreet mode each private cell says so in its place. The pathway is one joined bar
+(`.step-link` between the marks, hidden when the steps may wrap). The visits come first, beside
+"מה דורש אותי", whose lines leave out the child's name on the child's own card (`AlertList`'s
+`onCard`). Each visit uses `VisitActions` with `reminders={false}`, `onNoShow` and `onCard`, as on
+the front page; a visit of a later day, or a cancelled one, has no actions. Marking stays
+optimistic with its rollback. "מחיקת הכרטיס" stays the quiet link at the bottom.
 In כספים, "ייצוא לרואה החשבון" (beside the month and beside the year) opens a dialog that picks
 a month or a whole year and calls `ipc.exportIncome(period)` (not through `clinic`: the file goes
 from the core to the disk, and the window gets only its path, said in a toast). The browser

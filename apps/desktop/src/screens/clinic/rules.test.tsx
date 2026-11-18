@@ -266,10 +266,11 @@ describe("the small things", () => {
     expect(open.getAttribute("aria-label")?.startsWith(open.textContent ?? "-")).toBe(true);
   });
 
-  it("an alert on a patient's own card names the child without a link to the card she is on", async () => {
+  it("an alert on a patient's own card leaves the child's name out, so nothing links to the card she is on", async () => {
     await openCard("נועם");
     const needs = await region("מה דורש אותי");
-    expect(within(needs).getAllByText("נועם").length).toBeGreaterThan(0);
+    // The name is the card's heading (D-203): the lines under it do not repeat it, as a link or as text.
+    expect(within(needs).queryByText("נועם")).toBeNull();
     expect(within(needs).queryByRole("button", { name: "נועם" })).toBeNull();
     // What an alert is for stays: the way to the note it asks for.
     expect(within(needs).getByRole("button", { name: "לכתוב סיכום" })).toBeInTheDocument();
