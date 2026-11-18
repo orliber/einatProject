@@ -2,6 +2,7 @@
 // progress line that says how far along a request is and about how long is left.
 import { useEffect, useRef, useState } from "react";
 import { ipc } from "../ipc/client";
+import { RichText } from "./RichText";
 import "./Progress.css";
 
 /** Requests to Claude ("draft", "sort", "consult"), and the waits that stay on this computer. */
@@ -154,8 +155,9 @@ export function useWords(approval: string | undefined): number {
   return useLive(approval).words;
 }
 
-/** The words being written, as text only (never markup), kept scrolled to the newest line. */
-export function LiveText({ text, className = "" }: { text: string; className?: string }) {
+/** The words being written, as text only (never markup), kept scrolled to the newest line.
+ *  `rich`: laid out like the finished answer (headings, bold, lists; React nodes, never HTML). */
+export function LiveText({ text, className = "", rich = false }: { text: string; className?: string; rich?: boolean }) {
   const box = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const el = box.current;
@@ -164,7 +166,7 @@ export function LiveText({ text, className = "" }: { text: string; className?: s
   if (!text) return null;
   return (
     <div ref={box} className={`live-text ${className}`.trim()} dir="auto" aria-live="off">
-      {text}
+      {rich ? <RichText text={text} /> : text}
       <span className="live-caret" aria-hidden="true" />
     </div>
   );

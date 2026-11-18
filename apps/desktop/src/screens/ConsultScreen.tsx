@@ -92,7 +92,7 @@ function Typing({ since, approval, follow }: { since: number; approval: string |
     <div className="chat-row chat-row-ai" role="status">
       <span className="chat-avatar" aria-hidden="true">{ai.charAt(0)}</span>
       <div className={text ? "chat-bubble chat-bubble-ai chat-live" : "chat-bubble chat-bubble-ai chat-typing"}>
-        <LiveText text={text} className="live-text-chat" />
+        <LiveText text={text} className="live-text-chat serif" rich />
         {!text && <span className="dots" aria-hidden="true"><i /><i /><i /></span>}
         <span className="muted small">
           {ai} כותב{elapsed >= 2000 ? ` · ${elapsedClock(elapsed)} · ${leftText(elapsed, estimate, known)}` : "…"}{words >= 5 ? ` · ${wordsSoFar(words)}` : ""}
