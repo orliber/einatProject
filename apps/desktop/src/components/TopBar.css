@@ -59,10 +59,18 @@
   font-weight: 700;
   box-shadow: 0 1px 3px rgb(0 0 0 / 0.08);
 }
-/* Discreet mode: a quiet button that turns sand-coloured while it is on. */
-.topbar-discreet {
-  gap: 6px;
+/* The program's tools (D-203): one family of quiet 44px buttons, the discreet eye, the
+   keyboard shortcuts and the settings as icons, then "נעילה" with its word. */
+.topbar-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
 }
+.topbar-lock {
+  margin-inline-start: 4px;
+}
+/* Discreet mode: the eye turns sand-coloured while it is on. */
 .topbar-discreet-on {
   background: var(--warn-soft);
   border-color: var(--warn-line);
@@ -72,6 +80,15 @@
 .topbar-settings-on {
   background: var(--primary-soft);
   border-color: var(--primary-line);
+  color: var(--primary);
+}
+/* .icon-btn's sand hover would hide the on-state: a hover keeps it. */
+.topbar-discreet-on:hover:not(:disabled) {
+  background: var(--warn-soft);
+  color: var(--warn-ink);
+}
+.topbar-settings-on:hover:not(:disabled) {
+  background: var(--primary-soft);
   color: var(--primary);
 }
 
@@ -135,16 +152,42 @@
   border-radius: 999px;
   background: var(--ok);
 }
-.topbar-demo {
+/* The one quiet status badge (D-203): demo mode, a new version, or both. Text with a dot,
+   never colour alone; a button only when there is a version to open. */
+.topbar-status {
   display: inline-flex;
   align-items: center;
+  gap: 6px;
   min-height: 28px;
   padding: 0 12px;
   border-radius: 999px;
-  background: var(--warn-soft);
-  color: var(--warn-ink);
+  border: 1px solid var(--primary-line);
+  background: var(--primary-soft);
+  color: var(--primary);
   font-size: var(--text-sm);
   font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.topbar-status-demo {
+  border-color: var(--warn-line);
+  background: var(--warn-soft);
+  color: var(--warn-ink);
+}
+.topbar-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--primary);
+}
+.topbar-status-demo .topbar-status-dot {
+  background: var(--warn-dot);
+}
+button.topbar-status:hover {
+  background: var(--surface);
+}
+.topbar-status-short {
+  display: none;
 }
 
 /* The page under the bar (cases, consultation, settings). */
@@ -184,7 +227,7 @@
 
 /* A laptop screen, or a larger text size (measured after the zoom): the bar keeps to one
    line. Last, so it wins over the rules above. */
-/* The two parts, discreet mode and the lock come first: "מוצפן" steps back before them. */
+/* The two parts, the tools and the lock come first: "מוצפן" steps back before them. */
 @container (max-width: 1340px) {
   .topbar-safe {
     display: none;
@@ -194,8 +237,14 @@
   .topbar-area {
     padding: 0 12px;
   }
-  .topbar-discreet-text {
+}
+/* A narrow bar: the badge's short words (its name stays whole). */
+@container (max-width: 1000px) {
+  .topbar-status-long {
     display: none;
+  }
+  .topbar-status-short {
+    display: inline;
   }
 }
 /* A laptop with larger text: the program's name steps back (its lock stays), so the two

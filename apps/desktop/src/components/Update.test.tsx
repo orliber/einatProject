@@ -1,6 +1,7 @@
 // Updates (D-033, D-038): the settings row (check now, the newest already, a check that fails),
 // the window of a new version (now, later, a download that fails, a computer that does not
-// install by itself), the chip in the top bar, and the daily check that she can turn off.
+// install by itself), the chip in the top bar, the one status badge that tells demo mode and a
+// new version together (D-203), and the daily check that she can turn off.
 // The versions and notes are invented.
 import { configure, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -8,7 +9,7 @@ import { mockIPC } from "@tauri-apps/api/mocks";
 import type { UpdateView } from "../ipc/client";
 import { a11yViolations } from "../test/a11y";
 import { appApi, Host, serve, type Override } from "../test/host";
-import { checkNow, LockScreenUpdate, UpdateChip, UpdateDialog, UpdateSettings, versionAtLeast } from "./Update";
+import { checkNow, LockScreenUpdate, StatusChip, UpdateChip, UpdateDialog, UpdateSettings, versionAtLeast } from "./Update";
 import { forgetHold, useHoldUnsaved } from "./Unsaved";
 
 configure({ asyncUtilTimeout: 5000 });
@@ -156,6 +157,40 @@ describe("the daily check and the chip", () => {
 
   it("on the lock screen, only a version that installs here is offered", async () => {
     const { view } = await show(<LockScreenUpdate />, (cmd) => (cmd === "check_update" ? { ...UPDATE, can_install: false } : undefined));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(view.container).toBeEmptyDOMElement();
+  });
+});
+
+describe("the one status badge in the top bar", () => {
+  it("demo mode and a ready version are one button, “הדגמה · עדכון מוכן”, that opens “גרסה 0.9.3 מוכנה”; passes the accessibility check", async () => {
+    const { user, calls, view } = await show(<StatusChip demo />, (cmd) => (cmd === "check_update" ? UPDATE : undefined));
+    expect(await screen.findByRole("button", { name: /^הדגמה · (יש עדכון|עדכון מוכן)$/ })).toBeInTheDocument();
+    await waitFor(() => expect(calls.some((c) => c.cmd === "prepare_update")).toBe(true));
+    const badge = await screen.findByRole("button", { name: "הדגמה · עדכון מוכן" });
+    // One badge: demo mode is not a second one beside it.
+    expect(screen.getAllByRole("button")).toEqual([badge]);
+    expect(screen.queryByText("מצב הדגמה")).toBeNull();
+    expect(badge).toHaveAttribute("title", "לא הוגדר מפתח API. התשובות הן דוגמאות מקומיות, ושום דבר לא נשלח. לחיצה: הגרסה החדשה.");
+    // The short words of a narrow bar are not read twice.
+    expect(within(badge).getByText("הדגמה · עדכון")).toHaveAttribute("aria-hidden", "true");
+    expect(await a11yViolations(view.container)).toEqual([]);
+    await user.click(badge);
+    expect(await screen.findByRole("dialog", { name: "גרסה 0.9.3 מוכנה" })).toBeInTheDocument();
+  });
+
+  it("demo mode alone is the quiet text “מצב הדגמה”, not a button, and the daily check is still asked", async () => {
+    const { calls } = await show(<StatusChip demo />, (cmd) => (cmd === "check_update" ? null : undefined));
+    await waitFor(() => expect(calls.some((c) => c.cmd === "check_update")).toBe(true));
+    const badge = screen.getByText("מצב הדגמה");
+    expect(badge.tagName).toBe("SPAN");
+    expect(badge).toHaveAttribute("title", "לא הוגדר מפתח API. התשובות הן דוגמאות מקומיות, ושום דבר לא נשלח.");
+    expect(screen.queryByRole("button")).toBeNull();
+  });
+
+  it("with neither, nothing is shown", async () => {
+    const { calls, view } = await show(<StatusChip demo={false} />, (cmd) => (cmd === "check_update" ? null : undefined));
+    await waitFor(() => expect(calls.some((c) => c.cmd === "check_update")).toBe(true));
     await new Promise((r) => setTimeout(r, 50));
     expect(view.container).toBeEmptyDOMElement();
   });
