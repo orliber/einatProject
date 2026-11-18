@@ -60,6 +60,12 @@ pub enum AuditEvent {
     DriveBackupUploaded,
     DriveBackupFailed,
     DriveBackupCleanup,
+    /// The copy of the clinic's calendar to Google Calendar turned on or off, a round that
+    /// failed (the kind of problem only), and how the cleanup at Google went (D-202).
+    CalendarSyncOn,
+    CalendarSyncOff,
+    CalendarSyncFailed,
+    CalendarSyncCleanup,
     /// A patient card was added to the clinic. No meta: the card names no one here.
     ClinicPatientAdded,
     /// A patient was erased from the clinic with every record and history row of theirs.
@@ -116,6 +122,10 @@ impl AuditEvent {
             AuditEvent::DriveBackupUploaded => "drive_backup_uploaded",
             AuditEvent::DriveBackupFailed => "drive_backup_failed",
             AuditEvent::DriveBackupCleanup => "drive_backup_cleanup",
+            AuditEvent::CalendarSyncOn => "calendar_sync_on",
+            AuditEvent::CalendarSyncOff => "calendar_sync_off",
+            AuditEvent::CalendarSyncFailed => "calendar_sync_failed",
+            AuditEvent::CalendarSyncCleanup => "calendar_sync_cleanup",
             AuditEvent::ClinicPatientAdded => "clinic_patient_added",
             AuditEvent::ClinicPatientErased => "clinic_patient_erased",
             AuditEvent::ClinicNoteToCase => "clinic_note_to_case",

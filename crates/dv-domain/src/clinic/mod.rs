@@ -18,6 +18,8 @@
 //! [`ClinicRequest::NoteToCase`], which copies the formal record of a session (never the
 //! personal note) into the case as a material, where the case's own filter applies.
 
+mod calendar_sync;
+mod channels;
 mod holidays;
 mod income_export;
 mod insights;
@@ -26,6 +28,8 @@ mod slots;
 #[cfg(test)]
 mod tests;
 
+pub use calendar_sync::*;
+pub use channels::*;
 pub use holidays::*;
 pub use income_export::*;
 pub use insights::*;
@@ -978,6 +982,16 @@ pub enum ClinicRequest {
         patient_id: String,
         visit_id: Option<String>,
     },
+    /// The same text, with the address that opens the chat with the family on her own
+    /// device (D-201): WhatsApp, SMS or email. `contact`: its place on the card; `None`: the
+    /// first contact the channel can reach. Nothing is sent: she pastes and presses send.
+    Compose {
+        kind: MessageKind,
+        patient_id: String,
+        visit_id: Option<String>,
+        channel: Channel,
+        contact: Option<u8>,
+    },
     /// Cases that are not linked to any patient yet.
     CaseChoices,
     /// `case_id` = `None` unlinks.
@@ -1054,6 +1068,7 @@ pub enum ClinicReply {
     History(Vec<HistoryEntry>),
     Settings(ClinicSettings),
     Text(String),
+    Composed(Composed),
     Cases(Vec<CaseChoice>),
     Case(CaseLink),
     Holidays(Vec<Holiday>),

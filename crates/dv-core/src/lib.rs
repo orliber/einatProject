@@ -18,6 +18,7 @@ mod export;
 mod failures;
 mod followup;
 pub use binding::{ComputerSeal, WindowsSeal};
+pub mod calendar_sync;
 pub mod drive_backup;
 pub mod google;
 mod guides;
@@ -1080,6 +1081,8 @@ pub struct Core {
     drive_cleanup_at: Option<Instant>,
     /// Cleanups of the Drive copy on their way (D-099): the timer adds none while one runs.
     drive_cleanups: Arc<std::sync::atomic::AtomicUsize>,
+    /// The copy of the clinic's calendar to Google Calendar (D-202): its timings and rounds.
+    calendar: calendar_sync::CalendarState,
 }
 
 impl std::fmt::Debug for Core {

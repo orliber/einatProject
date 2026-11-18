@@ -223,6 +223,7 @@ describe("the front page", () => {
     const { user, calls, notes } = await openClinic();
     await within(todays()).findByRole("button", { name: "תמר" });
     await user.click(within(rowOf("תמר")).getByRole("button", { name: "תזכורת" }));
+    await user.click(await screen.findByRole("menuitem", { name: "רק להעתיק" }));
     await waitFor(() => expect(notes).toHaveLength(1));
     expect(notes[0]).toBe("התזכורת הועתקה ללוח המוגן, ואפשר להדביק אותה בהודעה. יימחק מהלוח בעוד דקה.");
     const copied = calls.filter((c) => c.cmd === "copy_secret");
@@ -230,6 +231,20 @@ describe("the front page", () => {
     expect(copied[0]?.args).toEqual({ text: "שלום יעל, תזכורת לפגישה ביום ראשון, 15.11.2026, בשעה 09:00. להתראות, ד\"ר רותם בדויה" });
     // The default text leaves the child's name out; the toast never carries the message.
     expect(String(copied[0]?.args.text)).not.toContain("תמר");
+  });
+
+  it("“תזכורת” can open WhatsApp at the parent's chat; the text goes to the protected clipboard, never in the address", async () => {
+    const { user, calls, notes } = await openClinic();
+    await within(todays()).findByRole("button", { name: "תמר" });
+    await user.click(within(rowOf("תמר")).getByRole("button", { name: "תזכורת" }));
+    await user.click(await screen.findByRole("menuitem", { name: "לשלוח בוואטסאפ" }));
+    await waitFor(() => expect(notes).toHaveLength(1));
+    expect(notes[0]).toBe("וואטסאפ נפתח מול יעל. התזכורת בלוח המוגן: מדביקים (Ctrl+V) ושולחים. יימחק מהלוח בעוד דקה.");
+    const sent = calls.filter((c) => c.cmd === "send_message");
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.args).toMatchObject({ kind: "reminder", channel: "whatsapp", contact: null });
+    // The window never copies it itself, and nothing else carries the text.
+    expect(calls.some((c) => c.cmd === "copy_secret")).toBe(false);
   });
 
   it("a copy that fails is said, and nothing is claimed", async () => {
@@ -240,6 +255,7 @@ describe("the front page", () => {
     const { user, notes } = await openClinic({ name: "clinic" }, broken);
     await within(todays()).findByRole("button", { name: "תמר" });
     await user.click(within(rowOf("תמר")).getByRole("button", { name: "תזכורת" }));
+    await user.click(await screen.findByRole("menuitem", { name: "רק להעתיק" }));
     await waitFor(() => expect(notes).toEqual(["ההעתקה לא הצליחה."]));
   });
 

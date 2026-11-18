@@ -367,6 +367,21 @@ fn main() {
                         commands::cleanup_in_background(Arc::clone(&timer), cleanup);
                     }
                 }
+                // The copy of the clinic's calendar to Google Calendar (D-202): a round a
+                // little after a visit changed, or every half hour, and a cleanup still owed
+                // after turning it off. Each on its own thread, with the core free.
+                if !locked {
+                    let (round, owed) = timer
+                        .lock()
+                        .map(|mut c| (c.take_calendar_sync(), c.take_calendar_cleanup()))
+                        .unwrap_or((None, None));
+                    if let Some(job) = round {
+                        commands::sync_in_background(Arc::clone(&timer), job);
+                    }
+                    if let Some(cleanup) = owed {
+                        commands::calendar_cleanup_in_background(Arc::clone(&timer), cleanup);
+                    }
+                }
                 if locked {
                     timer_clipboard.clear_now();
                     if let Some(w) = &timer_window {
@@ -578,6 +593,11 @@ fn main() {
             drive_backup_status,
             drive_backup_turn_on,
             drive_backup_turn_off,
+            calendar_status,
+            calendar_turn_on,
+            calendar_turn_off,
+            calendar_sync_now,
+            send_message,
             check_update,
             prepare_update,
             install_update,

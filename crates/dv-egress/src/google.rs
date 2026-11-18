@@ -38,6 +38,11 @@ pub(crate) const FILES_URL: &str = "https://www.googleapis.com/drive/v3/files";
 const UPLOAD_URL: &str = "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart";
 /// Her account id (`openid`) and the app's own hidden Drive folder. Nothing else.
 const SCOPES: &str = "openid https://www.googleapis.com/auth/drive.appdata";
+/// The copy of the clinic's calendar (D-202): her account id and the calendars this app made
+/// itself (`calendar.app.created`: the app sees none of her other calendars). Nothing else.
+const CALENDAR_SCOPES: &str = "openid https://www.googleapis.com/auth/calendar.app.created";
+/// The scope the calendar copy needs, as the token answer must name it.
+pub(crate) const CALENDAR_SCOPE: &str = "https://www.googleapis.com/auth/calendar.app.created";
 const ISSUERS: &[&str] = &["https://accounts.google.com", "accounts.google.com"];
 /// At most this many key files are tried (a few can exist after an interrupted switch).
 const MAX_KEYS: usize = 5;
@@ -170,6 +175,8 @@ pub struct SignIn {
     verifier: Zeroizing<String>,
     state: String,
     redirect: String,
+    /// The scope the answer must carry, or the token is refused.
+    required: &'static str,
     pub url: String,
 }
 
@@ -181,17 +188,28 @@ impl std::fmt::Debug for SignIn {
 
 /// Start a sign-in: listen on a free port of 127.0.0.1 and build the Google address.
 pub fn begin(cfg: &ClientConfig) -> Result<SignIn, GoogleError> {
-    begin_with(cfg, false)
+    begin_with(cfg, false, SCOPES, APPDATA_SCOPE)
 }
 
 /// Start a sign-in that also asks for lasting permission (a refresh token), for the
 /// encrypted backup copy that goes up after each backup without opening the browser (D-099).
 /// The scope is the same: the app's hidden Drive folder and her account id, nothing else.
 pub fn begin_lasting(cfg: &ClientConfig) -> Result<SignIn, GoogleError> {
-    begin_with(cfg, true)
+    begin_with(cfg, true, SCOPES, APPDATA_SCOPE)
 }
 
-fn begin_with(cfg: &ClientConfig, lasting: bool) -> Result<SignIn, GoogleError> {
+/// Start a sign-in for the copy of the clinic's calendar (D-202): a lasting permission for
+/// the calendars this app makes, and nothing of her Drive or of her other calendars.
+pub fn begin_calendar(cfg: &ClientConfig) -> Result<SignIn, GoogleError> {
+    begin_with(cfg, true, CALENDAR_SCOPES, CALENDAR_SCOPE)
+}
+
+fn begin_with(
+    cfg: &ClientConfig,
+    lasting: bool,
+    scopes: &'static str,
+    required: &'static str,
+) -> Result<SignIn, GoogleError> {
     let listener = TcpListener::bind(("127.0.0.1", 0))
         .map_err(|e| GoogleError::Protocol(format!("listener: {e}")))?;
     let port = listener
@@ -207,7 +225,7 @@ fn begin_with(cfg: &ClientConfig, lasting: bool) -> Result<SignIn, GoogleError> 
         ("client_id", cfg.client_id.as_str()),
         ("redirect_uri", redirect.as_str()),
         ("response_type", "code"),
-        ("scope", SCOPES),
+        ("scope", scopes),
         ("code_challenge", challenge.as_str()),
         ("code_challenge_method", "S256"),
         ("state", state.as_str()),
@@ -228,6 +246,7 @@ fn begin_with(cfg: &ClientConfig, lasting: bool) -> Result<SignIn, GoogleError> 
         verifier,
         state,
         redirect,
+        required,
         url,
     })
 }
@@ -453,12 +472,13 @@ pub(crate) fn host_allowed(url: &reqwest::Url) -> bool {
     url.scheme() == "https" && url.host_str().is_some_and(|h| GOOGLE_HOSTS.contains(&h))
 }
 
-/// Where a PUT may go: Drive's upload path on `www.googleapis.com`, nowhere else (D-099).
+/// Where a PUT may go: Drive's upload path on `www.googleapis.com` (D-099), or one event of
+/// a calendar (D-202, [`crate::calendar::event_path_allowed`]); nowhere else.
 pub(crate) fn put_allowed(url: &reqwest::Url) -> bool {
     host_allowed(url)
         && url.host_str() == Some("www.googleapis.com")
         && url.port().is_none()
-        && url.path() == "/upload/drive/v3/files"
+        && (url.path() == "/upload/drive/v3/files" || crate::calendar::event_path_allowed(url))
 }
 
 /// The largest answer read: a key file, a token, a file list.
@@ -498,7 +518,8 @@ impl Http for GoogleHttp {
         if !host_allowed(&url) {
             return Err(GoogleError::Protocol("host is not on the list".to_owned()));
         }
-        // A PUT is only ever the body of a backup copy, to Drive's upload path (D-099).
+        // A PUT is only ever the body of a backup copy, to Drive's upload path (D-099), or
+        // one event of the clinic's calendar (D-202).
         if req.method == Method::Put && !put_allowed(&url) {
             return Err(GoogleError::Protocol(
                 "a PUT off the upload path".to_owned(),
@@ -671,8 +692,9 @@ pub fn finish_with(
     let id_token = take_secret(&mut v, "id_token")
         .ok_or_else(|| GoogleError::Protocol("no id token".to_owned()))?;
     let refresh = take_secret(&mut v, "refresh_token");
-    // Google's consent page lets her untick the hidden folder; without it nothing here works.
-    if !granted(&v) {
+    // Google's consent page lets her untick the hidden folder (or the calendars); without it
+    // nothing here works.
+    if !granted(&v, sign_in.required) {
         if !keep_grant {
             let _ = revoke_token(http, &token);
         }
@@ -688,12 +710,12 @@ pub fn finish_with(
 /// The scope that every Google action of this app needs.
 const APPDATA_SCOPE: &str = "https://www.googleapis.com/auth/drive.appdata";
 
-/// The answer says the app's hidden Drive folder was granted (RFC 6749 §5.1 `scope`).
-fn granted(answer: &Value) -> bool {
+/// The answer says the scope the sign-in needs was granted (RFC 6749 §5.1 `scope`).
+fn granted(answer: &Value, required: &str) -> bool {
     answer
         .get("scope")
         .and_then(Value::as_str)
-        .is_some_and(|s| s.split(' ').any(|x| x == APPDATA_SCOPE))
+        .is_some_and(|s| s.split(' ').any(|x| x == required))
 }
 
 /// Move a text field out of a parsed answer into memory that is wiped when dropped.
@@ -1556,6 +1578,47 @@ mod tests {
         // The usual sign-in never asks for it.
         let plain = begin(&cfg()).unwrap();
         assert!(!plain.url.contains("access_type"));
+    }
+
+    #[test]
+    fn the_calendar_sign_in_asks_for_the_apps_own_calendars_only() {
+        let s = begin_calendar(&cfg()).unwrap();
+        let url = reqwest::Url::parse(&s.url).unwrap();
+        let q: std::collections::HashMap<String, String> = url.query_pairs().into_owned().collect();
+        assert_eq!(
+            q["scope"],
+            "openid https://www.googleapis.com/auth/calendar.app.created"
+        );
+        assert!(!q["scope"].contains("drive"));
+        assert_eq!(q["access_type"], "offline");
+        // A token for the hidden Drive folder only is not a calendar permission.
+        let drive_only = serde_json::json!({
+            "access_token": "ya29.token",
+            "refresh_token": "1//lasting",
+            "id_token": id_token("https://accounts.google.com", &cfg().client_id, "42"),
+            "scope": "https://www.googleapis.com/auth/drive.appdata openid",
+        });
+        let fake = Fake::new(vec![(200, drive_only.to_string().into_bytes())]);
+        assert!(matches!(
+            finish_with(&fake, &cfg(), &s, "code", true),
+            Err(GoogleError::ScopeNotGranted)
+        ));
+        let calendar = serde_json::json!({
+            "access_token": "ya29.token",
+            "refresh_token": "1//lasting",
+            "id_token": id_token("https://accounts.google.com", &cfg().client_id, "42"),
+            "scope": "openid https://www.googleapis.com/auth/calendar.app.created",
+        });
+        let fake = Fake::new(vec![(200, calendar.to_string().into_bytes())]);
+        let mut session = finish_with(&fake, &cfg(), &s, "code", true).unwrap();
+        assert_eq!(session.take_refresh_token().unwrap().as_str(), "1//lasting");
+        // And the other way round: a calendar token is not a Drive one.
+        let drive = begin_lasting(&cfg()).unwrap();
+        let fake = Fake::new(vec![(200, calendar.to_string().into_bytes())]);
+        assert!(matches!(
+            finish_with(&fake, &cfg(), &drive, "code", true),
+            Err(GoogleError::ScopeNotGranted)
+        ));
     }
 
     #[test]

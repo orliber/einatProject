@@ -16,6 +16,7 @@ use dv_privacy::ClearedPayload;
 use serde_json::Value;
 use zeroize::Zeroizing;
 
+pub mod calendar;
 pub mod drive_backup;
 pub mod google;
 pub mod name_model;
@@ -751,6 +752,11 @@ impl Transport for AnthropicTransport {
 #[cfg(test)]
 mod wire_tests;
 
+/// Tests that turn the process-wide emergency stop on hold this for writing; tests whose
+/// calls would stop meanwhile hold it for reading.
+#[cfg(test)]
+pub(crate) static STOP_FOR_TESTS: std::sync::RwLock<()> = std::sync::RwLock::new(());
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -910,6 +916,9 @@ mod tests {
 
     #[test]
     fn emergency_stop_blocks_remote_but_not_local() {
+        let _only = STOP_FOR_TESTS
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         set_stopped(true);
         let remote = admit(10, true);
         let local = admit(10, false);

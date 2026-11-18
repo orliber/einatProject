@@ -1,7 +1,8 @@
 // The clinic's settings: calendar hours and working days, the usual length and fee of each
 // kind of visit, places, the two message texts (with their placeholders and a live preview),
 // the note templates, the assessment pathway and its package (D-198), the starter kit of a new
-// family (D-199), the gap kept around a visit and the holidays (D-196, D-197), and the three
+// family (D-199), the gap kept around a visit and the holidays (D-196, D-197), the copy of the
+// calendar to Google Calendar (D-202, a switch of its own that acts at once), and the three
 // thresholds of "מה דורש אותי". Everything is saved at
 // once, with "שמירה": the core tidies and checks it, and its refusal is the message shown.
 // What she changed and did not save yet is kept while the program is open (in memory only),
@@ -13,6 +14,7 @@ import type { ClinicSettings } from "../../ipc/generated/ClinicSettings";
 import type { NoteTemplate } from "../../ipc/generated/NoteTemplate";
 import type { TaskKind } from "../../ipc/generated/TaskKind";
 import type { VisitKind } from "../../ipc/generated/VisitKind";
+import { CalendarSyncSection } from "./CalendarSyncSection";
 import { useClinicSettings, useReloadClinic, useSaveSettings } from "./clinicData";
 import { defaultClinicSettings, fillPreview, PLACEHOLDERS, sampleValues } from "./clinicDefaults";
 import { formatTime, moneyInput, parseMoney, parseTime, TASK_KIND_LABEL, TASK_KINDS, VISIT_KIND_LABEL, VISIT_KINDS } from "./format";
@@ -423,12 +425,14 @@ function SettingsForm({ stored }: { stored: ClinicSettings }) {
 
       <Section title="הודעות להורים">
         <p className="hint clinic-quiet">
-          התוכנה לא שולחת הודעות. היא ממלאת את הנוסח בפרטי הפגישה או היתרה ומעתיקה אותו, ואת מדביקה אותו בהודעה בעצמך.
+          התוכנה לא שולחת הודעות בעצמה. היא ממלאת את הנוסח בפרטי הפגישה או היתרה, פותחת אצלך במחשב את הצ'אט עם ההורה בוואטסאפ, ב-SMS או במייל, ומשאירה את הנוסח בלוח המוגן. את מדביקה ושולחת בעצמך.
           הנוסח שהגיע עם התוכנה לא כולל את שם הילד בכוונה, כדי שהשם לא ייצא מהמחשב בלי שבחרת בזה. מי שרוצה יכולה להוסיף {"{ילד}"}.
         </p>
         <MessageEditor id="settings-reminder" label="נוסח התזכורת לפגישה" value={draft.reminder} sample={sample} onChange={(reminder) => set({ reminder })} />
         <MessageEditor id="settings-payment" label="נוסח הודעת התשלום" value={draft.payment} sample={sample} onChange={(payment) => set({ payment })} />
       </Section>
+
+      <CalendarSyncSection />
 
       <Section title="תבניות לסיכום פגישה" aside={<span className="muted small">{draft.templates.length === 1 ? "תבנית אחת" : `${draft.templates.length} תבניות`}</span>}>
         <p className="hint clinic-quiet">שלד שאפשר להכניס לרשומה של סיכום פגישה ריק, כדי לא להתחיל מדף לבן.</p>

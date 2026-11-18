@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-approve-clean-paragraphs"
+description = "Enables the approve_clean_paragraphs command without any pre-configured scope."
+commands.allow = ["approve_clean_paragraphs"]
+
+[[permission]]
+identifier = "deny-approve-clean-paragraphs"
+description = "Denies the approve_clean_paragraphs command without any pre-configured scope."
+commands.deny = ["approve_clean_paragraphs"]

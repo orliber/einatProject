@@ -42,6 +42,7 @@ import {
 import { PathwayDialog } from "./PathwayDialog";
 import { PatientDialog } from "./PatientDialog";
 import { VisitDialog } from "./VisitDialog";
+import { SendMenu } from "./SendMenu";
 import "./PatientCardView.css";
 
 /** What is open over the card: one dialog at a time. */
@@ -582,7 +583,6 @@ type MoneyOpen =
   | null;
 
 function MoneyBox({ card, today }: { card: PatientCard; today: string }) {
-  const { notify, fail } = useApp();
   const [open, setOpen] = useState<MoneyOpen>(null);
   const b = card.balance;
 
@@ -598,23 +598,11 @@ function MoneyBox({ card, today }: { card: PatientCard; today: string }) {
   }, [card.visits, card.charges, card.payments]);
   const paged = usePaged(lines, 10);
 
-  /** Fills the payment message and puts it on the protected clipboard, for her to paste. */
-  async function message() {
-    try {
-      const text = await clinicApi.message("payment", card.patient.id);
-      // The text carries names: only the protected clipboard, never the ordinary one.
-      const seconds = await ipc.copySecret(text);
-      notify(`הודעת התשלום הועתקה ללוח המוגן, ואפשר להדביק אותה בהודעה. ${clearsIn(seconds)}.`);
-    } catch (e) {
-      notify(fail(asUiError(e)));
-    }
-  }
-
   return (
     <Section title="כספים"
       aside={(
         <span className="row pcard-money-actions">
-          {b.due > 0 && <button type="button" className="btn btn-small" onClick={() => void message()}>הודעת תשלום</button>}
+          {b.due > 0 && <SendMenu kind="payment" patientId={card.patient.id} label="הודעת תשלום" />}
           <button type="button" className="btn btn-small" onClick={() => setOpen({ kind: "charge" })}><PlusIcon /> חיוב חדש</button>
           <button type="button" className="btn btn-small btn-primary" onClick={() => setOpen({ kind: "payment" })}><PlusIcon /> תקבול חדש</button>
         </span>

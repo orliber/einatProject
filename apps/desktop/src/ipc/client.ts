@@ -22,6 +22,11 @@ import type { GoogleStatus } from "./generated/GoogleStatus";
 import type { DriveBackupStatus } from "./generated/DriveBackupStatus";
 import type { DriveProblem } from "./generated/DriveProblem";
 import type { DriveCleanupResult } from "./generated/DriveCleanupResult";
+import type { CalendarOff } from "./generated/CalendarOff";
+import type { CalendarProblem } from "./generated/CalendarProblem";
+import type { CalendarStatus } from "./generated/CalendarStatus";
+import type { Channel } from "./generated/Channel";
+import type { MessageKind } from "./generated/MessageKind";
 import type { NameMatch } from "./generated/NameMatch";
 import type { ChatView } from "./generated/ChatView";
 import type { ClinicRequest } from "./generated/ClinicRequest";
@@ -475,6 +480,18 @@ export const ipc = {
   /** How far deleting the copies and withdrawing the permission at Google got. */
   driveBackupTurnOff: () => call("drive_backup_turn_off"),
 
+  /** The one-way copy of the clinic's calendar to Google Calendar (D-202). Off by default. */
+  calendarStatus: () => call("calendar_status"),
+  /** Opens Google in her browser; resolves when she is back and the copy is on. */
+  calendarTurnOn: () => call("calendar_turn_on"),
+  /** How far deleting the app's calendar and withdrawing the permission at Google got. */
+  calendarTurnOff: () => call("calendar_turn_off"),
+  calendarSyncNow: () => call("calendar_sync_now"),
+  /** A message to the family (D-201): the chat opens on her device, the text goes to the
+   *  protected clipboard. Nothing is sent by the program. `contact`: its place on the card. */
+  sendMessage: (kind: MessageKind, patientId: string, visitId: string | null, channel: Channel, contact: number | null) =>
+    call("send_message", { kind, patientId, visitId, channel, contact }),
+
   // Writing style (D-043): past reports kept neutralized, the profile, learning from edits.
   styleOverview: () => call("style_overview"),
   /** A past report: the bytes go as the raw body. Nothing is kept until `saveStyleSource`. */
@@ -567,6 +584,10 @@ export type {
   DriveBackupStatus,
   DriveCleanupResult,
   DriveProblem,
+  CalendarOff,
+  CalendarProblem,
+  CalendarStatus,
+  Channel,
   NameMatch,
   MaterialRouting,
   PriorRecordView,

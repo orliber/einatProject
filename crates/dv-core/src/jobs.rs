@@ -379,7 +379,10 @@ impl RestoreJob {
             &self.bytes,
             &self.dir,
             self.proof.secret(None),
-            crate::drive_backup::forget_on_restore,
+            |v: &mut Vault| {
+                crate::drive_backup::forget_on_restore(v)?;
+                crate::calendar_sync::forget_on_restore(v)
+            },
         )
         .map(|(mut v, _)| {
             // The backup's password slot opens anywhere; here it is bound to this

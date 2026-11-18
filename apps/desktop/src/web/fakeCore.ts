@@ -8,6 +8,10 @@ import type { GoogleStatus } from "../ipc/generated/GoogleStatus";
 import type { NetPart } from "../ipc/generated/NetPart";
 import type { SafetyNet } from "../ipc/generated/SafetyNet";
 import type { DriveBackupStatus } from "../ipc/generated/DriveBackupStatus";
+import type { CalendarOff } from "../ipc/generated/CalendarOff";
+import type { CalendarStatus } from "../ipc/generated/CalendarStatus";
+import type { Channel } from "../ipc/generated/Channel";
+import type { Handed } from "../ipc/generated/Handed";
 import type { DriveCleanupResult } from "../ipc/generated/DriveCleanupResult";
 import type { StagedBackup } from "../ipc/generated/StagedBackup";
 import type { CaseDetail } from "../ipc/generated/CaseDetail";
@@ -51,7 +55,9 @@ import { readDocx } from "./docx";
 import { filter, restore, type Person } from "./filter";
 import { FakeStyle } from "./fakeStyle";
 import { FakeClinic } from "./fakeClinic";
+import type { ClinicReply } from "../ipc/generated/ClinicReply";
 import type { ClinicRequest } from "../ipc/generated/ClinicRequest";
+import type { MessageKind } from "../ipc/generated/MessageKind";
 import { compareSheets, comparisonText, formatSheet, instruments } from "./scores";
 import * as R from "./routing";
 import { PROVIDERS, providerOf } from "../providers";
@@ -250,6 +256,9 @@ export class FakeCore {
   /** The encrypted copy in Drive (D-099): off by default, needs Google connected. */
   private driveOn = false;
   private driveLastAt: number | null = null;
+  /** The copy of the clinic's calendar to Google Calendar (D-202): off by default. */
+  private calendarOn = false;
+  private calendarLastAt: number | null = null;
   private autoBackup = true;
   private reviewedAt: number | null = null;
   private convs: { id: string; caseId: string | null; updated: number; turns: { role: string; text: string; hidden: string[]; demo: boolean; at: number }[] }[] = [];
@@ -1238,6 +1247,32 @@ export class FakeCore {
         return null;
       case "clinic":
         return this.clinic.answer(a.request as ClinicRequest);
+      case "send_message": {
+        // The page cannot open WhatsApp: the text goes to the clipboard, as "רק להעתיק".
+        const reply = this.clinic.answer({ op: "compose", kind: a.kind as MessageKind, patient_id: String(a.patientId), visit_id: (a.visitId as string | null) ?? null, channel: a.channel as Channel, contact: (a.contact as number | null) ?? null });
+        if (reply.kind !== "composed") fail("internal", "משהו השתבש בקליניקה.");
+        const composed = (reply as Extract<ClinicReply, { kind: "composed" }>).data;
+        await navigator.clipboard.writeText(composed.text).catch(() => undefined);
+        return { to: composed.to, clears_in: 60 } satisfies Handed;
+      }
+      case "calendar_status":
+        return { available: true, on: this.calendarOn, last_at: this.calendarOn ? this.calendarLastAt : null, problem: null, cleanup_pending: false, last_off: null, detail: "times_only" } satisfies CalendarStatus;
+      case "calendar_turn_on":
+        this.calendarOn = true;
+        this.calendarLastAt = now();
+        this.logActivity("calendar_sync_on", "security", "הופעל סנכרון של יומן הקליניקה ליומן גוגל (שעות בלבד, בלי שמות)", true);
+        return this.handle("calendar_status", {});
+      case "calendar_sync_now":
+        if (!this.calendarOn) fail("refused", "הסנכרון עם יומן גוגל כבוי.");
+        this.calendarLastAt = now();
+        return this.handle("calendar_status", {});
+      case "calendar_turn_off": {
+        const was = this.calendarOn;
+        if (was) this.logActivity("calendar_sync_off", "security", "כובה הסנכרון של יומן הקליניקה ליומן גוגל", true);
+        this.calendarOn = false;
+        this.calendarLastAt = null;
+        return (was ? "cleaned" : "off") satisfies CalendarOff;
+      }
       case "list_cases":
         return this.cases.filter((c) => c.deletedAt === null).map((c) => this.summary(c));
       case "list_trash":

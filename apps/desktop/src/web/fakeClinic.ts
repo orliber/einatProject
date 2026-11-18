@@ -22,6 +22,8 @@ import type { ClinicReply } from "../ipc/generated/ClinicReply";
 import type { ClinicRequest } from "../ipc/generated/ClinicRequest";
 import type { ClinicSettings } from "../ipc/generated/ClinicSettings";
 import type { ClinicTask } from "../ipc/generated/ClinicTask";
+import type { Channel } from "../ipc/generated/Channel";
+import type { Composed } from "../ipc/generated/Composed";
 import type { Contact } from "../ipc/generated/Contact";
 import type { DiaryDay } from "../ipc/generated/DiaryDay";
 import type { DiaryErased } from "../ipc/generated/DiaryErased";
@@ -428,6 +430,8 @@ export class FakeClinic {
         return { kind: "settings", data: this.settings };
       case "message":
         return { kind: "text", data: this.message(r.kind, r.patient_id, r.visit_id) };
+      case "compose":
+        return { kind: "composed", data: this.compose(r.kind, r.patient_id, r.visit_id, r.channel, r.contact) };
       case "case_choices":
         return { kind: "cases", data: this.caseChoices() };
       case "link_case":
@@ -1524,7 +1528,32 @@ export class FakeClinic {
 
   // ---------------------------------------------------------------- messages
 
-  private message(kind: MessageKind, patientId: string, visitId: string | null): string {
+  /** As the core's `clinic_compose` (D-201): the address carries the number or email only. */
+  private compose(kind: MessageKind, patientId: string, visitId: string | null, channel: Channel, picked: number | null): Composed {
+    const p = this.patient(patientId);
+    const phone = channel === "whatsapp" || channel === "sms";
+    need(phone || channel === "email", "דרך השליחה לא מוכרת בגרסה הזו.");
+    const usable = (c: Contact) => (phone ? c.phone.trim() !== "" : c.email.trim() !== "");
+    const contact = picked === null ? p.contacts.find(usable) : p.contacts[picked];
+    need(contact !== undefined && usable(contact), phone ? "בכרטיס אין מספר טלפון של איש קשר. אפשר להוסיף אותו בכרטיס." : "בכרטיס אין כתובת מייל של איש קשר. אפשר להוסיף אותה בכרטיס.");
+    const c = contact as Contact;
+    let link: string;
+    if (phone) {
+      const digits = c.phone.replace(/\D/g, "");
+      const full = c.phone.trim().startsWith("+") ? digits : digits.startsWith("00") ? digits.slice(2) : digits.startsWith("0") ? `972${digits.slice(1)}` : digits;
+      need(/^[1-9]\d{7,14}$/.test(full), "למספר הטלפון של איש הקשר אי אפשר לשלוח. כדאי לבדוק אותו בכרטיס.");
+      link = channel === "whatsapp" ? `whatsapp://send?phone=${full}` : `sms:+${full}`;
+    } else {
+      const email = c.email.trim();
+      need(/^[A-Za-z0-9._+-]+@[A-Za-z0-9.-]+\.[A-Za-z0-9-]+$/.test(email), "כתובת המייל של איש הקשר לא תקינה. כדאי לבדוק אותה בכרטיס.");
+      link = `mailto:${email}`;
+    }
+    const name = cleanLine(c.name);
+    const text = this.message(kind, patientId, visitId, name === "" ? null : name);
+    return { text, link, delivery: "on_her_device", to: name === "" ? "איש הקשר" : name };
+  }
+
+  private message(kind: MessageKind, patientId: string, visitId: string | null, greet: string | null = null): string {
     const p = this.patient(patientId);
     const v = visitId === null ? null : this.visit(visitId);
     need(v === null || v.patient_id === p.id, "הפגישה שייכת למטופל אחר.");
@@ -1533,7 +1562,7 @@ export class FakeClinic {
     else need(due > 0, "אין יתרה לתשלום, ולכן אין מה לשלוח.");
     return fillMessage(kind === "reminder" ? this.settings.reminder_text : this.settings.payment_text, {
       // No name of a parent on the card: "שלום רב".
-      "{הורה}": p.contacts.map((c) => cleanLine(c.name)).find((name) => name !== "") ?? "רב",
+      "{הורה}": greet ?? p.contacts.map((c) => cleanLine(c.name)).find((name) => name !== "") ?? "רב",
       "{ילד}": p.name,
       "{יום}": v ? dayName(v.date) : "",
       "{תאריך}": v ? formatDate(v.date) : "",

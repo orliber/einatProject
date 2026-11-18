@@ -31,6 +31,9 @@ const ALLOWED_MAIL_DOMAINS: &[&str] = &[
     "example.org",
     "anthropic.com",
     "users.noreply.github.com",
+    // The id of a calendar the app makes in her Google account (D-202) has this shape. It
+    // is never a person's address.
+    "group.calendar.google.com",
 ];
 
 const MAX_FILE_BYTES: usize = 1_000_000;

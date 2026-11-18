@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-draft-briefs"
+description = "Enables the draft_briefs command without any pre-configured scope."
+commands.allow = ["draft_briefs"]
+
+[[permission]]
+identifier = "deny-draft-briefs"
+description = "Denies the draft_briefs command without any pre-configured scope."
+commands.deny = ["draft_briefs"]

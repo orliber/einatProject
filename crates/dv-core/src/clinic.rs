@@ -18,11 +18,11 @@ use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex};
 
 use dv_domain::clinic::{
-    self as rules, CaseChoice, CaseLink, Charge, ClinicReply, ClinicRequest, ClinicSettings,
-    ClinicTask, ContactRole, ErasedCards, ErasedTally, HistoryEntry, IncomeExport, MessageKind,
-    MessageValues, Overview, Patient, PatientCard, PatientRecords, PatientRow, PatientStatus,
-    Payment, Repeat, SavedVisits, Scope, SessionNote, Today, Visit, VisitKind, VisitStatus,
-    VisitView,
+    self as rules, CaseChoice, CaseLink, Channel, Charge, ClinicReply, ClinicRequest,
+    ClinicSettings, ClinicTask, Composed, ContactRole, Delivery, ErasedCards, ErasedTally,
+    HistoryEntry, IncomeExport, MessageKind, MessageValues, Overview, Patient, PatientCard,
+    PatientRecords, PatientRow, PatientStatus, Payment, Repeat, SavedVisits, Scope, SessionNote,
+    Today, Visit, VisitKind, VisitStatus, VisitView,
 };
 use dv_domain::{CaseMeta, DomainError, IdentityInput, InputKind, Role};
 use dv_vault::{AuditEvent, StoredClinicRecord, Vault, VaultError};
@@ -236,6 +236,11 @@ fn between<T: Kept>(v: &Vault, from: &str, to: &str) -> Result<Vec<T>, CoreError
         (Some(first), Some(last)) => Ok(open_readable(v.clinic_range(T::KIND, first, last)?).0),
         _ => Ok(Vec::new()),
     }
+}
+
+/// The visits from `from` to `to`, both included: what the calendar copy shows (D-202).
+pub(crate) fn visits_between(v: &Vault, from: &str, to: &str) -> Result<Vec<Visit>, CoreError> {
+    between(v, from, to)
 }
 
 /// The record with this id, when it is one of this kind.
@@ -623,6 +628,23 @@ impl Core {
     pub fn clinic(&mut self, request: ClinicRequest) -> Result<ClinicReply, CoreError> {
         // Locked is said before anything about the request itself.
         self.vault_ref()?;
+        // What moves the calendar's visits (or erases a patient's) tells the copy of the
+        // calendar to go again soon (D-202).
+        let moves_visits = matches!(
+            request,
+            ClinicRequest::SaveVisit { .. }
+                | ClinicRequest::DeleteVisit { .. }
+                | ClinicRequest::SavePathway { .. }
+                | ClinicRequest::ErasePatient { .. }
+        );
+        let reply = self.clinic_request(request);
+        if moves_visits && reply.is_ok() {
+            self.clinic_changed();
+        }
+        reply
+    }
+
+    fn clinic_request(&mut self, request: ClinicRequest) -> Result<ClinicReply, CoreError> {
         match request {
             ClinicRequest::Overview { today } => self.clinic_overview(&today),
             ClinicRequest::Calendar { from, to } => self.clinic_calendar(&from, &to),
@@ -656,6 +678,13 @@ impl Core {
                 patient_id,
                 visit_id,
             } => self.clinic_message(kind, &patient_id, visit_id.as_deref()),
+            ClinicRequest::Compose {
+                kind,
+                patient_id,
+                visit_id,
+                channel,
+                contact,
+            } => self.clinic_compose(kind, &patient_id, visit_id.as_deref(), channel, contact),
             ClinicRequest::CaseChoices => self.clinic_case_choices(),
             ClinicRequest::LinkCase {
                 patient_id,
@@ -1309,6 +1338,42 @@ impl Core {
         patient_id: &str,
         visit_id: Option<&str>,
     ) -> Result<ClinicReply, CoreError> {
+        let text = self.message_text(kind, patient_id, visit_id, None)?;
+        Ok(ClinicReply::Text(text))
+    }
+
+    /// The message, with the address that opens the chat on her device (D-201). The text
+    /// greets the contact it goes to; the address carries the number or email only.
+    fn clinic_compose(
+        &mut self,
+        kind: MessageKind,
+        patient_id: &str,
+        visit_id: Option<&str>,
+        channel: Channel,
+        picked: Option<u8>,
+    ) -> Result<ClinicReply, CoreError> {
+        let card = patient(self.vault_ref()?, patient_id)?;
+        let contact = rules::pick_contact(&card, channel, picked).map_err(refusal)?;
+        let link = rules::chat_link(channel, &contact).map_err(refusal)?;
+        let greet = Some(contact.name.clone()).filter(|n| !n.trim().is_empty());
+        let text = self.message_text(kind, patient_id, visit_id, greet)?;
+        Ok(ClinicReply::Composed(Composed {
+            text,
+            link,
+            delivery: Delivery::OnHerDevice,
+            to: rules::contact_label(&contact),
+        }))
+    }
+
+    /// The filled text of a message. `greet`: the contact's name for `{הורה}` instead of the
+    /// first one on the card.
+    fn message_text(
+        &mut self,
+        kind: MessageKind,
+        patient_id: &str,
+        visit_id: Option<&str>,
+        greet: Option<String>,
+    ) -> Result<String, CoreError> {
         let v = self.vault_ref()?;
         let patient = patient(v, patient_id)?;
         let visit: Option<Visit> = visit_id.map(|id| find(v, id)).transpose()?;
@@ -1347,7 +1412,7 @@ impl Core {
             }
         };
         let values = MessageValues {
-            parent: rules::message_parent(&patient),
+            parent: greet.unwrap_or_else(|| rules::message_parent(&patient)),
             child: patient.name.clone(),
             date: visit.as_ref().map(|visit| visit.date.clone()),
             start: visit.as_ref().map(|visit| visit.start),
@@ -1361,7 +1426,7 @@ impl Core {
                 .next()
                 .unwrap_or_default(),
         };
-        Ok(ClinicReply::Text(rules::fill_message(&template, &values)))
+        Ok(rules::fill_message(&template, &values))
     }
 
     // -------------------------------------------------------------- visits

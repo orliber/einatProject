@@ -61,7 +61,7 @@ const TOKEN_ACCOUNT_KEY: &str = "drive_backup_account";
 const CLEANUP_ACCOUNT_KEY: &str = "drive_backup_cleanup_account";
 const REVOKE_ACCOUNT_KEY: &str = "drive_backup_revoke_account";
 /// The account of a permission given before accounts were kept: matches none.
-const UNKNOWN_ACCOUNT: &str = "unknown";
+pub(crate) const UNKNOWN_ACCOUNT: &str = "unknown";
 /// The backup time of the newest copy that went up.
 const LAST_KEY: &str = "drive_backup_last_at";
 /// Why the last upload did not go up, or empty.
@@ -414,7 +414,21 @@ pub struct DriveCleanup {
     copies: bool,
     generation: Arc<AtomicU64>,
     at: u64,
+    /// Withdraw the permission at Google at the end. Not while the calendar copy (D-202)
+    /// rests on the same grant: it would stop too.
+    revoke: bool,
+    /// The calendar copy's generation when this was planned: when it moved (she began
+    /// turning it on meanwhile), the grant is not withdrawn now, and the next try decides again.
+    calendar_generation: Arc<AtomicU64>,
+    calendar_at: u64,
     _running: Running,
+}
+
+/// Two permissions rest on one grant at Google when they are of the same account. One whose
+/// account is not known may be of the same: the grant is left alone (it is withdrawn when the
+/// last of them is turned off).
+pub(crate) fn shares_grant(a: &str, b: &str) -> bool {
+    a == b || a == UNKNOWN_ACCOUNT || b == UNKNOWN_ACCOUNT
 }
 
 /// Counts a cleanup on its way, until it is dropped: the timer hands out no other meanwhile.
@@ -468,8 +482,18 @@ impl DriveCleanup {
     pub fn run(self, http: &dyn Http, cfg: &ClientConfig) -> DriveCleaned {
         let _one = DRIVE.lock().unwrap_or_else(PoisonError::into_inner);
         let moved = || self.generation.load(Ordering::Acquire) != self.at;
+        // A Google sign-in, or the calendar copy turning on, since this was planned: the
+        // grant may be the one she is giving now. Not withdrawn now; decided again later.
+        let hold = || {
+            self.calendar_generation.load(Ordering::Acquire) != self.calendar_at
+                || crate::google::signing_in()
+        };
         let outcome = if moved() {
             Cleaned::Superseded
+        } else if !self.copies && !self.revoke {
+            Cleaned::Done(DriveCleanupResult::Cleaned)
+        } else if !self.copies && hold() {
+            Cleaned::Done(DriveCleanupResult::Pending)
         } else if !self.copies {
             match google::revoke_token(http, &self.token) {
                 Ok(()) => Cleaned::Done(DriveCleanupResult::Cleaned),
@@ -482,6 +506,8 @@ impl DriveCleanup {
                 Ok(s) => match drive::delete_all_copies(http, &s, &self.vault_id) {
                     Err(_) => Cleaned::Done(DriveCleanupResult::Pending),
                     Ok(_) if moved() => Cleaned::Superseded,
+                    Ok(_) if !self.revoke => Cleaned::Done(DriveCleanupResult::Cleaned),
+                    Ok(_) if hold() => Cleaned::Done(DriveCleanupResult::Pending),
                     Ok(_) => match google::revoke_token(http, &self.token) {
                         Ok(()) => Cleaned::Done(DriveCleanupResult::Cleaned),
                         Err(_) => Cleaned::Done(DriveCleanupResult::Pending),
@@ -578,6 +604,7 @@ impl Core {
         } else {
             REVOKE_ACCOUNT_KEY
         });
+        let revoke = !self.calendar_holds_grant_on(&account);
         Some(DriveCleanup {
             session: self.session,
             token,
@@ -586,6 +613,9 @@ impl Core {
             copies,
             generation: Arc::clone(&self.drive_generation),
             at,
+            revoke,
+            calendar_generation: self.calendar_generation(),
+            calendar_at: self.calendar_generation().load(Ordering::Acquire),
             _running: Running::new(&self.drive_cleanups),
         })
     }
@@ -601,7 +631,26 @@ impl Core {
     /// is locked and that is not known. A short token kept this way runs out within the hour.
     #[must_use]
     pub fn drive_keeps_grant(&self) -> bool {
-        self.vault.is_none() || self.drive_backup_on() || self.drive_cleanup_token().is_some()
+        self.vault.is_none() || self.drive_holds_grant() || self.calendar_holds_grant()
+    }
+
+    /// The Drive copy rests on the app's grant at Google: on, or a cleanup owed. The calendar
+    /// copy (D-202) leaves the grant alone meanwhile.
+    #[must_use]
+    pub fn drive_holds_grant(&self) -> bool {
+        self.drive_backup_on() || self.drive_cleanup_token().is_some()
+    }
+
+    /// The Drive copy's generation, for the calendar copy's cleanup to notice a turning on.
+    pub(crate) fn drive_generation(&self) -> Arc<AtomicU64> {
+        Arc::clone(&self.drive_generation)
+    }
+
+    /// As [`Core::drive_holds_grant`], on the account `tag` (the grant is one per account).
+    pub(crate) fn drive_holds_grant_on(&self, tag: &str) -> bool {
+        (self.drive_backup_on() && shares_grant(&self.drive_account(TOKEN_ACCOUNT_KEY), tag))
+            || (self.drive_cleanup_token().is_some()
+                && shares_grant(&self.drive_account(CLEANUP_ACCOUNT_KEY), tag))
     }
 
     pub fn drive_backup_status(

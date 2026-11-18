@@ -4,6 +4,7 @@ import type { CaseLink } from "./CaseLink";
 import type { Charge } from "./Charge";
 import type { ClinicSettings } from "./ClinicSettings";
 import type { ClinicTask } from "./ClinicTask";
+import type { Composed } from "./Composed";
 import type { DiaryMonth } from "./DiaryMonth";
 import type { HistoryEntry } from "./HistoryEntry";
 import type { Holiday } from "./Holiday";
@@ -24,4 +25,4 @@ import type { VisitView } from "./VisitView";
 /**
  * The answer to each [`ClinicRequest`].
  */
-export type ClinicReply = { "kind": "overview", "data": Overview } | { "kind": "visits", "data": Array<VisitView> } | { "kind": "saved", "data": SavedVisits } | { "kind": "patients", "data": Array<PatientRow> } | { "kind": "card", "data": PatientCard } | { "kind": "patient", "data": Patient } | { "kind": "note", "data": SessionNote } | { "kind": "payment", "data": Payment } | { "kind": "charge", "data": Charge } | { "kind": "tasks", "data": Array<TaskView> } | { "kind": "task", "data": ClinicTask } | { "kind": "diary", "data": DiaryMonth } | { "kind": "income", "data": IncomeYear } | { "kind": "history", "data": Array<HistoryEntry> } | { "kind": "settings", "data": ClinicSettings } | { "kind": "text", "data": string } | { "kind": "cases", "data": Array<CaseChoice> } | { "kind": "case", "data": CaseLink } | { "kind": "holidays", "data": Array<Holiday> } | { "kind": "slots", "data": Array<Slot> } | { "kind": "proposed", "data": Array<Visit> } | { "kind": "insights", "data": Insights } | { "kind": "done" };
+export type ClinicReply = { "kind": "overview", "data": Overview } | { "kind": "visits", "data": Array<VisitView> } | { "kind": "saved", "data": SavedVisits } | { "kind": "patients", "data": Array<PatientRow> } | { "kind": "card", "data": PatientCard } | { "kind": "patient", "data": Patient } | { "kind": "note", "data": SessionNote } | { "kind": "payment", "data": Payment } | { "kind": "charge", "data": Charge } | { "kind": "tasks", "data": Array<TaskView> } | { "kind": "task", "data": ClinicTask } | { "kind": "diary", "data": DiaryMonth } | { "kind": "income", "data": IncomeYear } | { "kind": "history", "data": Array<HistoryEntry> } | { "kind": "settings", "data": ClinicSettings } | { "kind": "text", "data": string } | { "kind": "composed", "data": Composed } | { "kind": "cases", "data": Array<CaseChoice> } | { "kind": "case", "data": CaseLink } | { "kind": "holidays", "data": Array<Holiday> } | { "kind": "slots", "data": Array<Slot> } | { "kind": "proposed", "data": Array<Visit> } | { "kind": "insights", "data": Insights } | { "kind": "done" };
