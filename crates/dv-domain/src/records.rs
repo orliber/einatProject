@@ -75,6 +75,14 @@ pub struct CaseMeta {
     pub letter_left_out: Option<Vec<String>>,
 }
 
+/// A section of a case's report, from its template: never case data.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct NextSection {
+    pub key: String,
+    pub title: String,
+}
+
 /// One row of the case list. Names appear only locally.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export)]
@@ -91,6 +99,11 @@ pub struct CaseSummary {
     /// signature aside): 15 in an older case, 16 in the institute's. Filled in by the core.
     #[serde(default)]
     pub total_sections: u32,
+    /// The first section of its report, in report order, the signature aside, with no
+    /// approved paragraph; `None` when all are approved. Filled in by the core.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub next_section: Option<NextSection>,
     /// The folder it sits in; `None` = the top level.
     pub folder_id: Option<String>,
     /// Set while the case is in the recycle bin (unix seconds).

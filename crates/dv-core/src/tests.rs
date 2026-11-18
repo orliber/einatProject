@@ -1542,6 +1542,84 @@ fn failed_send_keeps_the_approval_for_a_retry() {
     );
 }
 
+/// The cases list says where each case goes on: the first section of its own report, in
+/// report order and the signature aside, that has nothing approved yet. Template text only,
+/// worked out on every read of the list and never stored.
+#[test]
+fn the_case_list_names_each_cases_next_section() {
+    let (_dir, mut core, case) = setup(None);
+    let row = |core: &mut Core, id: &str| {
+        core.list_cases()
+            .unwrap()
+            .into_iter()
+            .find(|c| c.id == id)
+            .unwrap()
+    };
+    let next = |core: &mut Core, id: &str| row(core, id).next_section.map(|s| (s.key, s.title));
+
+    // A new case, in the institute's report: its first section, 16 in all.
+    let fresh = row(&mut core, &case);
+    assert_eq!(fresh.total_sections, 16);
+    assert_eq!(
+        next(&mut core, &case),
+        Some(("referral".to_owned(), "סיבת ההפניה".to_owned()))
+    );
+
+    // The first section drafted (demo mode) and approved: the list goes on to the next one.
+    let id = core
+        .prepare_section(&case, "referral", "טיוטה לסיבת ההפניה")
+        .unwrap()
+        .approval_id
+        .unwrap();
+    let r = core.send_section(&id).unwrap();
+    assert!(r.demo);
+    assert!(!r.paragraphs.is_empty(), "{}", r.reply);
+    assert!(core.approve_section(&case, "referral").unwrap() > 0);
+    assert_eq!(
+        next(&mut core, &case),
+        Some(("background".to_owned(), "רקע".to_owned()))
+    );
+
+    // Every section approved (the signature has none): nothing is next, and the count stays.
+    let institute = ReportStructure::for_template(Some(dv_domain::INSTITUTE_TEMPLATE)).unwrap();
+    for s in institute.sections().filter(|s| s.key != "signature") {
+        if s.key != "referral" {
+            core.add_own_paragraph(&case, &s.key, "פסקה בדויה לבדיקה.")
+                .unwrap();
+        }
+    }
+    let all = row(&mut core, &case);
+    assert_eq!(all.next_section, None);
+    assert_eq!(all.total_sections, 16);
+
+    // An older case (no template kept) counts its own 15 and names its own titles.
+    let old = core
+        .vault_mut()
+        .unwrap()
+        .create_case(&CaseMeta {
+            code: "TEST-0011".into(),
+            consent: Some(consent()),
+            ..CaseMeta::default()
+        })
+        .unwrap();
+    assert_eq!(row(&mut core, &old).total_sections, 15);
+    assert_eq!(
+        next(&mut core, &old),
+        Some(("referral".to_owned(), "סיבת הפניה".to_owned()))
+    );
+    core.add_own_paragraph(&old, "referral", "פסקה בדויה לבדיקה.")
+        .unwrap();
+    assert_eq!(
+        next(&mut core, &old),
+        Some((
+            "background".to_owned(),
+            "רקע: הריון, לידה והתפתחות".to_owned()
+        ))
+    );
+    // The other case is not touched by it.
+    assert_eq!(next(&mut core, &case), None);
+}
+
 #[test]
 fn erasing_a_case_forgets_its_failure() {
     let dir = tempfile::tempdir().unwrap();

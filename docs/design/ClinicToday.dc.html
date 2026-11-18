@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>הקליניקה, היום</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Assistant:wght@400;600;700&amp;family=Frank+Ruhl+Libre:wght@500;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#1e5b56}a:hover{color:#164541}
+button{font:inherit;color:inherit;cursor:pointer}
+button:focus-visible,a:focus-visible{outline:2px solid #1e5b56;outline-offset:2px}
+.btn{min-height:40px;padding:0 16px;border-radius:10px;border:1px solid #cfd5d2;background:#fff;color:#15201f;font-size:15px;font-weight:600;display:inline-flex;align-items:center;gap:8px;white-space:nowrap}
+.btn-primary{background:#1e5b56;border-color:#1e5b56;color:#fff}
+.btn-small{min-height:36px;padding:0 12px;font-size:14px}
+.icon-btn{width:40px;height:40px;min-height:40px;padding:0;justify-content:center;border-color:transparent;background:transparent;color:#34403e}
+.icon-btn:hover{background:#e6efed}
+.chip{display:inline-flex;align-items:center;gap:4px;min-height:22px;padding:0 8px;border-radius:999px;font-size:12px;font-weight:600;white-space:nowrap}
+.tab{border:0;background:transparent;padding:12px 2px;color:#4a5654;border-bottom:3px solid transparent;white-space:nowrap}
+.group{display:flex;align-items:center;gap:10px;width:100%;min-height:48px;padding:0 4px;border:0;border-top:1px solid #e3e6e3;background:transparent;text-align:start;font-weight:600}
+.count{display:inline-grid;place-items:center;min-width:24px;height:24px;padding:0 6px;border-radius:999px;background:#fbf1e2;color:#8a4e0c;font-size:12px;font-weight:700;box-sizing:border-box}
+</style>
+</helmet>
+<div dir="rtl" lang="he" style="font-family: Assistant, 'Segoe UI', system-ui, sans-serif; color: #15201f; background: #f4f5f3; min-height: 1040px; font-size: 15px; line-height: 1.5">
+
+  <header style="display: flex; align-items: center; flex-wrap: wrap; gap: 12px 16px; padding: 12px 24px; background: #ffffff; border-bottom: 1px solid #e3e6e3">
+    <div style="display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 18px">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path></svg>
+      <span>כספת האבחון</span>
+    </div>
+    <nav aria-label="חלקי התוכנה" style="display: flex; gap: 4px; padding: 4px; background: #f1f3f1; border: 1px solid #e3e6e3; border-radius: 12px">
+      <button type="button" class="btn" style="min-height: 36px; border-color: transparent; background: transparent; color: #4a5654">כתיבת הדוחות</button>
+      <button type="button" aria-current="page" class="btn" style="min-height: 36px; border-color: #e3e6e3; box-shadow: 0 1px 3px rgba(21,32,31,0.1); color: #1e5b56">
+        ניהול הקליניקה
+        <span class="chip" style="background: #e6efed; color: #1e5b56">בטא</span>
+      </button>
+    </nav>
+    <span style="flex: 1 1 0"></span>
+    <button type="button" class="chip" style="border: 1px solid #ebcb98; background: #fbf1e2; color: #8a4e0c; min-height: 28px; padding: 0 10px; cursor: pointer">
+      <span aria-hidden="true" style="width: 6px; height: 6px; border-radius: 50%; background: #d38a2c"></span>
+      הדגמה · עדכון מוכן
+    </button>
+    <div style="display: flex; align-items: center; gap: 4px">
+      <button type="button" class="btn icon-btn" aria-label="מצב דיסקרטי" aria-pressed="false"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"></path><circle cx="12" cy="12" r="3"></circle></svg></button>
+      <button type="button" class="btn icon-btn" aria-label="עזרה וקיצורי מקלדת"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M9.5 9a2.5 2.5 0 0 1 4.8 1c0 1.7-2.3 2-2.3 3.5"></path><path d="M12 17h.01"></path></svg></button>
+      <button type="button" class="btn icon-btn" aria-label="הגדרות"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"></path></svg></button>
+      <button type="button" class="btn" style="margin-inline-start: 4px">נעילה</button>
+    </div>
+  </header>
+
+  <nav aria-label="הקליניקה" style="display: flex; gap: 26px; padding: 0 24px; background: #ffffff; border-bottom: 1px solid #e3e6e3; overflow-x: auto">
+    <button type="button" class="tab" aria-current="page" style="color: #15201f; font-weight: 700; border-bottom-color: #1e5b56">היום</button>
+    <button type="button" class="tab">יומן</button>
+    <button type="button" class="tab">מטופלים</button>
+    <button type="button" class="tab">המתנה</button>
+    <button type="button" class="tab">מעקבים</button>
+    <button type="button" class="tab">כספים</button>
+    <button type="button" class="tab">תמונת מצב</button>
+    <button type="button" class="tab">הגדרות הקליניקה</button>
+  </nav>
+
+  <main style="max-width: 1152px; margin: 0 auto; padding: 28px 24px 40px; display: flex; flex-direction: column; gap: 20px">
+    <div style="display: flex; align-items: flex-end; justify-content: space-between; flex-wrap: wrap; gap: 16px">
+      <div>
+        <h1 style="margin: 0; font-size: 28px; line-height: 1.2">צהריים טובים</h1>
+        <p style="margin: 6px 0 0; color: #4a5654">יום שלישי, 17.11.2026</p>
+      </div>
+      <div style="display: flex; gap: 10px; flex-wrap: wrap">
+        <button type="button" class="btn">+ מטופל חדש</button>
+        <button type="button" class="btn btn-primary">+ פגישה חדשה</button>
+      </div>
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px">
+      <div style="padding: 16px 18px; background: #ffffff; border: 1px solid #e3e6e3; border-radius: 14px">
+        <div style="font-size: 26px; font-weight: 700">4</div>
+        <div style="color: #4a5654; font-size: 14px">פגישות השבוע</div>
+      </div>
+      <div style="padding: 16px 18px; background: #ffffff; border: 1px solid #e3e6e3; border-radius: 14px">
+        <div style="font-size: 26px; font-weight: 700">800 ₪</div>
+        <div style="color: #4a5654; font-size: 14px">התקבל החודש</div>
+      </div>
+      <div style="padding: 16px 18px; background: #ffffff; border: 1px solid #e3e6e3; border-radius: 14px">
+        <div style="font-size: 26px; font-weight: 700; color: #8a4e0c">2,600 ₪</div>
+        <div style="color: #4a5654; font-size: 14px">יתרות פתוחות</div>
+      </div>
+      <div style="padding: 16px 18px; background: #ffffff; border: 1px solid #e3e6e3; border-radius: 14px">
+        <div style="font-size: 26px; font-weight: 700">2</div>
+        <div style="color: #4a5654; font-size: 14px">ברשימת ההמתנה</div>
+      </div>
+    </div>
+
+    <div style="display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start">
+      <!-- Today's visits: one action each, by the hour; the rest under ⋯. -->
+      <section aria-labelledby="today-visits" style="flex: 1.3 1 520px; min-width: 0; padding: 20px 22px; background: #ffffff; border: 1px solid #e3e6e3; border-radius: 14px">
+        <div style="display: flex; justify-content: space-between; align-items: baseline">
+          <h2 id="today-visits" style="margin: 0; font-size: 18px">הפגישות של היום</h2>
+          <span style="color: #4a5654; font-size: 13px">4 בלוח · אחת אחרי עכשיו</span>
+        </div>
+        <ul style="list-style: none; margin: 12px 0 0; padding: 0">
+          <li style="display: grid; grid-template-columns: 96px minmax(0, 1fr) auto; gap: 14px; align-items: center; padding: 14px 0; border-bottom: 1px solid #e3e6e3">
+            <span style="font-weight: 700; direction: ltr; text-align: right">09:00–10:30</span>
+            <div style="min-width: 0">
+              <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap"><a href="#" style="font-weight: 700; color: #15201f">תמר</a><span class="chip" style="background: #f1f3f1; color: #34403e">מפגש אבחון</span><span class="chip" style="background: #e5f1e8; color: #2f6b45">התקיימה</span></div>
+              <div style="font-size: 13px; color: #4a5654">הקליניקה · להביא את השאלונים שמילאו ההורים</div>
+            </div>
+            <div style="display: flex; gap: 4px; align-items: center">
+              <button type="button" class="btn btn-small">לכתוב סיכום</button>
+              <button type="button" class="btn icon-btn" aria-label="עוד פעולות לפגישה של תמר"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.8"></circle><circle cx="12" cy="12" r="1.8"></circle><circle cx="19" cy="12" r="1.8"></circle></svg></button>
+            </div>
+          </li>
+          <li style="display: grid; grid-template-columns: 96px minmax(0, 1fr) auto; gap: 14px; align-items: center; padding: 14px 0; border-bottom: 1px solid #e3e6e3">
+            <span style="font-weight: 700; direction: ltr; text-align: right">11:30–12:30</span>
+            <div style="min-width: 0">
+              <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap"><a href="#" style="font-weight: 700; color: #15201f">איתי</a><span class="chip" style="background: #f1f3f1; color: #34403e">פגישת היכרות</span></div>
+              <div style="font-size: 13px; color: #4a5654">הקליניקה</div>
+            </div>
+            <div style="display: flex; gap: 4px; align-items: center">
+              <button type="button" class="btn btn-small btn-primary">התקיימה</button>
+              <button type="button" class="btn icon-btn" aria-label="עוד פעולות לפגישה של איתי"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.8"></circle><circle cx="12" cy="12" r="1.8"></circle><circle cx="19" cy="12" r="1.8"></circle></svg></button>
+            </div>
+          </li>
+          <li style="display: grid; grid-template-columns: 96px minmax(0, 1fr) auto; gap: 14px; align-items: center; padding: 14px 0; border-bottom: 1px solid #e3e6e3">
+            <span style="font-weight: 700; direction: ltr; text-align: right; color: #4a5654">13:00–15:00</span>
+            <div style="min-width: 0; padding: 6px 10px; border-radius: 8px; background: repeating-linear-gradient(-45deg, #f4f5f3 0 8px, #ffffff 8px 16px); border: 1px dashed #cfd5d2">
+              <span style="font-weight: 600">כתיבת דוחות</span> <span style="font-size: 13px; color: #4a5654">· זמן שמור</span>
+            </div>
+            <span></span>
+          </li>
+          <li aria-label="עכשיו, 15:12" style="display: flex; align-items: center; gap: 8px; padding: 6px 0">
+            <span style="font-size: 12px; font-weight: 700; color: #8a4e0c; white-space: nowrap">עכשיו 15:12</span>
+            <span aria-hidden="true" style="flex: 1 1 auto; height: 2px; background: #d38a2c; border-radius: 2px"></span>
+          </li>
+          <li style="display: grid; grid-template-columns: 96px minmax(0, 1fr) auto; gap: 14px; align-items: center; padding: 14px 0">
+            <span style="font-weight: 700; direction: ltr; text-align: right">16:00–16:50</span>
+            <div style="min-width: 0">
+              <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap"><a href="#" style="font-weight: 700; color: #15201f">מאיה</a><span class="chip" style="background: #f1f3f1; color: #34403e">פגישת טיפול</span></div>
+              <div style="font-size: 13px; color: #4a5654">הקליניקה · בעוד 48 דקות</div>
+            </div>
+            <div style="display: flex; gap: 4px; align-items: center">
+              <button type="button" class="btn btn-small">תזכורת</button>
+              <button type="button" class="btn icon-btn" aria-label="עוד פעולות לפגישה של מאיה"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.8"></circle><circle cx="12" cy="12" r="1.8"></circle><circle cx="19" cy="12" r="1.8"></circle></svg></button>
+            </div>
+          </li>
+        </ul>
+      </section>
+
+      <!-- What needs her: by subject, with a count; the first subject open. -->
+      <section aria-labelledby="needs" style="flex: 1 1 360px; min-width: 0; padding: 20px 22px; background: #ffffff; border: 1px solid #e3e6e3; border-radius: 14px">
+        <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px">
+          <h2 id="needs" style="margin: 0; font-size: 18px">מה דורש אותי</h2>
+          <span style="color: #4a5654; font-size: 13px">7 דברים</span>
+        </div>
+
+        <button type="button" class="group" aria-expanded="true">
+          <span class="count">1</span><span style="flex: 1 1 auto">פגישה שלא סומנה</span>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 15l6-6 6 6"></path></svg>
+        </button>
+        <div style="display: flex; align-items: center; gap: 12px; padding: 4px 4px 14px 4px">
+          <div style="flex: 1 1 auto; min-width: 0">
+            <a href="#" style="font-weight: 700; color: #15201f">איתי</a>
+            <div style="font-size: 13px; color: #4a5654">היום ב-11:30, עדיין מתוכננת</div>
+          </div>
+          <button type="button" class="btn btn-small">התקיימה</button>
+        </div>
+
+        <button type="button" class="group" aria-expanded="false">
+          <span class="count">2</span><span style="flex: 1 1 auto">פגישות בלי סיכום</span>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"></path></svg>
+        </button>
+        <button type="button" class="group" aria-expanded="false">
+          <span class="count">1</span><span style="flex: 1 1 auto">יתרה פתוחה</span>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"></path></svg>
+        </button>
+        <button type="button" class="group" aria-expanded="false">
+          <span class="count">1</span><span style="flex: 1 1 auto">מעקב שמועדו עבר</span>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"></path></svg>
+        </button>
+        <button type="button" class="group" aria-expanded="false">
+          <span class="count">1</span><span style="flex: 1 1 auto">בהמתנה יותר מ-8 שבועות</span>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"></path></svg>
+        </button>
+        <button type="button" class="group" aria-expanded="false">
+          <span class="count" style="background: #e6efed; color: #1e5b56">1</span><span style="flex: 1 1 auto">שיחת משוב בשבוע הקרוב</span>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"></path></svg>
+        </button>
+      </section>
+    </div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1280,"height":1040}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

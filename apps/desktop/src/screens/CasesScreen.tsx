@@ -1,7 +1,7 @@
 // The case list, laid out like a file explorer (round 47, D-085): a folder tree on the right,
 // the path and the search above, and one table of subfolders and cases. Folders nest to any
 // depth (the core already keeps `parent_id`); this screen only shows them that way.
-import { useMemo, useState, type DragEvent } from "react";
+import { useEffect, useMemo, useState, type DragEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useApp } from "../App";
 import { BackupReminder } from "../components/Backup";
@@ -131,17 +131,22 @@ export function casesShown(all: CaseSummary[], current: string | null, matches: 
   return all.filter((c) => (matches ? matches(c) : (c.folder_id ?? null) === current));
 }
 
-/** One word, one line and three steps (canvas "תיקים": "שהסטטוס יהיה ברור ונקי"). */
+/**
+ * One word, one line and a thin bar of the approved sections (canvas "תיקים": "שהסטטוס יהיה
+ * ברור ונקי"; D-204 §2). A case ready to go out is one green chip. The bar is aria-hidden: the
+ * line beside it says the same numbers, and a case still at its materials shows it empty.
+ */
 function StatusCell({ s }: { s: CaseStatus }) {
+  if (s.steps[2] === "now") {
+    return <span className="chip chip-ok status-ready" title={s.full}><span aria-hidden="true">✓</span> {s.detail} · {s.word}</span>;
+  }
   return (
     <div className="status-cell" title={s.full}>
       <div className="status-line">
         <span className={s.attention ? "status-word attention" : "status-word"}>{s.word}</span>
         <span className="small muted">{s.detail}</span>
       </div>
-      <div className="pips" aria-hidden="true">
-        {s.steps.map((st, i) => <span key={i} className={`pip pip-${st}`} />)}
-      </div>
+      <progress className="meter" value={s.done} max={s.total} aria-hidden="true" />
     </div>
   );
 }
@@ -183,13 +188,29 @@ export function CasesScreen() {
   const allCases = useMemo(() => fresh(cases.data, cases.dataUpdatedAt), [cases.data, cases.dataUpdatedAt]);
   // A folder that no longer exists (deleted elsewhere): back to the top.
   const current = folderId && allFolders.some((f) => f.id === folderId) ? folderId : null;
-  // In a narrow window the tree folds away after a pick; focus goes to the button that reopens it.
+  // In a narrow window the tree folds away after a pick; focus goes to the button that reopens it,
+  // when it would go with the tree. At once: a window the pick opens ("תיקייה חדשה בפנים") then
+  // takes it from that button, and gives it back there when it closes (not to a hidden row).
   const closeTree = () => {
     if (!treeOpen) return;
     setTreeOpen(false);
-    setTimeout(() => document.querySelector<HTMLElement>(".tree-toggle")?.focus(), 0);
+    const toggle = () => document.querySelector<HTMLElement>(".tree-toggle")?.focus();
+    if (document.activeElement?.closest(".explorer-tree")) toggle();
+    // Lost on the way (what she picked from is gone): there too, but never from an open window
+    // (it would be behind it) or from wherever she is now.
+    setTimeout(() => {
+      if (document.querySelector('[role="dialog"]')) return;
+      const at = document.activeElement;
+      if (at && at !== document.body && !at.closest(".explorer-tree")) return;
+      toggle();
+    }, 0);
   };
+  // A folder entered from a row of the table: the row goes away with the list it is in, so the
+  // keyboard goes to where she is now, the folder's name in the path, and not to the page (from
+  // where Tab would start over at the top). Not when a window took it, or when it is elsewhere.
+  const [toPathOf, setToPathOf] = useState<string | null>(null);
   const setFolderId = (id: string | null) => {
+    setToPathOf(document.activeElement?.closest(".explorer-main tr") ? id : null);
     rememberFolder(id);
     setFolderIdState(id);
     setInTrash(false);
@@ -269,6 +290,8 @@ export function CasesScreen() {
     return { inProgress: open.length, resume: [...open].sort((a, b) => b.updated_at - a.updated_at)[0] };
   }, [allCases]);
   const resumeStatus = resume ? caseStatus(resume) : null;
+  /** The "להמשיך איפה שהפסקת" card is shown (not while searching or in the recycle bin). */
+  const resuming = Boolean(resume && resumeStatus && !q && !inTrash);
   const trashCount = trash.data?.length ?? 0;
 
   // ---------------------------------------------------------------- moving
@@ -356,10 +379,23 @@ export function CasesScreen() {
     }
   });
 
+  useEffect(() => {
+    if (toPathOf === null || toPathOf !== current) return;
+    const at = document.activeElement;
+    if (document.querySelector('[role="dialog"]') || (at && at !== document.body)) return;
+    document.querySelector<HTMLElement>('.explorer-main .crumbs [aria-current="page"]')?.focus();
+  }, [toPathOf, current]);
+
   // ---------------------------------------------------------------- actions
   const folderItems = (f: Folder): MenuItem[] => [
     { label: "פתיחה", run: () => setFolderId(f.id) },
-    { label: "תיקייה חדשה בפנים", run: () => { setFolderId(f.id); setModal({ kind: "new-folder" }); } },
+    { label: "תיקייה חדשה בפנים", run: () => {
+      // From the table, whose row goes away with the folder she enters: the window gives the
+      // keyboard back to "תיקייה כאן", the same step in that folder, not to the page.
+      if (document.activeElement?.closest(".explorer-main tr")) document.querySelector<HTMLElement>(".library-bar .new-folder-here")?.focus();
+      setFolderId(f.id);
+      setModal({ kind: "new-folder" });
+    } },
     { label: "שינוי שם", run: () => setModal({ kind: "rename", folder: f }) },
     { label: "העברה לתיקייה אחרת…", run: () => setModal({ kind: "move-folder", folder: f }) },
     { label: "מחיקת התיקייה", run: () => setModal({ kind: "delete-folder", folder: f }), danger: true },
@@ -407,19 +443,42 @@ export function CasesScreen() {
             <p className="muted">{cases.data ? (allCases.length ? inWorkLine(inProgress) : "עוד אין תיקים") : " "}</p>
           </div>
           <div className="row head-actions">
-            <button type="button" className="btn btn-primary btn-big" onClick={() => setCreating(true)}>+ תיק חדש</button>
+            {/* One green button on the screen (Einat, 18.11.2026): with the "להמשיך" card below,
+                that card's button is the one; "+ תיק חדש" steps back to a plain button. */}
+            <button type="button" className={resuming ? "btn" : "btn btn-primary btn-big"} onClick={() => setCreating(true)}>+ תיק חדש</button>
           </div>
         </div>
-        {resume && resumeStatus && !q && !inTrash && (
-          <section className="resume" aria-label="להמשיך איפה שהפסקת">
-            <span className="resume-eyebrow">להמשיך איפה שהפסקת:</span>
-            <span className="resume-text">
-              <strong className="serif resume-name">{caseName(resume)}</strong>
-              {" · "}{resumeStatus.word}{resumeStatus.steps[1] === "now" ? `, ${resumeStatus.detail}` : ""}
-              {resume.meta.current_section ? <> · <strong>הבא:</strong> {resume.meta.current_section}</> : null}
-            </span>
-            <button type="button" className="btn btn-primary"
-              onClick={() => go({ name: "case", id: resume.id, view: resumeStatus.view })}>
+        {resuming && resume && resumeStatus && (
+          // D-204 §2: the one prominent button of the list. It opens the report on the section it
+          // names, so "הסעיף הבא" is where she lands. A warning word stays on the card.
+          <section className="paper resume" aria-labelledby="resume-title">
+            <div className="resume-body">
+              <h2 id="resume-title" className="resume-eyebrow">להמשיך איפה שהפסקת</h2>
+              <div className="resume-who">
+                <strong className="serif resume-name">{caseName(resume)}</strong>
+                <span className="muted">{[ageOf(resume.meta.age, resume.meta.child_gender), resume.folder_id ? pathOf(resume.folder_id) : ""].filter(Boolean).join(" · ")}</span>
+              </div>
+              {(resumeStatus.attention || resumeStatus.view !== "report") && (
+                <div className="status-line">
+                  <span className={resumeStatus.attention ? "status-word attention" : "status-word"}>{resumeStatus.word}</span>
+                  <span className="muted">{resumeStatus.detail}</span>
+                </div>
+              )}
+              {resumeStatus.view === "report" && (
+                <div className="resume-progress">
+                  <progress className="meter meter-lg" value={resumeStatus.done} max={resumeStatus.total} aria-hidden="true" />
+                  <span>{resumeStatus.done} מתוך {resumeStatus.total} סעיפים אושרו</span>
+                </div>
+              )}
+              {resumeStatus.view === "report" && resume.next_section && (
+                <p className="resume-next">הסעיף הבא: <strong>{resume.next_section.title}</strong></p>
+              )}
+            </div>
+            <button type="button" className="btn btn-primary btn-big"
+              onClick={() => go({
+                name: "case", id: resume.id, view: resumeStatus.view,
+                ...(resumeStatus.view === "report" && resume.next_section ? { section: resume.next_section.key } : {}),
+              })}>
               {resumeStatus.view === "report" ? "להמשיך לכתוב ←" : "להמשיך ←"}
             </button>
           </section>
@@ -498,7 +557,7 @@ export function CasesScreen() {
                   </label>
                 )}
                 {!inTrash && (
-                  <button type="button" className="btn" onClick={() => setModal({ kind: "new-folder" })}><FolderIcon size={16} /> תיקייה כאן</button>
+                  <button type="button" className="btn new-folder-here" onClick={() => setModal({ kind: "new-folder" })}><FolderIcon size={16} /> תיקייה כאן</button>
                 )}
               </div>
 
@@ -526,7 +585,7 @@ export function CasesScreen() {
                           <th>שם</th>
                           <th>איפה זה עומד</th>
                           <th className="col-when">עודכן</th>
-                          <th className="col-go"><span className="visually-hidden">פעולות</span></th>
+                          <th className="col-menu"><span className="visually-hidden">פעולות</span></th>
                         </tr>
                       </thead>
                       <RightClickArea itemsAt={rowMenu}>
@@ -581,8 +640,15 @@ export function CasesScreen() {
                                       </svg>
                                     </span>
                                     <div className="min0">
-                                      <div className="case-name serif">
-                                        {c.child_name ? shown(c.child_name) : "ללא שם"}
+                                      {/* D-204 §2, as D-113 did for a folder: the name is the row's one stop
+                                          on the keyboard, and its name for a screen reader keeps the verb.
+                                          "(ללא שם)" keeps the words she sees inside that name (WCAG 2.5.3). */}
+                                      <div className="case-title">
+                                        <button type="button" className="case-name case-open serif" draggable
+                                          aria-label={`${s.button} בתיק של ${caseName(c)}${c.child_name ? "" : " (ללא שם)"}`}
+                                          onClick={(e) => { e.stopPropagation(); open(); }}>
+                                          {c.child_name ? shown(c.child_name) : "ללא שם"}
+                                        </button>
                                         {c.meta.follows && <span className="chip chip-sand follow-chip">מעקב</span>}
                                       </div>
                                       <div className="small muted ellipsis">
@@ -596,11 +662,6 @@ export function CasesScreen() {
                                 <td className="small muted col-when">{updated(c.updated_at)}</td>
                                 <td>
                                   <div className="row-actions">
-                                    {/* D-113: one prominent button in the list, on the case she is continuing. */}
-                                    <button type="button" className={c.id === resume?.id ? "btn btn-primary" : "btn"}
-                                      onClick={(e) => { e.stopPropagation(); open(); }}>
-                                      {s.button}<span className="visually-hidden"> בתיק של {caseName(c)}</span>
-                                    </button>
                                     <ActionsMenu items={caseItems(c)} label={`פעולות על התיק של ${caseName(c)}`} />
                                   </div>
                                 </td>
@@ -617,7 +678,6 @@ export function CasesScreen() {
                   {cases.data && !emptyHere && (
                     <div className="explorer-foot small muted">
                       <span>{shownCases.length === 1 ? "תיק אחד" : `${shownCases.length} תיקים`}{q ? " בכל התיקיות" : ""}</span>
-                      <span>גוררים תיק לתיקייה כדי להעביר, או לסל המחזור. לחיצה ימנית: עוד פעולות.</span>
                     </div>
                   )}
                 </>

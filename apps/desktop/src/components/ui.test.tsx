@@ -1,6 +1,6 @@
 // Shared pieces: filter text is shown as text, errors offer the next step, dialogs trap the
 // keyboard's attention. All names are invented.
-import { useState } from "react";
+import { StrictMode, useEffect, useState } from "react";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AppContext, type AppApi } from "../App";
@@ -315,6 +315,113 @@ describe("Dialog", () => {
     expect(screen.getByRole("dialog")).toHaveFocus();
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("dialog")).toBeNull();
+    expect(opener).toHaveFocus();
+  });
+
+  it("with a field that takes the focus as it opens, focus still goes back to the opener (F5-r)", async () => {
+    const user = userEvent.setup();
+    function Host() {
+      const [open, setOpen] = useState(false);
+      return (
+        <>
+          <button type="button" onClick={() => setOpen(true)}>שינוי שם</button>
+          {open && <Dialog title="שם חדש" onClose={() => setOpen(false)}><input aria-label="השם" autoFocus /></Dialog>}
+        </>
+      );
+    }
+    render(<Host />);
+    const opener = screen.getByRole("button", { name: "שינוי שם" });
+    opener.focus();
+    await user.keyboard("{Enter}");
+    expect(screen.getByLabelText("השם")).toHaveFocus();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(opener).toHaveFocus();
+  });
+
+  it("in StrictMode a field marked autoFocus keeps the focus, and closing returns it to the opener", async () => {
+    const user = userEvent.setup();
+    function Host() {
+      const [open, setOpen] = useState(false);
+      return (
+        <>
+          <button type="button" onClick={() => setOpen(true)}>פתיחה</button>
+          {open && <Dialog title="d" onClose={() => setOpen(false)}><input aria-label="השם" autoFocus /></Dialog>}
+        </>
+      );
+    }
+    render(<StrictMode><Host /></StrictMode>);
+    const opener = screen.getByRole("button", { name: "פתיחה" });
+    opener.focus();
+    await user.keyboard("{Enter}");
+    expect(screen.getByLabelText("השם")).toHaveFocus();
+    await user.keyboard("{Escape}");
+    expect(opener).toHaveFocus();
+  });
+
+  // A loading frame replaced by its form in one commit (NoteDialog: the summary opened from
+  // Today, the calendar's day list or Tasks): the form's field keeps the focus as it opens, and
+  // closing the form returns it to what opened the loading frame (regression of 793ee73).
+  for (const strict of [false, true]) {
+    it(`a loading frame replaced by its form hands its opener over${strict ? " (StrictMode)" : ""}`, async () => {
+      const user = userEvent.setup();
+      function Form({ onClose }: { onClose: () => void }) {
+        return <Dialog title="סיכום" onClose={onClose}><textarea aria-label="הסיכום" autoFocus /></Dialog>;
+      }
+      function Loading({ onClose }: { onClose: () => void }) {
+        const [ready, setReady] = useState(false);
+        useEffect(() => {
+          const t = setTimeout(() => setReady(true), 20);
+          return () => clearTimeout(t);
+        }, []);
+        if (!ready) return <Dialog title="סיכום" onClose={onClose}><p>טוען</p></Dialog>;
+        return <Form onClose={onClose} />;
+      }
+      function Host() {
+        const [open, setOpen] = useState(false);
+        return (
+          <>
+            <button type="button" onClick={() => setOpen(true)}>לכתוב סיכום</button>
+            {open && <Loading onClose={() => setOpen(false)} />}
+          </>
+        );
+      }
+      render(strict ? <StrictMode><Host /></StrictMode> : <Host />);
+      const opener = screen.getByRole("button", { name: "לכתוב סיכום" });
+      opener.focus();
+      await user.keyboard("{Enter}");
+      expect(screen.getByRole("dialog")).toHaveFocus();
+      await act(() => new Promise((r) => setTimeout(r, 60)));
+      expect(screen.getByLabelText("הסיכום")).toHaveFocus();
+      await user.keyboard("{Escape}");
+      expect(screen.queryByRole("dialog")).toBeNull();
+      expect(opener).toHaveFocus();
+    });
+  }
+
+  it("a dialog that replaces another without a field of its own takes the focus, and gives it back to the first one's opener", async () => {
+    const user = userEvent.setup();
+    function Host() {
+      const [step, setStep] = useState<"" | "a" | "b">("");
+      return (
+        <>
+          <button type="button" onClick={() => setStep("a")}>מחיקה</button>
+          {step === "a" && (
+            <Dialog title="א" onClose={() => setStep("")}>
+              <button type="button" onClick={() => setStep("b")}>הלאה</button>
+            </Dialog>
+          )}
+          {step === "b" && <Dialog title="ב" onClose={() => setStep("")}><p>בטוח?</p></Dialog>}
+        </>
+      );
+    }
+    render(<Host />);
+    const opener = screen.getByRole("button", { name: "מחיקה" });
+    opener.focus();
+    await user.keyboard("{Enter}");
+    await user.click(screen.getByRole("button", { name: "הלאה" }));
+    expect(screen.getByRole("dialog", { name: "ב" })).toHaveFocus();
+    await user.keyboard("{Escape}");
     expect(opener).toHaveFocus();
   });
 

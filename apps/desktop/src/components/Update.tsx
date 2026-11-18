@@ -181,23 +181,49 @@ export function useUpdateReady(): boolean {
   return useSyncExternalStore(subscribe, () => ready);
 }
 
-/** "There is a new version": in the top bar, only when there is one. */
-export function UpdateChip() {
+const DEMO_TITLE = "לא הוגדר מפתח API. התשובות הן דוגמאות מקומיות, ושום דבר לא נשלח.";
+
+/**
+ * The one quiet status badge in the top bar (D-204): demo mode, a new version, or both in one
+ * badge. Demo mode alone is text with its explanation in the title, as before; a version makes
+ * it a button that opens the version's window. Nothing at all when there is neither. Mounting
+ * it runs the daily check, so the check runs on every page with the bar.
+ */
+export function StatusChip({ demo }: { demo: boolean }) {
+  // First and always: the hourly look runs because this is mounted, badge or not.
   useDailyUpdateCheck();
   const update = useFoundUpdate();
-  const isReady = useUpdateReady();
+  const ready = useUpdateReady();
   const [open, setOpen] = useState(false);
-  if (!update) return null;
+  if (!update && !demo) return null;
+  if (!update) {
+    return (
+      <span className="topbar-status topbar-status-demo" title={DEMO_TITLE}>
+        <span className="topbar-status-dot" aria-hidden="true" />מצב הדגמה
+      </span>
+    );
+  }
+  // The short words are always within the long ones (the button's name), so what she sees is
+  // what a voice command or a screen reader hears (WCAG 2.5.3).
+  const long = demo ? (ready ? "הדגמה · עדכון מוכן" : "הדגמה · עדכון חדש") : (ready ? "גרסה חדשה מוכנה" : "יש גרסה חדשה");
+  const short = demo ? "הדגמה · עדכון" : "גרסה חדשה";
   return (
     <>
       {/* In a narrow bar (a laptop, or larger text) the words shorten; the name stays whole. */}
-      <button type="button" className="update-chip" aria-label={isReady ? "גרסה חדשה מוכנה" : "יש גרסה חדשה"} onClick={() => setOpen(true)}>
-        <SparkIcon /> <span className="update-chip-long">{isReady ? "גרסה חדשה מוכנה" : "יש גרסה חדשה"}</span>
-        <span className="update-chip-short" aria-hidden="true">גרסה חדשה</span>
+      <button type="button" className={demo ? "topbar-status topbar-status-demo" : "topbar-status"} aria-label={long}
+        title={demo ? `${DEMO_TITLE} לחיצה: הגרסה החדשה.` : undefined} onClick={() => setOpen(true)}>
+        <span className="topbar-status-dot" aria-hidden="true" />
+        <span className="topbar-status-long">{long}</span>
+        <span className="topbar-status-short" aria-hidden="true">{short}</span>
       </button>
       {open && <UpdateDialog update={update} onClose={() => setOpen(false)} />}
     </>
   );
+}
+
+/** "There is a new version", with no demo mode: the badge on its own (the case bar, the tests). */
+export function UpdateChip() {
+  return <StatusChip demo={false} />;
 }
 
 export function UpdateDialog({ update, onClose }: { update: UpdateView; onClose: () => void }) {

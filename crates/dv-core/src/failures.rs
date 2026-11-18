@@ -46,25 +46,38 @@ impl Core {
         Ok(())
     }
 
-    /// Put the failure marks, and each case's number of sections, on the rows of a case list.
+    /// Put the failure marks, each case's number of sections and its next section on the rows
+    /// of a case list. The sections are the template's (key and title), never case data, and
+    /// nothing of this is stored: it is worked out again on every read of the list.
     pub(crate) fn with_failures(
         &mut self,
         mut cases: Vec<CaseSummary>,
     ) -> Result<Vec<CaseSummary>, CoreError> {
         let failed = self.failed_sends()?;
-        // The report's structure is read once for each template, not once for each case.
-        let mut counts: HashMap<Option<String>, u32> = HashMap::new();
+        // The report's sections are read once for each template, not once for each case.
+        let mut sections: HashMap<Option<String>, Vec<(String, String)>> = HashMap::new();
         for c in &mut cases {
             c.failed_at = failed.get(&c.id).copied();
-            // The same count as the report's table of contents, so the list and the report
-            // agree ("2 מתוך 15").
-            c.total_sections = *counts.entry(c.meta.template.clone()).or_insert_with(|| {
+            let list = sections.entry(c.meta.template.clone()).or_insert_with(|| {
                 dv_domain::ReportStructure::for_template(c.meta.template.as_deref())
-                    .map(|s| s.sections().filter(|s| s.key != "signature").count())
-                    .ok()
-                    .and_then(|n| u32::try_from(n).ok())
+                    .map(|s| {
+                        s.sections()
+                            .filter(|s| s.key != "signature")
+                            .map(|s| (s.key.clone(), s.title.clone()))
+                            .collect()
+                    })
                     .unwrap_or_default()
             });
+            // The same count as the report's table of contents, so the list and the report
+            // agree ("2 מתוך 15").
+            c.total_sections = u32::try_from(list.len()).unwrap_or_default();
+            c.next_section = list
+                .iter()
+                .find(|(k, _)| !c.approved_sections.contains(k))
+                .map(|(key, title)| dv_domain::NextSection {
+                    key: key.clone(),
+                    title: title.clone(),
+                });
         }
         Ok(cases)
     }

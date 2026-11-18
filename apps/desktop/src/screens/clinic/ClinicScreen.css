@@ -3,22 +3,18 @@
 .clinic {
   gap: var(--space-4);
 }
-.clinic-beta {
-  margin: 0;
-  align-self: flex-start;
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius-md);
-  background: var(--sand);
-  color: var(--ink-soft);
-  font-size: var(--text-sm);
-}
 .clinic-panel {
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
+}
+/* On every page of the clinic, room for the page's scrollbar is kept even when there is none:
+   on Windows a scrollbar takes width, so a page that scrolls beside one that does not (another
+   tab, the month beside the week, the bar of a visit chosen on the calendar in a short window)
+   would move everything sideways, the visit under the pointer too (D-204 §5). The part of the
+   reports keeps its own width. */
+html:has(.clinic-panel) {
+  scrollbar-gutter: stable;
 }
 /* The panel takes the keyboard only to be scrolled; its ring would frame the whole page. */
 .clinic-panel:focus-visible {
@@ -168,6 +164,46 @@
   gap: var(--space-2);
 }
 
+/* The line "עכשיו" between today's visits (D-204): the same --warn-dot as the calendar's
+   .cal-now, with its words in --warn. */
+.clinic-now {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) 0;
+  border-top: 1px solid var(--line);
+}
+.clinic-now + .clinic-visit {
+  border-top: 0;
+}
+.clinic-now-label {
+  font-size: var(--text-xs);
+  font-weight: 700;
+  color: var(--warn);
+  white-space: nowrap;
+}
+.clinic-now-rule {
+  flex: 1 1 auto;
+  height: 0;
+  border-top: 2px solid var(--warn-dot);
+  border-radius: 2px;
+}
+
+/* Time she kept for herself, on the front page: hatched, its hours quiet (D-204). */
+.clinic-today .clinic-visit[data-kind="block"] .clinic-visit-body {
+  padding: var(--space-1) var(--space-3);
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: repeating-linear-gradient(135deg, var(--sand) 0 6px, var(--surface-alt) 6px 12px);
+}
+.clinic-today .clinic-visit[data-kind="block"] .clinic-visit-when {
+  color: var(--ink-muted);
+}
+/* Its hours still open the visit, and say so under the pointer like every other. */
+.clinic-today .clinic-visit[data-kind="block"] .clinic-visit-open:hover {
+  color: var(--primary);
+}
+
 /* ---------- what needs her ---------- */
 .clinic-alert {
   display: flex;
@@ -190,6 +226,66 @@
 .clinic-alert-head {
   flex-wrap: wrap;
   gap: var(--space-2);
+}
+
+/* ---------- what needs her, by topic (AlertGroups, D-204) ---------- */
+/* One row per kind that opens and folds, like the finish step's groups (.fin-head). The
+   focus ring comes from the global :focus-visible. */
+.clinic-need-title {
+  margin: 0;
+  font-size: var(--text-md);
+}
+.clinic-need-head {
+  width: 100%;
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 0 var(--space-1);
+  border: 0;
+  border-top: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-weight: 600;
+  text-align: start;
+  cursor: pointer;
+}
+.clinic-need-group:first-child .clinic-need-head {
+  border-top: 0;
+}
+.clinic-need-head:hover {
+  background: var(--sand);
+}
+.clinic-need-count {
+  min-width: 24px;
+  min-height: 24px;
+  justify-content: center;
+  padding: 0 6px;
+  font-weight: 700;
+}
+.clinic-need-chevron {
+  display: inline-grid;
+  color: var(--ink-muted);
+  transition: transform var(--dur-hover) var(--ease-out);
+}
+.clinic-need-head[aria-expanded="true"] .clinic-need-chevron {
+  transform: rotate(180deg);
+}
+@media (prefers-reduced-motion: reduce) {
+  .clinic-need-chevron {
+    transition: none;
+  }
+}
+.clinic-need-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: 0 var(--space-1) var(--space-3);
+}
+/* A folded kind keeps its (empty) body for aria-controls; `display: flex` would show it. */
+.clinic-need-body[hidden] {
+  display: none;
 }
 
 /* ---------- tasks ---------- */

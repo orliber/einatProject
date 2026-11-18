@@ -4,6 +4,7 @@
 // clipboard, and she pastes it and presses send herself.
 import { useApp } from "../../App";
 import { AddMenu } from "../../components/Menu";
+import { isDiscreet, shownName } from "../../discreet";
 import { asUiError, ipc } from "../../ipc/client";
 import { clinicApi } from "../../ipc/clinic";
 import type { Channel } from "../../ipc/generated/Channel";
@@ -21,25 +22,36 @@ const OPENED: Record<Exclude<Channel, "unknown">, string> = {
   email: "תוכנת המייל נפתחה",
 };
 
+/** What the core says in place of a contact who has no name on the card (`contact_label` in
+ *  crates/dv-domain/src/clinic/channels.rs; the browser preview's stand-in says the same). It
+ *  is no name: the toast shows it as it is, never as initials ("א. ה."), also in discreet mode. */
+export const NAMELESS_CONTACT = "איש הקשר";
+
 /** What the message is, as the toasts name it. */
 const WHAT: Record<MessageKind, string> = {
   reminder: "התזכורת",
   payment: "הודעת התשלום",
 };
 
-export function SendMenu({ kind, patientId, visitId = null, label }: {
-  kind: MessageKind;
-  patientId: string;
-  visitId?: string | null;
-  label: string;
-}) {
+/**
+ * Sending a message to the family, for a menu that offers it ("תזכורת", "הודעת תשלום"). The
+ * toast names the contact as the screen may show it now: initials in discreet mode (D-192; a gap
+ * since D-201, closed in D-204), and "איש הקשר" as it is (`NAMELESS_CONTACT`). It never carries
+ * the message itself.
+ */
+export function useSend(kind: MessageKind, patientId: string, visitId: string | null = null): {
+  send: (channel: Exclude<Channel, "unknown">) => Promise<void>;
+  copy: () => Promise<void>;
+} {
   const { notify, fail } = useApp();
 
   /** Opens the chat on her device; the text goes to the protected clipboard only. */
   async function send(channel: Exclude<Channel, "unknown">) {
     try {
       const handed = await ipc.sendMessage(kind, patientId, visitId, channel, null);
-      notify(`${OPENED[channel]} מול ${handed.to}. ${WHAT[kind]} בלוח המוגן: מדביקים (Ctrl+V) ושולחים. ${clearsIn(handed.clears_in)}.`);
+      const to = handed.to === NAMELESS_CONTACT ? NAMELESS_CONTACT : shownName(handed.to, isDiscreet());
+      // Initials end with their own full stop ("י. ל."): the sentence does not add a second one.
+      notify(`${OPENED[channel]} מול ${to}${to.endsWith(".") ? "" : "."} ${WHAT[kind]} בלוח המוגן: מדביקים (Ctrl+V) ושולחים. ${clearsIn(handed.clears_in)}.`);
     } catch (e) {
       notify(fail(asUiError(e)));
     }
@@ -58,6 +70,16 @@ export function SendMenu({ kind, patientId, visitId = null, label }: {
     }
   }
 
+  return { send, copy };
+}
+
+export function SendMenu({ kind, patientId, visitId = null, label }: {
+  kind: MessageKind;
+  patientId: string;
+  visitId?: string | null;
+  label: string;
+}) {
+  const { send, copy } = useSend(kind, patientId, visitId);
   return (
     <AddMenu label={label} className="btn btn-small" items={[
       { label: "לשלוח בוואטסאפ", run: () => void send("whatsapp") },

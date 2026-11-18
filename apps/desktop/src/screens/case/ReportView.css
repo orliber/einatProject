@@ -65,6 +65,9 @@
   margin-inline-start: -15px;
   padding-inline-start: 12px;
   border-inline-start: 3px solid transparent;
+  /* D-204: brought into view with "nearest" (opened from the list), it keeps a little room
+     under it, so its last button never sits on the window's edge. */
+  scroll-margin-block-end: 16px;
 }
 /* The section in focus: a green line at its side, no background. */
 .a4-section.is-focus {
@@ -141,6 +144,31 @@
   align-items: center;
   gap: 12px;
 }
+/* D-204 §3: the box folded, one row: "✦ לנסח את הסעיף", "לכתוב בעצמי", "איך לנסח? (לא חובה)". */
+.a4-brief-closed {
+  gap: 12px;
+  margin-top: 8px;
+}
+.a4-brief-toggle {
+  align-self: center;
+}
+/* Her unsent draft, behind a newer wish kept for the section in another report (D-204 §3). */
+.a4-brief-earlier {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin: 0;
+}
+.a4-brief-earlier-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
 /* An empty section out of focus: one dashed line. */
 .a4-gap-line {
   display: flex;
@@ -169,6 +197,13 @@
 .a4-heading {
   font-size: var(--text-lg);
   margin: 16px 0 4px;
+}
+/* The keyboard on the section's heading (D-204): a thin ring with room around the words, quieter
+   than the ring of a button, and only when it came from the keyboard. */
+.a4-heading:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 4px;
+  border-radius: 4px;
 }
 .a4-heading button {
   font: inherit;
@@ -653,7 +688,10 @@
 
 /* Round 42: the page reads as a document. What the program says about a paragraph (how close
    it is to her style, a note on it) and what a section is written from show when the mouse or
-   the keyboard is on it; warnings stay. The space stays too, so nothing moves on hover. */
+   the keyboard is on it; warnings stay. The space stays too, so nothing moves on hover. With
+   the brief folded (D-204), the section in focus still says what it will be written from before
+   she drafts it, as it did when the open box held the keyboard; only then, so a section with no
+   material keeps one line that says so. */
 .a4-para .style-hint,
 .a4-para .style-note,
 .a4-section .a4-sources {
@@ -666,7 +704,8 @@
 .a4-para:hover .style-note,
 .a4-para:focus-within .style-note,
 .a4-section:hover .a4-sources,
-.a4-section:focus-within .a4-sources {
+.a4-section:focus-within .a4-sources,
+.a4-section.is-focus:has(.a4-brief-closed) .a4-sources {
   opacity: 1;
 }
 /* A new draft comes in softly. */

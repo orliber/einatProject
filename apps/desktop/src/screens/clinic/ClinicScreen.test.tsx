@@ -1,7 +1,7 @@
 // The clinic's page over the demo core: the tabs (click, keyboard, deep links), the front
 // page with the demo clinic's visits, the quick actions, the three dialogs, discreet mode and
 // the accessibility check. Every name is invented; the clock is held at a Sunday morning so
-// "today" is the same day on every run.
+// "today" is the same day on every run (and at 15:12 for the afternoon of the board, D-204).
 import { configure, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
@@ -62,11 +62,36 @@ const tab = (name: string) => screen.getByRole("tab", { name });
 const todays = () => screen.getByRole("region", { name: "הפגישות של היום" });
 /** The row of a patient's visit on today's list. */
 const rowOf = (name: string) => within(todays()).getByRole("button", { name }).closest("li") as HTMLElement;
+/** The "⋯" of a visit on a list. */
+const moreOf = (row: HTMLElement) => within(row).getByRole("button", { name: /^עוד פעולות לפגישה/ });
+
+/** Picks a step from the "⋯" of a visit's row. */
+async function fromMenu(user: ReturnType<typeof userEvent.setup>, row: HTMLElement, item: string) {
+  await user.click(moreOf(row));
+  await user.click(await screen.findByRole("menuitem", { name: item }));
+}
+
+/** The words of a visit's "⋯", in order; the menu is closed again after. */
+async function menuOf(user: ReturnType<typeof userEvent.setup>, row: HTMLElement): Promise<string[]> {
+  await user.click(moreOf(row));
+  const menu = await screen.findByRole("menu");
+  const words = within(menu).getAllByRole("menuitem").map((i) => i.textContent ?? "");
+  await user.keyboard("{Escape}");
+  await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+  return words;
+}
+
+/** The afternoon of the board (ClinicToday.dc.html): תמר's and איתי's visits are over and not
+ *  marked, her own time ended at 15:00, and מאיה's is at 16:00. */
+const afternoon = () => vi.setSystemTime(new Date(2026, 10, 15, 15, 12));
+const NAMES = ["תמר", "איתי", "מאיה", "נועם", "יובל", "עומר", "יעל"];
 
 describe("the clinic's page", () => {
-  it("says it is a beta, shows the eight tabs, and passes the accessibility check", async () => {
+  it("marks the clinic as beta only on the bar's switch, shows the eight tabs, and passes the accessibility check", async () => {
     const { view } = await openClinic();
-    expect(screen.getByRole("note")).toHaveTextContent("ניהול הקליניקה בגרסת בטא. הכל נשמר מוצפן בכספת שבמחשב, ושום דבר מכאן לא נשלח לשום מקום.");
+    // The page has no line of its own about the beta (D-204): the switch says it, below.
+    expect(screen.queryByText(/בגרסת בטא/)).toBeNull();
+    expect(screen.queryByRole("note")).toBeNull();
     expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["היום", "יומן", "מטופלים", "המתנה", "מעקבים", "כספים", "תמונת מצב", "הגדרות הקליניקה"]);
     expect(tab("היום")).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("tabpanel")).toHaveAccessibleName("היום");
@@ -169,7 +194,7 @@ describe("the front page", () => {
 
   it("when today is over, the next day with visits follows", async () => {
     vi.setSystemTime(new Date(2026, 10, 15, 19, 0));
-    await openClinic();
+    const { user } = await openClinic();
     const next = await screen.findByRole("region", { name: "הפגישות הבאות: יום שני, 16.11.2026" });
     expect(within(next).getByRole("button", { name: "תמר" })).toBeInTheDocument();
     expect(within(next).getByText("תצפית")).toBeInTheDocument();
@@ -178,9 +203,14 @@ describe("the front page", () => {
     const ahead = within(next).getByRole("button", { name: "תמר" }).closest("li") as HTMLElement;
     expect(within(ahead).queryByRole("button", { name: "התקיימה" })).toBeNull();
     expect(within(ahead).getByRole("button", { name: "תזכורת" })).toBeInTheDocument();
+    // Not in its "⋯" either: the note and the visit itself.
+    expect(moreOf(ahead)).toHaveAccessibleName("עוד פעולות לפגישה של תמר, 10:00");
+    expect(await menuOf(user, ahead)).toEqual(["לכתוב סיכום", "לפתוח את הפגישה"]);
   });
 
   it("marking a visit “התקיימה” updates its row at once, and the vault has it", async () => {
+    // תמר's visit (09:00–10:30) is over: "התקיימה" is its one step.
+    vi.setSystemTime(new Date(2026, 10, 15, 10, 45));
     const { user, requests } = await openClinic();
     await within(todays()).findByRole("button", { name: "תמר" });
     expect(within(rowOf("תמר")).getByText("מתוכננת")).toBeInTheDocument();
@@ -188,9 +218,10 @@ describe("the front page", () => {
     expect(within(rowOf("תמר")).getByText("התקיימה")).toBeInTheDocument();
     expect(within(rowOf("תמר")).queryByText("מתוכננת")).toBeNull();
     await waitFor(() => expect(requests().some((r) => r.op === "save_visit" && r.visit.status === "held" && r.scope === "one")).toBe(true));
-    // After the vault answered, the row still says so, and the quick action is gone.
+    // After the vault answered, the row still says so, and the same button asks for the note.
     await waitFor(() => expect(within(rowOf("תמר")).queryByRole("button", { name: "התקיימה" })).toBeNull());
     expect(within(rowOf("תמר")).getByText("התקיימה")).toBeInTheDocument();
+    expect(within(rowOf("תמר")).getByRole("button", { name: "לכתוב סיכום" })).toBeInTheDocument();
     // The other visits are as they were.
     expect(within(rowOf("איתי")).getByText("מתוכננת")).toBeInTheDocument();
   });
@@ -201,6 +232,7 @@ describe("the front page", () => {
       if (cmd === "clinic" && (args.request as ClinicRequest).op === "save_visit") throw { code: "refused", message: "הפגישה לא נשמרה.", details: [], action: { kind: "dismiss" } };
       return undefined;
     };
+    vi.setSystemTime(new Date(2026, 10, 15, 10, 45));
     const { user, notes } = await openClinic({ name: "clinic" }, refuse);
     await within(todays()).findByRole("button", { name: "תמר" });
     await user.click(within(rowOf("תמר")).getByRole("button", { name: "התקיימה" }));
@@ -286,6 +318,246 @@ describe("the front page", () => {
   });
 });
 
+describe("the front page by the time (D-204)", () => {
+  it("one action by the time: “התקיימה” on visits that are over, “תזכורת” on the one ahead, the rest under “⋯”", async () => {
+    afternoon();
+    const { user } = await openClinic();
+    await within(todays()).findByRole("button", { name: "תמר" });
+    // Over and not marked: "התקיימה" is the step, and the page's main one for that visit.
+    for (const name of ["תמר", "איתי"]) {
+      const row = rowOf(name);
+      expect(within(row).getByRole("button", { name: "התקיימה" }), name).toHaveClass("btn", "btn-small", "btn-primary");
+      expect(within(row).queryByRole("button", { name: "תזכורת" }), name).toBeNull();
+      expect(within(row).queryByRole("button", { name: /סיכום/ }), name).toBeNull();
+    }
+    // Still ahead: "תזכורת", quiet, and nothing to mark yet.
+    expect(within(rowOf("מאיה")).getByRole("button", { name: "תזכורת" })).toHaveClass("btn", "btn-small");
+    expect(within(rowOf("מאיה")).getByRole("button", { name: "תזכורת" })).not.toHaveClass("btn-primary");
+    expect(within(rowOf("מאיה")).queryByRole("button", { name: "התקיימה" })).toBeNull();
+    // Each visit's row has its time, its name, one step and "⋯": no more.
+    expect(within(rowOf("איתי")).getAllByRole("button").map((b) => b.getAttribute("aria-label") ?? b.textContent))
+      .toEqual(["11:30–12:30, פתיחת הפגישה של איתי", "איתי", "התקיימה", "עוד פעולות לפגישה של איתי, 11:30"]);
+    // Time she kept for herself: no step, no "⋯", and no empty box for them.
+    const own = within(todays()).getByText("כתיבת דוחות").closest("li") as HTMLElement;
+    expect(within(own).getAllByRole("button").map((b) => b.getAttribute("aria-label"))).toEqual(["13:00–15:00, פתיחת הפגישה של כתיבת דוחות"]);
+    expect(own.querySelector(".clinic-visit-actions")).toBeNull();
+    expect(own).toHaveTextContent("זמן שמור");
+
+    // What is not the step waits in "⋯", always ending with the visit itself; a visit that has
+    // begun offers no reminder there either.
+    expect(await menuOf(user, rowOf("תמר"))).toEqual(["לכתוב סיכום", "לפתוח את הפגישה"]);
+    expect(await menuOf(user, rowOf("מאיה"))).toEqual(["התקיימה", "לכתוב סיכום", "לפתוח את הפגישה"]);
+    await fromMenu(user, rowOf("מאיה"), "לפתוח את הפגישה");
+    const dialog = await screen.findByRole("dialog", { name: "פרטי הפגישה" });
+    expect(within(dialog).getByRole("group", { name: "מטופל" })).toHaveTextContent("מאיה");
+  });
+
+  it("draws “עכשיו 15:12” between the visits, counts “4 בלוח · אחת אחרי עכשיו”, and says “בעוד 48 דקות” on the next one", async () => {
+    afternoon();
+    const { view } = await openClinic();
+    await within(todays()).findByRole("button", { name: "תמר" });
+    const items = within(todays()).getAllByRole("listitem");
+    expect(items.map((li) => within(li).queryAllByRole("button")[0]?.textContent ?? li.textContent))
+      .toEqual(["09:00–10:30", "11:30–12:30", "13:00–15:00", "עכשיו 15:12", "16:00–16:50"]);
+    // The line is text in its place in the list: no name of its own, nothing that speaks up.
+    const line = items[3] as HTMLElement;
+    expect(line).not.toHaveAttribute("aria-label");
+    expect(within(line).queryByRole("status")).toBeNull();
+    expect(line.querySelector(".clinic-now-rule")).toHaveAttribute("aria-hidden", "true");
+    // How many the day holds, how many are still ahead, and how soon the next one is.
+    expect(within(todays()).getByText("4 בלוח · אחת אחרי עכשיו")).toBeInTheDocument();
+    expect(rowOf("מאיה")).toHaveTextContent("בעוד 48 דקות");
+    expect(items.filter((li) => li.textContent?.includes("בעוד"))).toEqual([rowOf("מאיה")]);
+    // "מתוכננת" is said to a screen reader only; the visits that are over keep it too.
+    expect(within(rowOf("מאיה")).getByText("מתוכננת")).toHaveClass("visually-hidden");
+    expect(within(rowOf("תמר")).getByText("מתוכננת")).toHaveClass("visually-hidden");
+    expect(await a11yViolations(view.container)).toEqual([]);
+
+    // Before the first visit there is no line (it only stands between two), and the first
+    // visit says how soon it is.
+    view.unmount();
+    vi.setSystemTime(new Date(2026, 10, 15, 8, 0));
+    const morning = await openClinic();
+    await within(todays()).findByRole("button", { name: "תמר" });
+    expect(within(todays()).queryByText(/^עכשיו/)).toBeNull();
+    expect(within(todays()).getAllByRole("listitem")).toHaveLength(4);
+    expect(within(todays()).getByText("4 בלוח")).toBeInTheDocument();
+    expect(rowOf("תמר")).toHaveTextContent("בעוד שעה");
+
+    // Just before her own time: that is not "the next one", מאיה's visit is.
+    morning.view.unmount();
+    vi.setSystemTime(new Date(2026, 10, 15, 12, 45));
+    await openClinic();
+    await within(todays()).findByRole("button", { name: "תמר" });
+    expect(within(todays()).getAllByRole("listitem").map((li) => within(li).queryAllByRole("button")[0]?.textContent ?? li.textContent))
+      .toEqual(["09:00–10:30", "11:30–12:30", "עכשיו 12:45", "13:00–15:00", "16:00–16:50"]);
+    expect(within(todays()).getByText("4 בלוח · 2 אחרי עכשיו")).toBeInTheDocument();
+    expect(rowOf("מאיה")).toHaveTextContent("בעוד 3 שעות ו-15 דקות");
+    expect(within(todays()).getAllByRole("listitem").filter((li) => li.textContent?.includes("בעוד"))).toEqual([rowOf("מאיה")]);
+  });
+
+  it("after “התקיימה” the focus stays on the same button, which now reads “לכתוב סיכום”", async () => {
+    afternoon();
+    const { user, requests } = await openClinic();
+    await within(todays()).findByRole("button", { name: "תמר" });
+    const needs = screen.getByRole("region", { name: "מה דורש אותי" });
+    expect(within(needs).getByRole("button", { name: "פגישה בלי סיכום: 2" })).toBeInTheDocument();
+    const step = within(rowOf("תמר")).getByRole("button", { name: "התקיימה" });
+    await user.click(step);
+    expect(step).toHaveFocus();
+    expect(step).toHaveTextContent("לכתוב סיכום");
+    await waitFor(() => expect(requests().some((r) => r.op === "save_visit" && r.visit.status === "held")).toBe(true));
+    // The page is read again: the visit now waits for its note, and the button is still hers.
+    await within(needs).findByRole("button", { name: "פגישה בלי סיכום: 3" });
+    expect(step.isConnected).toBe(true);
+    expect(step).toHaveFocus();
+    expect(step).toHaveAccessibleName("לכתוב סיכום");
+    expect(step).not.toHaveClass("btn-primary");
+    await user.keyboard("{Enter}");
+    const dialog = await screen.findByRole("dialog", { name: "סיכום מפגש אבחון" });
+    expect(dialog).toHaveTextContent("תמר · 15.11.2026, 09:00");
+    await user.click(within(dialog).getByRole("button", { name: "סגירה" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+
+    // The same step on its line in "מה דורש אותי", for a visit of today, opens its note too.
+    await user.click(within(needs).getByRole("button", { name: "פגישה בלי סיכום: 3" }));
+    const tamar = within(needs).getByRole("button", { name: "תמר" }).closest("li") as HTMLElement;
+    await user.click(within(tamar).getByRole("button", { name: "לכתוב סיכום" }));
+    expect(await screen.findByRole("dialog", { name: "סיכום מפגש אבחון" })).toHaveTextContent("תמר · 15.11.2026, 09:00");
+  });
+
+  it("a note saved from “לכתוב סיכום” takes that step off the row, and the focus goes to the row's “⋯”, not to the page", async () => {
+    afternoon();
+    const { user } = await openClinic();
+    await within(todays()).findByRole("button", { name: "תמר" });
+    // Marked held, the same button asks for the note; Enter opens it.
+    const step = within(rowOf("תמר")).getByRole("button", { name: "התקיימה" });
+    await user.click(step);
+    expect(step).toHaveAccessibleName("לכתוב סיכום");
+    await user.keyboard("{Enter}");
+    const dialog = await screen.findByRole("dialog", { name: "סיכום מפגש אבחון" });
+    await user.type(await within(dialog).findByLabelText("רשומה"), "שיתפה פעולה לאורך המפגש.");
+    await user.click(within(dialog).getByRole("button", { name: "שמירה" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await within(rowOf("תמר")).findByText("יש סיכום");
+    expect(within(rowOf("תמר")).queryByRole("button", { name: "לכתוב סיכום" })).toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(moreOf(rowOf("תמר"))));
+  });
+
+  it("groups “מה דורש אותי” by topic, the first open, with “N דברים” beside the title; passes the accessibility check open and closed", async () => {
+    afternoon();
+    const { user, view, went } = await openClinic();
+    const needs = screen.getByRole("region", { name: "מה דורש אותי" });
+    const toggles = () => within(needs).getAllByRole("heading", { level: 3 }).map((h) => within(h).getByRole("button"));
+    const bodyOf = (toggle: HTMLElement) => document.getElementById(toggle.getAttribute("aria-controls") ?? "") as HTMLElement;
+    expect(within(needs).getByText("8 דברים")).toBeInTheDocument();
+    // In the order she would deal with them, with the clinic's words and a count; the first open.
+    const topics = ["פגישה שלא סומנה: 2", "פגישה בלי סיכום: 2", "משימה שמועדה עבר: 1", "שיחת משוב קרובה: 1", "חוב פתוח: 1", "המתנה ארוכה: 1"];
+    expect(toggles()).toHaveLength(topics.length);
+    toggles().forEach((toggle, i) => {
+      expect(toggle).toHaveAccessibleName(topics[i]);
+      expect(toggle).toHaveAttribute("aria-expanded", i === 0 ? "true" : "false");
+    });
+    // A line under its topic has no topic of its own.
+    const [unmarked, noNote] = toggles() as [HTMLElement, HTMLElement];
+    const open = bodyOf(unmarked);
+    expect(within(open).getAllByRole("listitem")).toHaveLength(2);
+    expect(open.querySelector(".chip")).toBeNull();
+    expect(within(open).queryByText("פגישה שלא סומנה")).toBeNull();
+    expect(within(open).getAllByRole("button", { name: "התקיימה" })).toHaveLength(2);
+    expect(bodyOf(noNote)).not.toBeVisible();
+    expect(await a11yViolations(view.container)).toEqual([]);
+
+    // Folded and opened by her; one she opened stays open.
+    await user.click(unmarked);
+    expect(unmarked).toHaveAttribute("aria-expanded", "false");
+    expect(await a11yViolations(view.container)).toEqual([]);
+    await user.click(noNote);
+    expect(noNote).toHaveAttribute("aria-expanded", "true");
+    const lines = within(bodyOf(noNote)).getAllByRole("listitem");
+    expect(lines.map((li) => li.textContent)).toEqual([
+      "נועםעדיין אין סיכום למפגש אבחון מיום 01.11.2026.לכתוב סיכום",
+      "מאיהעדיין אין סיכום לפגישת טיפול מיום 08.11.2026.לכתוב סיכום",
+    ]);
+    expect(await a11yViolations(view.container)).toEqual([]);
+    // A visit of an earlier day is not on this page: its note is written from the card.
+    await user.click(within(lines[0] as HTMLElement).getByRole("button", { name: "לכתוב סיכום" }));
+    expect(went[went.length - 1]).toMatchObject({ name: "clinic", tab: "patients" });
+    expect((went[went.length - 1] as { patientId?: string }).patientId).toMatch(/^patient-/);
+  });
+
+  it("“התקיימה” on an unmarked line saves at once, the line leaves, the count drops and the focus goes to its topic; a refusal brings it back", async () => {
+    afternoon();
+    let release: () => void = () => undefined;
+    let refuse = false;
+    const slowSave: Override = async (cmd, args, core) => {
+      if (cmd === "copy_secret") return 60;
+      if (cmd !== "clinic" || (args.request as ClinicRequest).op !== "save_visit") return undefined;
+      await new Promise<void>((r) => (release = r));
+      if (refuse) throw { code: "refused", message: "הפגישה לא נשמרה.", details: [], action: { kind: "dismiss" } };
+      return core.handle(cmd, args);
+    };
+    const { user, requests, notes } = await openClinic({ name: "clinic" }, slowSave);
+    const needs = screen.getByRole("region", { name: "מה דורש אותי" });
+    const lineOf = (name: string) => within(needs).queryByRole("button", { name })?.closest("li") ?? null;
+    const saves = () => requests().filter((r) => r.op === "save_visit");
+    expect(within(needs).getByText("8 דברים")).toBeInTheDocument();
+
+    await user.click(within(lineOf("תמר") as HTMLElement).getByRole("button", { name: "התקיימה" }));
+    // Before the vault answers: the line is gone, the topic and the title count one less, and
+    // the keyboard is on the topic's row.
+    expect(lineOf("תמר")).toBeNull();
+    const topic = within(needs).getByRole("button", { name: "פגישה שלא סומנה: 1" });
+    expect(topic).toHaveFocus();
+    expect(within(needs).getByText("7 דברים")).toBeInTheDocument();
+    expect(within(rowOf("תמר")).getByText("התקיימה")).toBeInTheDocument();
+    await waitFor(() => expect(saves()).toHaveLength(1));
+    expect(saves()[0]).toMatchObject({ scope: "one", visit: { status: "held", start: 540 } });
+    release();
+    // The page is read again: the visit waits for its note now, and the focus was not moved.
+    await within(needs).findByRole("button", { name: "פגישה בלי סיכום: 3" });
+    expect(topic).toHaveFocus();
+    expect(lineOf("תמר")).toBeNull();
+
+    // The vault refuses the next one: the line comes back, and the toast says why.
+    refuse = true;
+    await user.click(within(lineOf("איתי") as HTMLElement).getByRole("button", { name: "התקיימה" }));
+    expect(lineOf("איתי")).toBeNull();
+    // The whole topic went: the keyboard is on the row now in its place.
+    expect(within(needs).queryByRole("button", { name: /^פגישה שלא סומנה/ })).toBeNull();
+    expect(within(needs).getByRole("button", { name: "פגישה בלי סיכום: 3" })).toHaveFocus();
+    await waitFor(() => expect(saves()).toHaveLength(2));
+    release();
+    await waitFor(() => expect(notes).toContain("הפגישה לא נשמרה."));
+    expect(await within(needs).findByRole("button", { name: "פגישה שלא סומנה: 1" })).toHaveAttribute("aria-expanded", "true");
+    expect(within(lineOf("איתי") as HTMLElement).getByRole("button", { name: "התקיימה" })).toBeInTheDocument();
+    expect(within(rowOf("איתי")).getByText("מתוכננת")).toBeInTheDocument();
+    expect(within(rowOf("איתי")).getByRole("button", { name: "התקיימה" })).toBeInTheDocument();
+  });
+
+  it("in discreet mode every “⋯” is named by initials, no aria-label or title carries a full name, and a WhatsApp reminder from “תזכורת” toasts initials", async () => {
+    afternoon();
+    const { user, notes, calls } = await openClinic();
+    await within(todays()).findByRole("button", { name: "תמר" });
+    await user.click(screen.getByRole("switch", { name: "מצב דיסקרטי" }));
+    expect(within(todays()).getAllByRole("button", { name: /^עוד פעולות לפגישה/ }).map((b) => b.getAttribute("aria-label")))
+      .toEqual(["עוד פעולות לפגישה של ת., 09:00", "עוד פעולות לפגישה של א., 11:30", "עוד פעולות לפגישה של מ., 16:00"]);
+    // Every name the page gives a control, or a tip, is initials too.
+    const named = [...document.querySelectorAll("[aria-label], [title]")]
+      .flatMap((el) => [el.getAttribute("aria-label") ?? "", el.getAttribute("title") ?? ""]).join(" | ");
+    for (const name of NAMES) expect(named, name).not.toContain(name);
+    for (const name of NAMES) expect(screen.getByRole("tabpanel"), name).not.toHaveTextContent(name);
+
+    // מאיה's visit is still ahead: "תזכורת" is its step.
+    await user.click(within(rowOf("מ.")).getByRole("button", { name: "תזכורת" }));
+    await user.click(await screen.findByRole("menuitem", { name: "לשלוח בוואטסאפ" }));
+    await waitFor(() => expect(notes).toHaveLength(1));
+    expect(notes[0]).toBe("וואטסאפ נפתח מול ה. התזכורת בלוח המוגן: מדביקים (Ctrl+V) ושולחים. יימחק מהלוח בעוד דקה.");
+    expect(calls.filter((c) => c.cmd === "send_message").map((c) => c.args)).toEqual([expect.objectContaining({ kind: "reminder", channel: "whatsapp", contact: null })]);
+    expect(calls.some((c) => c.cmd === "copy_secret")).toBe(false);
+  });
+});
+
 describe("discreet mode", () => {
   it("shows initials in place of every name, and stays on until she turns it off (D-192)", async () => {
     const { user, view } = await openClinic();
@@ -298,7 +570,8 @@ describe("discreet mode", () => {
     const panel = screen.getByRole("tabpanel");
     for (const name of ["תמר", "איתי", "מאיה", "נועם", "יובל", "עומר"]) expect(within(panel).queryByText(name), name).toBeNull();
     // In a dialog too: the note of a visit is headed by initials.
-    await user.click(within(todays()).getAllByRole("button", { name: "סיכום" })[0] as HTMLElement);
+    await user.click(within(todays()).getByRole("button", { name: "עוד פעולות לפגישה של ת., 09:00" }));
+    await user.click(await screen.findByRole("menuitem", { name: "לכתוב סיכום" }));
     const dialog = await screen.findByRole("dialog", { name: "סיכום מפגש אבחון" });
     await within(dialog).findByLabelText("רשומה");
     expect(dialog).toHaveTextContent("ת. · 15.11.2026, 09:00");
@@ -322,7 +595,7 @@ describe("discreet mode in the dialogs", () => {
   it("the personal note waits for “להציג”, and the history shows only what was done and when", async () => {
     const { user } = await openClinic();
     await within(todays()).findByRole("button", { name: "תמר" });
-    await user.click(within(rowOf("תמר")).getByRole("button", { name: "סיכום" }));
+    await fromMenu(user, rowOf("תמר"), "לכתוב סיכום");
     const first = await screen.findByRole("dialog", { name: "סיכום מפגש אבחון" });
     await user.type(await within(first).findByLabelText("רשומה"), "שיתפה פעולה לאורך המפגש.");
     await user.type(within(first).getByLabelText("תרשומת אישית"), "לבדוק שוב קשב בפעם הבאה.");
@@ -331,7 +604,7 @@ describe("discreet mode in the dialogs", () => {
     await within(rowOf("תמר")).findByText("יש סיכום");
 
     await user.click(screen.getByRole("switch", { name: "מצב דיסקרטי" }));
-    await user.click(within(rowOf("ת.")).getByRole("button", { name: "סיכום" }));
+    await fromMenu(user, rowOf("ת."), "לפתוח את הסיכום");
     const dialog = await screen.findByRole("dialog", { name: "סיכום מפגש אבחון" });
     await within(dialog).findByLabelText("רשומה");
     expect(within(dialog).queryByLabelText("תרשומת אישית")).toBeNull();
@@ -457,7 +730,7 @@ describe("adding a patient", () => {
     await user.click(within(await screen.findByRole("dialog", { name: "מטופל חדש" })).getByRole("button", { name: "ביטול" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 
-    await user.click(within(rowOf("תמר")).getByRole("button", { name: "סיכום" }));
+    await fromMenu(user, rowOf("תמר"), "לכתוב סיכום");
     const note = await screen.findByRole("dialog", { name: "סיכום מפגש אבחון" });
     await user.type(await within(note).findByLabelText("רשומה"), "טיוטה");
     await user.click(within(note).getByRole("button", { name: "ביטול" }));
@@ -480,7 +753,7 @@ describe("the session note", () => {
   it("keeps the record and the personal note apart, and says what each is", async () => {
     const { user, requests, view } = await openClinic();
     await within(todays()).findByRole("button", { name: "תמר" });
-    await user.click(within(rowOf("תמר")).getByRole("button", { name: "סיכום" }));
+    await fromMenu(user, rowOf("תמר"), "לכתוב סיכום");
     const dialog = await screen.findByRole("dialog", { name: "סיכום מפגש אבחון" });
     const record = await within(dialog).findByLabelText("רשומה");
     const personal = within(dialog).getByLabelText("תרשומת אישית");
@@ -501,7 +774,7 @@ describe("the session note", () => {
 
     // The row says there is a note; opening it again shows each text in its own box.
     expect(await within(rowOf("תמר")).findByText("יש סיכום")).toBeInTheDocument();
-    await user.click(within(rowOf("תמר")).getByRole("button", { name: "סיכום" }));
+    await fromMenu(user, rowOf("תמר"), "לפתוח את הסיכום");
     const again = await screen.findByRole("dialog", { name: "סיכום מפגש אבחון" });
     expect(await within(again).findByLabelText("רשומה")).toHaveValue("שיתפה פעולה לאורך המפגש.");
     expect(within(again).getByLabelText("תרשומת אישית")).toHaveValue("לבדוק שוב קשב בפעם הבאה.");
@@ -513,7 +786,7 @@ describe("the session note", () => {
   it("a template fills an empty record only, and unsaved text asks before it is dropped", async () => {
     const { user } = await openClinic();
     await within(todays()).findByRole("button", { name: "תמר" });
-    await user.click(within(rowOf("תמר")).getByRole("button", { name: "סיכום" }));
+    await fromMenu(user, rowOf("תמר"), "לכתוב סיכום");
     const dialog = await screen.findByRole("dialog", { name: "סיכום מפגש אבחון" });
     const record = await within(dialog).findByLabelText("רשומה");
     const insert = within(dialog).getByRole("button", { name: "הוספת התבנית" });

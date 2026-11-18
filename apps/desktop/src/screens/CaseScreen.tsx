@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { useApp } from "../App";
 import { sortInParts } from "./case/sortParts";
 import { ipc, type CaseDetail, type Prepared, type SortResult, type UiError } from "../ipc/client";
@@ -6,8 +6,8 @@ import { ReviewDialog } from "../components/ReviewDialog";
 import { ExportDialog } from "../components/ExportDialog";
 import { ReportRunDialog } from "../components/ReportRunDialog";
 import { ProgressLine, estimateMs, recordDuration, timed, WaitLine, type Task } from "../components/Progress";
-import { ErrorLine, CloseIcon, Skeleton, dialogOpen } from "../components/ui";
-import { UpdateChip } from "../components/Update";
+import { ErrorLine, CloseIcon, Skeleton, dialogOpen, SearchIcon, FullPageIcon, ChatIcon } from "../components/ui";
+import { useDailyUpdateCheck } from "../components/Update";
 import { ActionsMenu, type MenuItem } from "../components/Menu";
 import { SampleGuide } from "./case/SampleGuide";
 import { CaseSearch } from "./case/CaseSearch";
@@ -144,9 +144,12 @@ async function cardOfCase(caseId: string): Promise<string | null> {
   return rows.find((r) => r.patient.case_id === caseId)?.patient.id ?? null;
 }
 
-export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
+export function CaseScreen({ caseId, view, section }: { caseId: string; view: string; section?: string }) {
   const { go, fail, lockNow, status, notify, showShortcuts } = useApp();
   const shown = useShownName();
+  // The case bar shows no app status (D-204 §3): demo mode and a new version are in the top bar
+  // and on the lock screen. The hourly look for a version still runs while a case is open.
+  useDailyUpdateCheck();
   // The clinic card linked to this case, if any (D-195). Quiet: a failure only hides the link.
   const clinicCard = useQuery({ queryKey: ["clinic", "card-of-case", caseId], queryFn: () => cardOfCase(caseId), staleTime: 60_000 });
   const ai = useAi();
@@ -164,8 +167,10 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
   const [fullDraft, setFullDraft] = useState(false);
   /** "מה יצא מהמחשב": open for one section (its key), or the whole case (""). */
   const [sentFor, setSentFor] = useState<string | null>(null);
-  /** The section in focus on the report page (round 48); `move` brings it into view. */
-  const [focus, setFocus] = useState<{ key: string; at: number; move: boolean; para?: string } | null>(null);
+  /** The section in focus on the report page (round 48); `move` brings it into view. It starts
+   *  on `section` when one was asked for (the cases card's "הסעיף הבא", D-204 §2). */
+  const [focus, setFocus] = useState<{ key: string; at: number; move: boolean; para?: string } | null>(
+    () => (section ? { key: section, at: Date.now(), move: true } : null));
   const [searching, setSearching] = useState(false);
   // The bar is there only once the case is read: its element, not a ref, so the watch starts then.
   const [bar, setBar] = useState<HTMLElement | null>(null);
@@ -536,31 +541,44 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
     <div className="case case-v2">
       <header className="case-bar" ref={setBar}>
         <button type="button" className="case-back" onClick={() => go({ name: "cases" })}>→ תיקים</button>
+        <span className="case-sep" aria-hidden="true" />
         <button type="button" className="case-id" title="פרטים ושמות להסתרה" onClick={() => go({ name: "case", id: caseId, view: "details" })}>
           <span className="case-child" title={child ? shown(child) : detail.meta.code}>{child ? shown(child) : detail.meta.code}</span>
           {age && <span className="case-age">{age}</span>}
           <span className={detail.meta.consent ? "chip chip-ok" : "chip chip-warn"}>{detail.meta.consent ? "✓ הסכמה" : "חסרה הסכמה"}</span>
           {detail.meta.follows && <span className="chip chip-sand">מעקב</span>}
         </button>
+        {/* D-204 §3: the stages joined by a line, green once done; the lines are drawing only,
+            and a finished stage says so in words to a screen reader. */}
         <nav className="stages" aria-label="שלבי התיק">
-          {stages.map((st) => (
-            <button key={st.n} type="button" className={stage === st.n ? "stage on" : "stage"} aria-current={stage === st.n ? "step" : undefined}
-              onClick={() => (st.n === 2 ? toReport() : go({ name: "case", id: caseId, view: st.view }))}>
-              <span className={st.done && stage !== st.n ? "stage-dot done" : "stage-dot"} aria-hidden="true">{st.done && stage !== st.n ? "✓" : st.n}</span>
-              {st.label}
-            </button>
-          ))}
+          {stages.map((st, i) => {
+            const shownDone = st.done && stage !== st.n;
+            const prev = stages[i - 1];
+            return (
+              <Fragment key={st.n}>
+                {prev && <span className={prev.done && stage !== prev.n ? "step-link step-link-done" : "step-link"} aria-hidden="true" />}
+                <button type="button" className={stage === st.n ? "stage on" : shownDone ? "stage done" : "stage"} aria-current={stage === st.n ? "step" : undefined}
+                  onClick={() => (st.n === 2 ? toReport() : go({ name: "case", id: caseId, view: st.view }))}>
+                  <span className={shownDone ? "stage-dot done" : "stage-dot"} aria-hidden="true">{shownDone ? "✓" : st.n}</span>
+                  {st.label}
+                  {/* The space outside the hidden word, so the name reads "חומרים (הושלם)". */}
+                  {shownDone && <>{" "}<span className="visually-hidden">(הושלם)</span></>}
+                </button>
+              </Fragment>
+            );
+          })}
         </nav>
-        {status.demo_mode && <span className="chip chip-sand case-demo" title="לא הוגדר מפתח API בהגדרות">מצב הדגמה</span>}
-        <UpdateChip />
-        {stage === 2 && !narrowBar && (
-          <button type="button" className="btn" aria-pressed={fullPage} title={fullPage ? "להחזיר את תוכן הדוח שבצד" : "להסתיר את תוכן הדוח שבצד"} onClick={() => setFullPage(!fullPage)}>
-            דף מלא
-          </button>
-        )}
-        {!narrowBar && <button type="button" className="btn" onClick={() => setSearching(true)}>חיפוש</button>}
-        {!narrowBar && <button type="button" className="btn" onClick={() => go({ name: "consult", caseId })}>התייעצות</button>}
-        <ActionsMenu items={more} label="עוד פעולות: פרטים ושמות, כתיבת כל הדוח, נעילה" />
+        {/* D-204 §3: one quiet family of tools, each an icon with its name. */}
+        <div className="case-tools">
+          {stage === 2 && !narrowBar && (
+            <button type="button" className="btn btn-quiet" aria-pressed={fullPage} title={fullPage ? "להחזיר את תוכן הדוח שבצד" : "להסתיר את תוכן הדוח שבצד"} onClick={() => setFullPage(!fullPage)}>
+              <FullPageIcon />דף מלא
+            </button>
+          )}
+          {!narrowBar && <button type="button" className="btn btn-quiet" onClick={() => setSearching(true)}><SearchIcon />חיפוש</button>}
+          {!narrowBar && <button type="button" className="btn btn-quiet" onClick={() => go({ name: "consult", caseId })}><ChatIcon />התייעצות</button>}
+          <ActionsMenu items={more} label="עוד פעולות: פרטים ושמות, כתיבת כל הדוח, נעילה" />
+        </div>
       </header>
       <ErrorLine error={error} />
       {detail.sample && (
@@ -765,23 +783,24 @@ function Contents(props: {
       </nav>
       <div className="contents-foot">
         {/* D-114: material not sorted yet goes into no draft, so it is said above the writing,
-            in words, with what to do (not a small link under it). While the whole report is
-            written its run sorts first, so the alert steps aside. */}
+            with what to do. D-204 §3: one quiet line with a dot; what it means is in its title
+            and, for a screen reader, in words. While the whole report is written its run sorts
+            first, so the line steps aside. */}
         {unsorted > 0 && props.onSort && (
-          <div className="contents-alert" role="status">
-            <b>{unsorted === 1 ? "חומר אחד עוד לא מוין לסעיפים" : `${unsorted} חומרים עוד לא מוינו לסעיפים`}</b>
-            {detail.meta.consent ? (
-              <span>
-                חומר שלא מוין לא נכנס לטיוטות.
-                {missing > 0 ? " אחרי המיון יתברר גם איפה באמת חסר חומר." : ""}
-              </span>
-            ) : (
-              <span>המיון שולח את החומרים, בלי שמות, ל-{ai}. קודם רושמים את הסכמת ההורים.</span>
-            )}
-            <button type="button" className="btn btn-small" onClick={detail.meta.consent ? props.onSort : props.onConsent}>
-              {detail.meta.consent ? "למיין את החומרים" : "רישום ההסכמה"}
+          <p className="contents-alert" role="status">
+            <span className="contents-alert-dot" aria-hidden="true" />
+            <span>{unsorted === 1 ? "חומר אחד עוד לא מוין לסעיפים." : `${unsorted} חומרים עוד לא מוינו לסעיפים.`}</span>
+            {/* Its own leading space, so a screen reader never runs the two sentences together. */}
+            <span className="visually-hidden">
+              {detail.meta.consent
+                ? ` חומר שלא מוין לא נכנס לטיוטות.${missing > 0 ? " אחרי המיון יתברר גם איפה באמת חסר חומר." : ""}`
+                : ` המיון שולח את החומרים, בלי שמות, ל-${ai}. קודם רושמים את הסכמת ההורים.`}
+            </span>
+            <button type="button" className="link-btn" title={detail.meta.consent ? "חומר שלא מוין לא נכנס לטיוטות" : "קודם רושמים את הסכמת ההורים"}
+              onClick={detail.meta.consent ? props.onSort : props.onConsent}>
+              {detail.meta.consent ? "למיין" : "רישום ההסכמה"}
             </button>
-          </div>
+          </p>
         )}
         {readyDrafts > 1 && (
           <button type="button" className="btn btn-primary" disabled={props.approvingAll} onClick={() => props.onApproveAll(readyIds, heldIds)}>

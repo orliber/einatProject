@@ -16,10 +16,11 @@ function summary(over: Partial<CaseSummary> & { approved?: number; consent?: boo
   } as CaseSummary;
 }
 
-describe("caseStatus: one word, one line, three steps", () => {
+describe("caseStatus: one word, one line, one bar", () => {
   it("no materials and no sections: collecting materials", () => {
     const s = caseStatus(summary({}));
     expect(s.word).toBe("אוספים חומרים");
+    expect([s.done, s.total]).toEqual([0, TOTAL_SECTIONS]);
     expect(s.steps).toEqual(["now", "empty", "empty"]);
     expect(s.view).toBe("materials");
   });
@@ -28,6 +29,7 @@ describe("caseStatus: one word, one line, three steps", () => {
     const s = caseStatus(summary({ approved: 2 }));
     expect(s.word).toBe("בכתיבה");
     expect(s.detail).toBe(`2 מתוך ${TOTAL_SECTIONS} סעיפים אושרו`);
+    expect([s.done, s.total]).toEqual([2, 16]);
     expect(s.steps).toEqual(["done", "now", "empty"]);
     expect(s.view).toBe("report");
   });
@@ -35,24 +37,29 @@ describe("caseStatus: one word, one line, three steps", () => {
   it("every section approved: ready to export", () => {
     const s = caseStatus(summary({ approved: TOTAL_SECTIONS }));
     expect(s.word).toBe("מוכן להוצאה");
+    expect([s.done, s.total]).toEqual([16, 16]);
     expect(s.steps).toEqual(["done", "done", "now"]);
   });
 
   it("counts the case's own report, as the report does: 15 in an older case, signature aside", () => {
     const older = caseStatus(summary({ approved: 2, total_sections: 15 }));
     expect(older.detail).toBe("2 מתוך 15 סעיפים אושרו");
+    expect([older.done, older.total]).toEqual([2, 15]);
     const done = summary({ total_sections: 15 });
     done.approved_sections = [...Array.from({ length: 15 }, (_, i) => `s${i}`), "signature"];
     expect(caseStatus(done).word).toBe("מוכן להוצאה");
+    expect([caseStatus(done).done, caseStatus(done).total]).toEqual([15, 15]);
     const signed = summary({ total_sections: 15 });
     signed.approved_sections = [...Array.from({ length: 14 }, (_, i) => `s${i}`), "signature"];
     expect(caseStatus(signed).detail).toBe("14 מתוך 15 סעיפים אושרו");
+    expect([caseStatus(signed).done, caseStatus(signed).total]).toEqual([14, 15]);
   });
 
   it("a missing consent comes before everything else", () => {
     const s = caseStatus(summary({ approved: 3, consent: false }));
     expect(s.word).toBe("חסרה הסכמה");
     expect(s.attention).toBe(true);
+    expect([s.done, s.total]).toEqual([3, 16]);
   });
 
   it("a failed send is said first, and the case opens where it was", () => {
@@ -60,6 +67,7 @@ describe("caseStatus: one word, one line, three steps", () => {
     expect(s.word).toBe("השליחה נכשלה");
     expect(s.attention).toBe(true);
     expect(s.view).toBe("report");
+    expect([s.done, s.total]).toEqual([3, 16]);
   });
 
   it("no word appears twice in a row: the word, the detail and the button", () => {

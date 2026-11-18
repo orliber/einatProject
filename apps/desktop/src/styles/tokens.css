@@ -37,6 +37,21 @@
   --line: #e3e6e3;
   --line-strong: #cfd5d2;
   --field-line: #cfd5d2;
+  /* The calendar's kinds (D-204): each readable at 4.5:1 on its own tint; intake and therapy
+     use --primary and --warn. Today's column on the time grid: --primary-wash. */
+  --kind-assessment: #3b6ea5;
+  --kind-assessment-soft: #e8eef6;
+  --kind-assessment-line: #cbd8ea;
+  --kind-observation: #575ca6;
+  --kind-observation-soft: #ecedf7;
+  --kind-observation-line: #d3d5ec;
+  --kind-feedback: #7a4f99;
+  --kind-feedback-soft: #f2ecf6;
+  --kind-feedback-line: #ddd0e8;
+  --kind-guidance: #9c3f66;
+  --kind-guidance-soft: #f9ecf1;
+  --kind-guidance-line: #ecd0db;
+  --primary-wash: #f5faf9;
   /* The case column ("leather binding"). */
   --side: #16272a;
   --side-card: #203537;
@@ -139,6 +154,23 @@
     --line: #2c3634;
     --line-strong: #3d4947;
     --field-line: #56635f;
+    /* The calendar's kinds (D-204), and today's column. */
+    --kind-assessment: #8ab4e6;
+    --kind-assessment-soft: #1b2a3b;
+    --kind-assessment-line: #2f4a68;
+    --kind-observation: #a7abeb;
+    --kind-observation-soft: #23243b;
+    --kind-observation-line: #3a3d66;
+    --kind-feedback: #c7a6e0;
+    --kind-feedback-soft: #2a2237;
+    --kind-feedback-line: #4a3a5e;
+    --kind-guidance: #e9a3c0;
+    --kind-guidance-soft: #37222c;
+    --kind-guidance-line: #5e3a4a;
+    --primary-wash: #1d302d;
+    /* On today's tint, its hour line and its head a step stronger (light keeps --line, --primary-soft). */
+    --primary-wash-line: #34423f;
+    --primary-wash-head: #203d39;
     /* The case column is dark in both. Around the report page: */
     --paper-sand: #262d2b;
     --overlay: rgba(0, 0, 0, 0.6);
@@ -184,6 +216,23 @@
     --line: #2c3634;
     --line-strong: #3d4947;
     --field-line: #56635f;
+    /* The calendar's kinds (D-204), and today's column. */
+    --kind-assessment: #8ab4e6;
+    --kind-assessment-soft: #1b2a3b;
+    --kind-assessment-line: #2f4a68;
+    --kind-observation: #a7abeb;
+    --kind-observation-soft: #23243b;
+    --kind-observation-line: #3a3d66;
+    --kind-feedback: #c7a6e0;
+    --kind-feedback-soft: #2a2237;
+    --kind-feedback-line: #4a3a5e;
+    --kind-guidance: #e9a3c0;
+    --kind-guidance-soft: #37222c;
+    --kind-guidance-line: #5e3a4a;
+    --primary-wash: #1d302d;
+    /* On today's tint, its hour line and its head a step stronger (light keeps --line, --primary-soft). */
+    --primary-wash-line: #34423f;
+    --primary-wash-head: #203d39;
     /* The case column is dark in both. Around the report page: */
     --paper-sand: #262d2b;
     --overlay: rgba(0, 0, 0, 0.6);

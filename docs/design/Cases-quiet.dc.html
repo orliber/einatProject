@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>מסך התיקים</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Assistant:wght@400;600;700&amp;family=Frank+Ruhl+Libre:wght@500;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#1e5b56}a:hover{color:#164541}
+button,input,select{font:inherit;color:inherit}
+button{cursor:pointer}
+button:focus-visible,input:focus-visible,select:focus-visible,a:focus-visible{outline:2px solid #1e5b56;outline-offset:2px}
+.btn{min-height:40px;padding:0 16px;border-radius:10px;border:1px solid #cfd5d2;background:#fff;color:#15201f;font-size:15px;font-weight:600;display:inline-flex;align-items:center;gap:8px;white-space:nowrap}
+.btn-primary{background:#1e5b56;border-color:#1e5b56;color:#fff}
+.btn-primary:hover{background:#164541}
+.icon-btn{width:40px;height:40px;min-height:40px;padding:0;justify-content:center;border-color:transparent;background:transparent;color:#34403e}
+.icon-btn:hover{background:#e6efed}
+.chip{display:inline-flex;align-items:center;gap:6px;min-height:24px;padding:0 10px;border-radius:999px;font-size:12px;font-weight:600;white-space:nowrap}
+.visually-hidden{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+</style>
+</helmet>
+<div dir="rtl" lang="he" style="font-family: Assistant, 'Segoe UI', system-ui, sans-serif; color: #15201f; background: #f4f5f3; min-height: 920px; font-size: 15px; line-height: 1.5">
+
+  <!-- The top bar: one status pill, every button the same size and look. -->
+  <header style="display: flex; align-items: center; flex-wrap: wrap; gap: 12px 16px; padding: 12px 24px; background: #ffffff; border-bottom: 1px solid #e3e6e3">
+    <div style="display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 18px">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path></svg>
+      <span>כספת האבחון</span>
+    </div>
+    <nav aria-label="חלקי התוכנה" style="display: flex; gap: 4px; padding: 4px; background: #f1f3f1; border: 1px solid #e3e6e3; border-radius: 12px">
+      <button type="button" aria-current="page" class="btn" style="min-height: 36px; border-color: #e3e6e3; box-shadow: 0 1px 3px rgba(21,32,31,0.1); color: #1e5b56">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"></path><path d="M14 3v5h5"></path><path d="M9 13h6M9 17h4"></path></svg>
+        כתיבת הדוחות
+      </button>
+      <button type="button" class="btn" style="min-height: 36px; border-color: transparent; background: transparent; color: #4a5654; font-weight: 600">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"></rect><path d="M16 3v4M8 3v4M3 10h18"></path></svg>
+        ניהול הקליניקה
+        <span class="chip" style="background: #e6efed; color: #1e5b56; min-height: 20px; padding: 0 8px">בטא</span>
+      </button>
+    </nav>
+    <span style="flex: 1 1 0"></span>
+    <button type="button" class="chip" style="border: 1px solid #ebcb98; background: #fbf1e2; color: #8a4e0c; min-height: 28px; cursor: pointer">
+      <span aria-hidden="true" style="width: 6px; height: 6px; border-radius: 50%; background: #d38a2c"></span>
+      הדגמה · עדכון מוכן
+    </button>
+    <div style="display: flex; align-items: center; gap: 4px">
+      <button type="button" class="btn icon-btn" aria-label="מצב דיסקרטי" aria-pressed="false" title="מצב דיסקרטי">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+      </button>
+      <button type="button" class="btn icon-btn" aria-label="עזרה וקיצורי מקלדת" title="עזרה וקיצורי מקלדת">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M9.5 9a2.5 2.5 0 0 1 4.8 1c0 1.7-2.3 2-2.3 3.5"></path><path d="M12 17h.01"></path></svg>
+      </button>
+      <button type="button" class="btn icon-btn" aria-label="הגדרות" title="הגדרות">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"></path></svg>
+      </button>
+      <button type="button" class="btn" style="margin-inline-start: 4px">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path></svg>
+        נעילה
+      </button>
+    </div>
+  </header>
+
+  <nav aria-label="כתיבת הדוחות" style="display: flex; gap: 28px; padding: 0 24px; background: #ffffff; border-bottom: 1px solid #e3e6e3">
+    <button type="button" aria-current="page" style="border: 0; background: transparent; padding: 12px 2px; font-weight: 700; color: #15201f; border-bottom: 3px solid #1e5b56">תיקים</button>
+    <button type="button" style="border: 0; background: transparent; padding: 12px 2px; color: #4a5654; border-bottom: 3px solid transparent">התייעצות</button>
+    <button type="button" style="border: 0; background: transparent; padding: 12px 2px; color: #4a5654; border-bottom: 3px solid transparent">הסגנון שלי</button>
+  </nav>
+
+  <main style="max-width: 1152px; margin: 0 auto; padding: 32px 24px 40px; display: flex; flex-direction: column; gap: 24px">
+    <div style="display: flex; align-items: flex-end; justify-content: space-between; flex-wrap: wrap; gap: 16px">
+      <div>
+        <h1 style="margin: 0; font-size: 28px; line-height: 1.2">צהריים טובים, רותם</h1>
+        <p style="margin: 6px 0 0; color: #4a5654">3 תיקים · 2 בעבודה, אחד מוכן להוצאה</p>
+      </div>
+      <button type="button" class="btn btn-primary" style="min-height: 44px">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>
+        תיק חדש
+      </button>
+    </div>
+
+    <!-- Where she left off: the first thing on the page, with how far and what is next. -->
+    <section aria-labelledby="go-on" style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 20px; padding: 24px; background: #ffffff; border: 1px solid #cfe0dc; border-radius: 14px; box-shadow: 0 1px 3px rgba(21,32,31,0.06)">
+      <div style="display: flex; flex-direction: column; gap: 10px; flex: 1 1 420px; min-width: 0">
+        <h2 id="go-on" style="margin: 0; font-size: 13px; font-weight: 700; color: #1e5b56">להמשיך איפה שהפסקת</h2>
+        <div style="display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap">
+          <span style="font-family: 'Frank Ruhl Libre', David, serif; font-size: 28px; font-weight: 700">נועם</span>
+          <span style="color: #4a5654">בן 5 ו-4 חודשים · אבחונים פרטיים</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 12px; max-width: 520px">
+          <div role="img" aria-label="3 מתוך 15 סעיפים אושרו" style="flex: 1 1 auto; height: 8px; background: #e9ecea; border-radius: 999px; overflow: hidden">
+            <div style="width: 20%; height: 100%; background: #1e5b56; border-radius: 999px"></div>
+          </div>
+          <span style="font-size: 13px; color: #34403e; white-space: nowrap">3 מתוך 15 סעיפים</span>
+        </div>
+        <p style="margin: 0; color: #34403e">הסעיף הבא: <b>תיאור תפקוד והתנהגות (לפי ההורים)</b></p>
+      </div>
+      <button type="button" class="btn btn-primary" style="min-height: 48px; padding: 0 22px; font-size: 16px">
+        להמשיך לכתוב
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5M11 6l-6 6 6 6"></path></svg>
+      </button>
+    </section>
+
+    <!-- The cases: folders on the side, and each case says where it stands. -->
+    <section aria-label="התיקים" style="display: flex; flex-wrap: wrap; background: #ffffff; border: 1px solid #e3e6e3; border-radius: 14px; overflow: hidden">
+      <nav aria-label="תיקיות" style="flex: 1 1 220px; max-width: 260px; padding: 12px; border-inline-end: 1px solid #e3e6e3; display: flex; flex-direction: column; gap: 2px">
+        <button type="button" aria-current="true" style="display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 12px; border: 0; border-radius: 8px; background: #e6efed; font-weight: 700; text-align: start">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#1e5b56" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path></svg>
+          <span style="flex: 1 1 auto">כל התיקים</span><span style="font-size: 12px; color: #4a5654">3</span>
+        </button>
+        <button type="button" style="display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 12px; border: 0; border-radius: 8px; background: transparent; text-align: start">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#4a5654" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path></svg>
+          <span style="flex: 1 1 auto">אבחונים פרטיים</span><span style="font-size: 12px; color: #4a5654">2</span>
+        </button>
+        <button type="button" style="display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 12px; border: 0; border-radius: 8px; background: transparent; text-align: start">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#4a5654" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path></svg>
+          <span style="flex: 1 1 auto">הפניות מהמכון</span><span style="font-size: 12px; color: #4a5654">1</span>
+        </button>
+        <button type="button" style="display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 12px; border: 0; border-radius: 8px; background: transparent; color: #1e5b56; font-weight: 600; text-align: start">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>
+          תיקייה חדשה
+        </button>
+        <hr style="border: 0; border-top: 1px solid #e3e6e3; width: 100%; margin: 8px 0">
+        <button type="button" style="display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 12px; border: 0; border-radius: 8px; background: transparent; color: #34403e; text-align: start">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"></path></svg>
+          סל המחזור
+        </button>
+      </nav>
+
+      <div style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column">
+        <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 14px 20px; border-bottom: 1px solid #e3e6e3">
+          <label for="case-q" class="visually-hidden">חיפוש תיקים</label>
+          <input id="case-q" type="search" placeholder="חיפוש בכל התיקים" style="width: 100%; max-width: 300px; min-height: 40px; padding: 0 12px; border: 1px solid #cfd5d2; border-radius: 10px; background: #ffffff; box-sizing: border-box">
+          <label for="case-sort" class="visually-hidden">מיון</label>
+          <select id="case-sort" style="min-height: 40px; padding: 0 12px; border: 1px solid #cfd5d2; border-radius: 10px; background: #ffffff">
+            <option>לפי עדכון אחרון</option>
+            <option>לפי שם</option>
+            <option>לפי שלב</option>
+          </select>
+        </div>
+
+        <div role="table" aria-label="התיקים" style="display: flex; flex-direction: column">
+          <div role="row" style="display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1.4fr) minmax(0, 0.6fr) 48px; gap: 16px; align-items: center; padding: 10px 20px; background: #fafbfa; border-bottom: 1px solid #e3e6e3; font-size: 13px; font-weight: 700; color: #4a5654">
+            <span role="columnheader">תיק</span><span role="columnheader">איפה זה עומד</span><span role="columnheader">עודכן</span><span role="columnheader"><span class="visually-hidden">פעולות</span></span>
+          </div>
+
+          <div role="row" style="display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1.4fr) minmax(0, 0.6fr) 48px; gap: 16px; align-items: center; padding: 14px 20px; border-bottom: 1px solid #e3e6e3">
+            <div role="cell" style="display: flex; flex-direction: column">
+              <a href="#" style="font-family: 'Frank Ruhl Libre', David, serif; font-size: 19px; font-weight: 700; color: #15201f; text-decoration: none">נועם</a>
+              <span style="font-size: 13px; color: #4a5654">בן 5 ו-4 חודשים · אבחונים פרטיים</span>
+            </div>
+            <div role="cell" style="display: flex; flex-direction: column; gap: 6px">
+              <span style="font-size: 13px; font-weight: 600">כתיבה · 3 מתוך 15 סעיפים</span>
+              <div aria-hidden="true" style="height: 6px; max-width: 240px; background: #e9ecea; border-radius: 999px; overflow: hidden"><div style="width: 20%; height: 100%; background: #1e5b56"></div></div>
+            </div>
+            <span role="cell" style="color: #4a5654">היום</span>
+            <span role="cell"><button type="button" class="btn icon-btn" aria-label="עוד פעולות לתיק של נועם"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.8"></circle><circle cx="12" cy="12" r="1.8"></circle><circle cx="19" cy="12" r="1.8"></circle></svg></button></span>
+          </div>
+
+          <div role="row" style="display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1.4fr) minmax(0, 0.6fr) 48px; gap: 16px; align-items: center; padding: 14px 20px; border-bottom: 1px solid #e3e6e3">
+            <div role="cell" style="display: flex; flex-direction: column">
+              <a href="#" style="font-family: 'Frank Ruhl Libre', David, serif; font-size: 19px; font-weight: 700; color: #15201f; text-decoration: none">תמר</a>
+              <span style="font-size: 13px; color: #4a5654">בת 4 וחודשיים · הפניות מהמכון</span>
+            </div>
+            <div role="cell" style="display: flex; flex-direction: column; gap: 6px">
+              <span style="font-size: 13px; font-weight: 600">חומרים · 4 מתוך 5 סוגים</span>
+              <div aria-hidden="true" style="height: 6px; max-width: 240px; background: #e9ecea; border-radius: 999px; overflow: hidden"><div style="width: 80%; height: 100%; background: #4a8a83"></div></div>
+            </div>
+            <span role="cell" style="color: #4a5654">15.11</span>
+            <span role="cell"><button type="button" class="btn icon-btn" aria-label="עוד פעולות לתיק של תמר"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.8"></circle><circle cx="12" cy="12" r="1.8"></circle><circle cx="19" cy="12" r="1.8"></circle></svg></button></span>
+          </div>
+
+          <div role="row" style="display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1.4fr) minmax(0, 0.6fr) 48px; gap: 16px; align-items: center; padding: 14px 20px">
+            <div role="cell" style="display: flex; flex-direction: column">
+              <a href="#" style="font-family: 'Frank Ruhl Libre', David, serif; font-size: 19px; font-weight: 700; color: #15201f; text-decoration: none">יובל</a>
+              <span style="font-size: 13px; color: #4a5654">בן 5 ו-6 חודשים · אבחונים פרטיים</span>
+            </div>
+            <div role="cell">
+              <span class="chip" style="background: #e5f1e8; color: #2f6b45">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5 9-10"></path></svg>
+                כל הסעיפים אושרו · מוכן להוצאה
+              </span>
+            </div>
+            <span role="cell" style="color: #4a5654">12.11</span>
+            <span role="cell"><button type="button" class="btn icon-btn" aria-label="עוד פעולות לתיק של יובל"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.8"></circle><circle cx="12" cy="12" r="1.8"></circle><circle cx="19" cy="12" r="1.8"></circle></svg></button></span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <p style="margin: 0; display: flex; align-items: center; gap: 8px; font-size: 13px; color: #4a5654">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path></svg>
+      השמות נשארים במחשב. Claude מקבל תפקידים ("הילד", "הגננת") במקום שמות.
+    </p>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1280,"height":920}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

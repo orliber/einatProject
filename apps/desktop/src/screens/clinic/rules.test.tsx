@@ -68,7 +68,7 @@ describe("a value of a later version (D-178)", () => {
 
   it("is shown in plain words on the card, and nothing breaks", async () => {
     await openCard("נועם", later);
-    const head = (await screen.findByRole("heading", { name: "נועם" })).closest("header") as HTMLElement;
+    const head = (await screen.findByRole("heading", { name: "נועם" })).closest(".pcard-head") as HTMLElement;
     expect(head).toHaveTextContent("מצב לא מוכר");
     expect(within(head).getByRole("list", { name: "אנשי קשר" })).toHaveTextContent("קשר לא מוכר");
     expect(within(await visitOn("20.11.2026")).getByText("סוג לא מוכר")).toBeInTheDocument();
@@ -114,8 +114,12 @@ describe("rows that could not be read (D-178)", () => {
   it("are said first on the front page, about no patient and with nothing to open", async () => {
     await openOn(TODAY, unread);
     const needs = await region("מה דורש אותי");
-    const first = within(needs).getAllByRole("listitem")[0] as HTMLElement;
-    expect(within(first).getByText("רישום שלא נקרא")).toBeInTheDocument();
+    // Their topic is the first, and so the open one (D-204).
+    const topic = within(within(needs).getAllByRole("heading", { level: 3 })[0] as HTMLElement).getByRole("button");
+    expect(topic).toHaveAccessibleName("רישום שלא נקרא: 1");
+    expect(topic).toHaveAttribute("aria-expanded", "true");
+    const panel = document.getElementById(topic.getAttribute("aria-controls") ?? "") as HTMLElement;
+    const first = within(panel).getAllByRole("listitem")[0] as HTMLElement;
     expect(first).toHaveTextContent(UNREADABLE.text);
     expect(within(first).queryByRole("button")).toBeNull();
   });
@@ -262,19 +266,30 @@ describe("the small things", () => {
     expect(open.getAttribute("aria-label")?.startsWith(open.textContent ?? "-")).toBe(true);
   });
 
-  it("an alert on a patient's own card names the child without a link to the card she is on", async () => {
+  it("an alert on a patient's own card leaves the child's name out, so nothing links to the card she is on", async () => {
     await openCard("נועם");
     const needs = await region("מה דורש אותי");
-    expect(within(needs).getAllByText("נועם").length).toBeGreaterThan(0);
+    // The name is the card's heading (D-204): the lines under it do not repeat it, as a link or as text.
+    expect(within(needs).queryByText("נועם")).toBeNull();
     expect(within(needs).queryByRole("button", { name: "נועם" })).toBeNull();
     // What an alert is for stays: the way to the note it asks for.
     expect(within(needs).getByRole("button", { name: "לכתוב סיכום" })).toBeInTheDocument();
   });
 
   it("the same alert on the front page does lead to the card", async () => {
-    await openOn(TODAY);
+    const { user, went } = await openOn(TODAY);
     const needs = await region("מה דורש אותי");
-    expect(within(needs).getAllByRole("button", { name: "נועם" }).length).toBeGreaterThan(0);
+    // The alert is under its topic (D-204), here the first one and so open; the name in it is
+    // a way to the card.
+    const topic = within(within(needs).getAllByRole("heading", { level: 3 })[0] as HTMLElement).getByRole("button");
+    expect(topic).toHaveAccessibleName("פגישה בלי סיכום: 2");
+    expect(topic).toHaveAttribute("aria-expanded", "true");
+    const group = document.getElementById(topic.getAttribute("aria-controls") ?? "") as HTMLElement;
+    const noam = within(group).getByRole("button", { name: "נועם" });
+    expect(within(noam.closest("li") as HTMLElement).getByRole("button", { name: "לכתוב סיכום" })).toBeInTheDocument();
+    await user.click(noam);
+    expect(went[went.length - 1]).toMatchObject({ name: "clinic", tab: "patients" });
+    expect((went[went.length - 1] as { patientId?: string }).patientId).toMatch(/^patient-/);
   });
 
   it("a read that failed can always be tried again, also after “הבנתי”", async () => {

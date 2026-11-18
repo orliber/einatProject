@@ -6,6 +6,7 @@ import type { PatientStatus } from "../../ipc/generated/PatientStatus";
 import type { PayMethod } from "../../ipc/generated/PayMethod";
 import type { TaskKind } from "../../ipc/generated/TaskKind";
 import type { Today } from "../../ipc/generated/Today";
+import type { Visit } from "../../ipc/generated/Visit";
 import type { VisitKind } from "../../ipc/generated/VisitKind";
 import type { VisitStatus } from "../../ipc/generated/VisitStatus";
 
@@ -180,8 +181,9 @@ export function formatSpan(start: number, minutes: number): string {
   return `${formatTime(start)}–${formatTime(start + minutes)}`;
 }
 
-/** "50 דקות", "שעה", "שעה וחצי", "שעתיים", "2:15 שעות". */
+/** "דקה", "50 דקות", "שעה", "שעה וחצי", "שעתיים", "2:15 שעות". */
 export function formatLength(minutes: number): string {
+  if (minutes === 1) return "דקה";
   if (minutes < 60) return `${minutes} דקות`;
   if (minutes === 60) return "שעה";
   if (minutes === 90) return "שעה וחצי";
@@ -195,6 +197,64 @@ export function today(now: Date = new Date()): Today {
     date: `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`,
     minute: now.getHours() * 60 + now.getMinutes(),
   };
+}
+
+// ------------------------------------------------------------------ a visit and the time
+// When a visit asks for something (review item 3 of 18.11.2026, D-204): one step that fits the
+// time is offered on the line, the rest wait in "⋯". A visit under way counts as begun: a
+// reminder makes no sense once it has started.
+
+/** The visit has begun (or its day is past). */
+export function visitStarted(v: Pick<Visit, "date" | "start">, now: Today): boolean {
+  return v.date < now.date || (v.date === now.date && v.start <= now.minute);
+}
+
+/** The visit is over: the core's own rule for "פגישה שלא סומנה". */
+export function visitEnded(v: Pick<Visit, "date" | "start" | "minutes">, now: Today): boolean {
+  return v.date < now.date || (v.date === now.date && v.start + v.minutes <= now.minute);
+}
+
+export type VisitStep = "hold" | "note" | "remind" | null;
+
+/** The one step that fits the time: begun and planned → "hold"; held without a note → "note";
+ *  still ahead and planned → "remind"; otherwise none. Time she kept for herself has none. */
+export function visitStep(v: Visit, hasNote: boolean, now: Today): VisitStep {
+  if (v.kind === "block" || v.patient_id === null) return null;
+  if (v.status === "planned") return visitStarted(v, now) ? "hold" : "remind";
+  if (v.status === "held" && !hasNote) return "note";
+  return null;
+}
+
+/** Where the "now" line goes in a day's list sorted by start: only BETWEEN two entries (the
+ *  index of the first one still ahead), else -1. */
+export function nowIndex(starts: number[], minute: number): number {
+  const i = starts.findIndex((s) => s > minute);
+  return i <= 0 ? -1 : i;
+}
+
+/** "4 בלוח · 2 אחרי עכשיו": how many visits the day holds, and how many are still ahead when
+ *  that is some of them but not all. "" for an empty day. */
+export function todayCountWords(total: number, after: number): string {
+  if (total <= 0) return "";
+  const head = total === 1 ? "פגישה אחת בלוח" : `${total} בלוח`;
+  if (after <= 0 || after >= total) return head;
+  return `${head} · ${after === 1 ? "אחת" : after} אחרי עכשיו`;
+}
+
+/** How soon a visit is, as it is said: "בעוד דקה", "בעוד 48 דקות", "בעוד שעה", "בעוד שעה ודקה",
+ *  "בעוד שעה ו-15 דקות", "בעוד שעתיים", "בעוד שעתיים ו-5 דקות", "בעוד 3 שעות", "בעוד 3 שעות
+ *  ו-15 דקות". Never "1 דקות" or "2:35 שעות" (a visit's length may read so, a sentence does
+ *  not). "עכשיו" for no time at all, which the front page never asks for. */
+export function untilWords(minutes: number): string {
+  const m = Math.trunc(minutes);
+  if (m <= 0) return "עכשיו";
+  const hours = Math.floor(m / 60);
+  const rest = m % 60;
+  const mins = rest === 1 ? "דקה" : `${rest} דקות`;
+  if (hours === 0) return `בעוד ${mins}`;
+  const head = hours === 1 ? "שעה" : hours === 2 ? "שעתיים" : `${hours} שעות`;
+  if (rest === 0) return `בעוד ${head}`;
+  return `בעוד ${head} ${rest === 1 ? "ודקה" : `ו-${mins}`}`;
 }
 
 // ------------------------------------------------------------------ Hebrew labels

@@ -1,6 +1,6 @@
 // The case explorer moves, never copies: a case lives in one folder, so a drag to a folder takes
 // it out of where it was, and the recycle bin takes exactly the one case. Invented cases only.
-import { configure, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, configure, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { mockIPC } from "@tauri-apps/api/mocks";
 import { App } from "../../App";
@@ -50,6 +50,17 @@ async function openList() {
   render(<App />);
   await screen.findByRole("button", { name: /בתיק של נועם$/ });
   return { user, core, calls };
+}
+
+/** The list over the demo core, with the demo case "נועם" changed as the core would list it. */
+async function openWith(change: (c: CaseSummary) => CaseSummary) {
+  const core = new FakeCore();
+  await core.handle("unlock", { password: "x" });
+  mockIPC(async (cmd, args) => {
+    const out = await core.handle(cmd, args);
+    return cmd === "list_cases" ? (out as CaseSummary[]).map((c) => (c.child_name === "נועם" ? change(c) : c)) : out;
+  });
+  render(<App />);
 }
 
 const table = () => screen.getByRole("table");
@@ -104,19 +115,60 @@ describe("the case explorer", () => {
     // "עודכן": when a case inside last changed; nothing for an empty folder.
     expect(row.querySelector("td.col-when")?.textContent).not.toBe("");
     expect(folderRow("הפניות מהמכון").querySelector("td.col-when")?.textContent).toBe("");
-    // One prominent button in the list, on the case she is continuing.
-    const primaries = table().querySelectorAll(".btn-primary");
-    expect(primaries).toHaveLength(1);
-    expect(caseRow("נועם").contains(primaries[0] ?? null)).toBe(true);
+    // D-204 §2: no prominent button in the table, and one green button on the screen (Einat,
+    // 18.11.2026): the card's, on the case she is continuing; "+ תיק חדש" is a plain button then.
+    expect(table().querySelectorAll(".btn-primary")).toHaveLength(0);
+    const card = screen.getByRole("region", { name: "להמשיך איפה שהפסקת" });
+    const prominent = Array.from(screen.getByRole("main").querySelectorAll(".btn-primary"));
+    expect(prominent).toEqual([within(card).getByRole("button", { name: "להמשיך לכתוב ←" })]);
+    expect(screen.getByRole("button", { name: "+ תיק חדש" })).not.toHaveClass("btn-primary");
     // The folder's name is its stop on the keyboard: Tab to it, Enter opens it.
     within(row).getByRole("button", { name: "פתיחת התיקייה אבחונים פרטיים" }).focus();
     await user.keyboard("{Enter}");
     expect(await screen.findByRole("button", { name: /בתיק של מאיה$/ })).toBeInTheDocument();
     expect(within(screen.getByRole("navigation", { name: "מיקום" })).getByRole("button", { name: "אבחונים פרטיים" })).toHaveAttribute("aria-current", "page");
-    // Inside a folder no case is the one being continued: no prominent button there.
+    // Inside a folder too, no row has a prominent button.
     expect(table().querySelectorAll(".btn-primary")).toHaveLength(0);
     await user.click(screen.getByRole("button", { name: "לתיקייה שמעל" }));
     await vi.waitFor(() => expect(screen.queryByRole("navigation", { name: "מיקום" })).toBeNull());
+    // While she searches the card steps aside, and "+ תיק חדש" is the green button again.
+    await user.type(screen.getByRole("searchbox", { name: "חיפוש תיקים" }), "נועם");
+    expect(screen.queryByRole("region", { name: "להמשיך איפה שהפסקת" })).toBeNull();
+    expect(screen.getByRole("button", { name: "+ תיק חדש" })).toHaveClass("btn-primary");
+    await user.clear(screen.getByRole("searchbox", { name: "חיפוש תיקים" }));
+  });
+
+  it("the sentence about dragging is gone, and the case's name is the button that opens it", async () => {
+    const { user } = await openList();
+    expect(screen.queryByText(/גוררים תיק לתיקייה/)).toBeNull();
+    // The foot still counts the cases.
+    expect(document.querySelector(".explorer-foot")).toHaveTextContent("תיק אחד");
+    const row = caseRow("נועם");
+    const name = within(row).getByRole("button", { name: "להמשיך בתיק של נועם" });
+    // Its visible words are the child's name; "⋯" is the only other control in the row.
+    expect(name).toHaveTextContent("נועם");
+    expect(within(row).getAllByRole("button")).toEqual([name, within(row).getByRole("button", { name: "פעולות על התיק של נועם" })]);
+    await user.click(name);
+    expect(await screen.findByRole("article", { name: "הדוח, כמו בקובץ" })).toBeInTheDocument();
+  });
+
+  it("a case ready to go out is one green chip, and its name says “להוציא”", async () => {
+    await openWith((c) => {
+      const ready = { ...c, approved_sections: Array.from({ length: c.total_sections }, (_, i) => `section-${i}`) };
+      delete ready.next_section;
+      return ready;
+    });
+    const name = await screen.findByRole("button", { name: "להוציא בתיק של נועם" });
+    const row = name.closest("tr") as HTMLElement;
+    expect(within(row).getByText("כל הסעיפים אושרו · מוכן להוצאה")).toHaveClass("chip", "chip-ok");
+    // No bar beside the chip: it says all there is.
+    expect(row.querySelector("progress")).toBeNull();
+  });
+
+  it("a case with no name keeps “ללא שם” inside its button's name", async () => {
+    await openWith((c) => ({ ...c, child_name: null }));
+    const name = await screen.findByRole("button", { name: "להמשיך בתיק של תיק-1024 (ללא שם)" });
+    expect(name).toHaveTextContent(/^ללא שם$/);
   });
 
   it("clicking anywhere on a folder row opens it", async () => {
@@ -182,6 +234,14 @@ describe("the case explorer", () => {
     expect(name).toHaveAttribute("draggable", "true");
     expect(drag(name, folderRow("אבחונים פרטיים"))).toBe(true);
     expect(await screen.findByText(/התיקייה "הפניות מהמכון" הועברה ל"אבחונים פרטיים"/)).toBeInTheDocument();
+  });
+
+  it("a case dragged by its name moves like one dragged by its row (D-204)", async () => {
+    await openList();
+    const name = within(caseRow("נועם")).getByRole("button", { name: "להמשיך בתיק של נועם" });
+    expect(name).toHaveAttribute("draggable", "true");
+    expect(drag(name, folderRow("הפניות מהמכון"))).toBe(true);
+    expect(await screen.findByText(/התיק של נועם הועבר ל"הפניות מהמכון"/)).toBeInTheDocument();
   });
 
   it("something dropped from outside the app is ignored", async () => {
@@ -272,6 +332,64 @@ describe("the case explorer", () => {
     await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "העברה לסל המחזור" }));
     await vi.waitFor(() => expect(screen.queryByText("אי אפשר לפתוח מעקב עכשיו.")).toBeNull());
     refuse = false;
+  });
+
+  // In a narrow window the tree folds behind "תיקיות" after a pick, and the keyboard goes to
+  // that button, but only when it went with the tree (or was lost).
+  it("a folder picked in the folded tree gives the keyboard to the button that reopens it", async () => {
+    const { user } = await openList();
+    const toggle = screen.getByRole("button", { name: "תיקיות" });
+    await user.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    await user.click(treeRow(/^אבחונים פרטיים/));
+    await vi.waitFor(() => expect(toggle).toHaveAttribute("aria-expanded", "false"));
+    await vi.waitFor(() => expect(toggle).toHaveFocus());
+  });
+
+  it("“תיקייה חדשה בפנים” from the folded tree keeps the keyboard in the new folder's name, not behind the window", async () => {
+    const { user } = await openList();
+    const toggle = screen.getByRole("button", { name: "תיקיות" });
+    await user.click(toggle);
+    const row = treeRow(/^אבחונים פרטיים/);
+    row.focus();
+    // Shift+F10 on the folder: the browser's context menu event on the focused row.
+    fireEvent.contextMenu(row);
+    await user.click(await screen.findByRole("menuitem", { name: "תיקייה חדשה בפנים" }));
+    const name = await within(await screen.findByRole("dialog")).findByLabelText("שם התיקייה");
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    // The tree's fold has had its turn (a timer): the name field still has the keyboard.
+    await act(() => new Promise((r) => setTimeout(r, 30)));
+    expect(name).toHaveFocus();
+    expect(toggle).not.toHaveFocus();
+    await user.keyboard("ילדים");
+    expect(name).toHaveValue("ילדים");
+    // Closed, the keyboard is on "תיקיות", not on the folded tree's hidden row.
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "סגירה" }));
+    if (screen.queryByRole("dialog")) await user.click(screen.getByRole("button", { name: "לסגור בלי לשמור" }));
+    await vi.waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(toggle).toHaveFocus();
+  });
+
+  it("a folder entered from the table keeps the keyboard, on its name in the path, not on the page", async () => {
+    const { user } = await openList();
+    within(folderRow("אבחונים פרטיים")).getByRole("button", { name: "פתיחת התיקייה אבחונים פרטיים" }).focus();
+    await user.keyboard("{Enter}");
+    const crumb = await within(screen.getByRole("navigation", { name: "מיקום" })).findByRole("button", { name: "אבחונים פרטיים" });
+    expect(crumb).toHaveAttribute("aria-current", "page");
+    await vi.waitFor(() => expect(crumb).toHaveFocus());
+  });
+
+  it("“תיקייה חדשה בפנים” from the table's “⋯” gives the keyboard back to “תיקייה כאן”, not to the page", async () => {
+    const { user } = await openList();
+    await user.click(within(folderRow("אבחונים פרטיים")).getByRole("button", { name: "פעולות על התיקייה אבחונים פרטיים" }));
+    await user.click(await screen.findByRole("menuitem", { name: "תיקייה חדשה בפנים" }));
+    const dialog = await screen.findByRole("dialog");
+    await vi.waitFor(() => expect(within(dialog).getByLabelText("שם התיקייה")).toHaveFocus());
+    await user.keyboard("{Escape}");
+    await vi.waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    // In the folder she went into, on the same step there.
+    expect(within(screen.getByRole("navigation", { name: "מיקום" })).getByRole("button", { name: "אבחונים פרטיים" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("button", { name: /תיקייה כאן/ })).toHaveFocus();
   });
 });
 

@@ -171,9 +171,10 @@ pub(crate) async fn keep_draft_brief(
     section_key: String,
     text: String,
     keep: bool,
+    seen: Option<String>,
 ) -> Res<DraftBriefs> {
     with_core(&state, move |c| {
-        c.keep_draft_brief(&section_key, &text, keep)
+        c.keep_draft_brief(&section_key, &text, keep, seen.as_deref())
     })
     .await
 }

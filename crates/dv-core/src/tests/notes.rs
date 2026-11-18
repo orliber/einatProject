@@ -379,7 +379,7 @@ fn asked(prepared: &Prepared) -> String {
 #[test]
 fn the_whole_report_run_sends_the_wish_she_kept_for_a_section() {
     let (_dir, mut core, case) = setup(None);
-    core.keep_draft_brief("kindergarten", "להתחיל מהקשר עם הצוות", true)
+    core.keep_draft_brief("kindergarten", "להתחיל מהקשר עם הצוות", true, None)
         .unwrap();
     let run = core.prepare_full_draft(&case).unwrap();
     assert!(
@@ -410,7 +410,7 @@ fn the_whole_report_run_sends_the_wish_she_kept_for_a_section() {
     assert!(asked(&own).ends_with("מה שחשוב לי שייכתב בסעיף: להתחיל מהקשר עם הצוות"));
     assert!(with_wish.ends_with("מה שחשוב לי שייכתב בסעיף: להתחיל מהקשר עם הצוות"));
     // A wish sent once without keeping it is not the section's.
-    core.keep_draft_brief("kindergarten", "משהו אחר", false)
+    core.keep_draft_brief("kindergarten", "משהו אחר", false, None)
         .unwrap();
     assert_eq!(
         crate::prepare::full_draft_instruction(

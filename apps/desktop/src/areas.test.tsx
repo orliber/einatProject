@@ -68,6 +68,32 @@ describe("two parts: writing reports and running the clinic", () => {
   });
 });
 
+describe("the bar's tools (D-204)", () => {
+  it("the bar's tools are one family: an eye switch with no word, “קיצורי מקלדת (F1)”, “הגדרות”, then “נעילה”", async () => {
+    const { user } = await openApp();
+    const header = document.querySelector(".topbar") as HTMLElement;
+    const tools = header.querySelector(".topbar-tools") as HTMLElement;
+    const eye = within(tools).getByRole("switch", { name: "מצב דיסקרטי" });
+    expect(Array.from(tools.querySelectorAll("button"))).toEqual([
+      eye,
+      within(tools).getByRole("button", { name: "קיצורי מקלדת (F1)" }),
+      within(tools).getByRole("button", { name: "הגדרות" }),
+      within(tools).getByRole("button", { name: "נעילה" }),
+    ]);
+    // One family: every tool a full-size button, the first three icons only.
+    for (const b of tools.querySelectorAll("button")) expect(b).not.toHaveClass("btn-small");
+    expect(Array.from(tools.querySelectorAll("button.btn.icon-btn"))).toHaveLength(3);
+    expect(eye.textContent).toBe("");
+    expect(eye).toHaveAttribute("aria-checked", "false");
+    await user.click(eye);
+    expect(eye).toHaveAttribute("aria-checked", "true");
+    await user.click(eye);
+    expect(eye).toHaveAttribute("aria-checked", "false");
+    // "מוצפן" stays in the bar, before the tools.
+    expect(within(header).getByText("מוצפן, שמור במחשב הזה")).toBeInTheDocument();
+  });
+});
+
 describe("discreet mode in the reports too", () => {
   it("shows the child's initials in the list, the notices and the case's bar", async () => {
     const { user } = await openApp();
@@ -84,6 +110,18 @@ describe("discreet mode in the reports too", () => {
     const bar = document.querySelector(".case-bar") as HTMLElement;
     expect(within(bar).getByText("נ.")).toBeInTheDocument();
     expect(bar).not.toHaveTextContent("נועם");
+  });
+
+  it("in discreet mode the card shows initials and the row's name button is named “…בתיק של נ.”", async () => {
+    const { user } = await openApp();
+    await user.click(screen.getByRole("switch", { name: "מצב דיסקרטי" }));
+    const card = screen.getByRole("region", { name: "להמשיך איפה שהפסקת" });
+    await waitFor(() => expect(within(card).getByText("נ.")).toHaveClass("resume-name"));
+    expect(card).not.toHaveTextContent("נועם");
+    const name = screen.getByRole("button", { name: /בתיק של נ\.$/ });
+    expect(name).toHaveClass("case-open");
+    expect(name).toHaveTextContent(/^נ\.$/);
+    expect(screen.getByRole("main")).not.toHaveTextContent("נועם");
   });
 
   it("is one switch: turned on in the reports, it is on in the clinic", async () => {

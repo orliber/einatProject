@@ -7,7 +7,8 @@ import type { Alert } from "../../ipc/generated/Alert";
 import { a11yViolations } from "../../test/a11y";
 import { forgetDiscreet } from "./ClinicScreen";
 import { ask, holding, idOf, NOW, openOn, refusing } from "./officeTestKit";
-import { addMonths, alertGroups, groupTasks, SUGGESTIONS, taskGroupOf } from "./TasksTab";
+import { alertGroups } from "./parts";
+import { addMonths, groupTasks, SUGGESTIONS, taskGroupOf } from "./TasksTab";
 
 configure({ asyncUtilTimeout: 5000 });
 vi.setConfig({ testTimeout: 30_000 });

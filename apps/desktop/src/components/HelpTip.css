@@ -1,0 +1,37 @@
+/* The "?" toggletip beside a fixed explanation (HelpTip.tsx, D-204). Tokens only. */
+.help-tip {
+  position: relative;
+  display: inline-flex;
+  flex-shrink: 0;
+}
+/* Always on the page, empty while closed, so the text is announced when it opens. z 15: above
+   the calendar grid's sticky heads (4-5), below the menus (60). */
+.help-tip-live {
+  position: absolute;
+  top: calc(100% + var(--space-2));
+  inset-inline-start: 0;
+  z-index: 15;
+}
+/* Near the window's left edge (RTL) the card opens the other way. */
+.help-tip-flip .help-tip-live {
+  inset-inline-start: auto;
+  inset-inline-end: 0;
+}
+.help-tip-card {
+  width: min(340px, calc(100vw - 32px));
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-2);
+  color: var(--ink);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+  white-space: normal;
+}
+.help-tip-card p {
+  margin: 0;
+}

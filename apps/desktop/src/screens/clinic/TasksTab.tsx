@@ -18,29 +18,13 @@ import { clinicKeys, useDeleteTask, useOptimistic, useOverview, useReloadClinic,
 import { ALERT_KIND_LABEL, formatDate, optionsWith, TASK_KIND_LABEL, TASK_KINDS, weekRange } from "./format";
 import { NoteDialog } from "./NoteDialog";
 import {
-  AlertList, ConfirmDialog, EmptyState, Field, Pager, PatientName, PatientPicker, ReadError, Section, SelectField, TextAreaField, TextField, useClinicNav, useDiscreet, usePaged,
+  alertGroups, AlertList, ALERTS_SHOWN, ConfirmDialog, EmptyState, Field, Pager, PatientName, PatientPicker, ReadError, Section, SelectField, TextAreaField, TextField,
+  useClinicNav, useDiscreet, usePaged,
 } from "./parts";
 import { VisitDialog } from "./VisitDialog";
 import "./TasksTab.css";
 
 // ------------------------------------------------------------------ pure pieces
-
-/** The kinds of "מה דורש אותי" in the order she would deal with them: rows that were not read
- *  first (every figure is without them, D-178), then what is quick to close, then what takes
- *  a decision. */
-const ALERT_ORDER: AlertKind[] = ["unreadable", "unmarked", "no_note", "task_overdue", "feedback_soon", "materials_missing", "report_due", "debt", "no_next_visit", "waiting"];
-
-/** How many lines of a kind show before "להציג את כולן". */
-const ALERTS_SHOWN = 4;
-
-/** The alerts by kind, each kind keeping the order the clinic gave (oldest first). */
-export function alertGroups(alerts: Alert[]): { kind: AlertKind; alerts: Alert[] }[] {
-  // A kind that is not in the order still gets its group, after the others: no alert is dropped.
-  const kinds = [...ALERT_ORDER, ...alerts.map((a) => a.kind).filter((kind) => !ALERT_ORDER.includes(kind))];
-  return [...new Set(kinds)]
-    .map((kind) => ({ kind, alerts: alerts.filter((a) => a.kind === kind) }))
-    .filter((g) => g.alerts.length > 0);
-}
 
 export type TaskGroupId = "late" | "today" | "week" | "later" | "undated";
 

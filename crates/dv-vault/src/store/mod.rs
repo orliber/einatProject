@@ -1525,6 +1525,7 @@ impl Vault {
                         created_at,
                         updated_at,
                         total_sections: 0,
+                        next_section: None,
                         folder_id,
                         deleted_at,
                         failed_at: None,

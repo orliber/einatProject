@@ -103,6 +103,24 @@ describe("FakeCore review screens", () => {
   });
 });
 
+describe("the case list's next section (D-204)", () => {
+  it("names the first section with nothing approved, as the core does, and none once all are approved", async () => {
+    const core = new FakeCore();
+    const caseId = await newCase(core);
+    const row = async () => ((await core.handle("list_cases", {})) as import("../ipc/generated/CaseSummary").CaseSummary[]).find((c) => c.id === caseId);
+    expect((await row())?.next_section).toEqual({ key: "referral", title: "סיבת הפניה" });
+    await core.handle("add_own_paragraph", { caseId, sectionKey: "referral", text: "פסקה בדויה." });
+    expect((await row())?.next_section).toEqual({ key: "background", title: "רקע: הריון, לידה והתפתחות" });
+    const detail = (await core.handle("case_detail", { caseId })) as import("../ipc/generated/CaseDetail").CaseDetail;
+    for (const s of detail.sections) {
+      if (s.key !== "referral" && s.key !== "signature") await core.handle("add_own_paragraph", { caseId, sectionKey: s.key, text: "פסקה בדויה." });
+    }
+    const all = await row();
+    expect(all && "next_section" in all).toBe(false);
+    expect(all?.total_sections).toBe(15);
+  });
+});
+
 describe("the demo case's notes (D-161)", () => {
   it("sit on approved paragraphs only, are counted for the finish page, and go once their words are changed", async () => {
     const core = new FakeCore();

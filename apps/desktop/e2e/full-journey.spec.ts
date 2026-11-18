@@ -244,7 +244,7 @@ test("two sections are written and approved, a paragraph is edited by hand, and 
   const focused = report.locator(".a4-section.is-focus");
   await expect(focused).toHaveCount(1);
   const firstId = await focused.getAttribute("id");
-  await focused.getByRole("button", { name: "✦ לנסח" }).click();
+  await focused.getByRole("button", { name: "✦ לנסח את הסעיף" }).click();
   const approve = report.getByRole("button", { name: "✓ לאשר" });
   await expect(approve).toBeVisible({ timeout: 20_000 });
   await expect(report.locator(".a4-section.has-pending")).toHaveAttribute("id", firstId ?? "");
@@ -258,9 +258,9 @@ test("two sections are written and approved, a paragraph is edited by hand, and 
   const gap = report.locator(".a4-gap-line").getByRole("button", { name: "✦ לנסח" }).first();
   const secondId = await gap.evaluate((b) => b.closest(".a4-section")?.id ?? "");
   expect(secondId).not.toBe(firstId);
-  // Out of focus, "✦ לנסח" opens the section's box (D-140); its own "✦ לנסח" sends.
+  // Out of focus, "✦ לנסח" brings the section into focus (D-140); its "✦ לנסח את הסעיף" sends.
   await gap.click();
-  await report.locator(`#${secondId}`).getByRole("button", { name: "✦ לנסח" }).click();
+  await report.locator(`#${secondId}`).getByRole("button", { name: "✦ לנסח את הסעיף" }).click();
   await expect(approve).toBeVisible({ timeout: 20_000 });
   await expect(report.locator(".a4-section.has-pending")).toHaveAttribute("id", secondId);
   await approve.click();
@@ -365,7 +365,7 @@ test("what left the computer: the request is listed with the child's name hidden
   const report = page.getByRole("article", { name: "הדוח, כמו בקובץ" });
   await expect(report).toBeVisible();
   // One request (the review screen is off: it goes at once, hidden).
-  await report.locator(".a4-section.is-focus").getByRole("button", { name: "✦ לנסח" }).click();
+  await report.locator(".a4-section.is-focus").getByRole("button", { name: "✦ לנסח את הסעיף" }).click();
   await expect(report.getByRole("button", { name: "✓ לאשר" })).toBeVisible({ timeout: 20_000 });
 
   // From settings → privacy: every case.
