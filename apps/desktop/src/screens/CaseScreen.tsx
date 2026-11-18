@@ -144,7 +144,7 @@ async function cardOfCase(caseId: string): Promise<string | null> {
   return rows.find((r) => r.patient.case_id === caseId)?.patient.id ?? null;
 }
 
-export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
+export function CaseScreen({ caseId, view, section }: { caseId: string; view: string; section?: string }) {
   const { go, fail, lockNow, status, notify, showShortcuts } = useApp();
   const shown = useShownName();
   // The clinic card linked to this case, if any (D-195). Quiet: a failure only hides the link.
@@ -164,8 +164,10 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
   const [fullDraft, setFullDraft] = useState(false);
   /** "מה יצא מהמחשב": open for one section (its key), or the whole case (""). */
   const [sentFor, setSentFor] = useState<string | null>(null);
-  /** The section in focus on the report page (round 48); `move` brings it into view. */
-  const [focus, setFocus] = useState<{ key: string; at: number; move: boolean; para?: string } | null>(null);
+  /** The section in focus on the report page (round 48); `move` brings it into view. It starts
+   *  on `section` when one was asked for (the cases card's "הסעיף הבא", D-203 §2). */
+  const [focus, setFocus] = useState<{ key: string; at: number; move: boolean; para?: string } | null>(
+    () => (section ? { key: section, at: Date.now(), move: true } : null));
   const [searching, setSearching] = useState(false);
   // The bar is there only once the case is read: its element, not a ref, so the watch starts then.
   const [bar, setBar] = useState<HTMLElement | null>(null);

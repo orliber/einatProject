@@ -46,7 +46,8 @@ const PageLoading = () => <main className="center-note" aria-busy="true" />;
 
 export type Route =
   | { name: "cases" }
-  | { name: "case"; id: string; view: string }
+  // `section`: the report opens on it (the cases card's "הסעיף הבא", D-203 §2).
+  | { name: "case"; id: string; view: string; section?: string }
   | { name: "consult"; caseId?: string }
   | { name: "style" }
   | { name: "clinic"; tab?: ClinicTab; patientId?: string }
@@ -366,7 +367,7 @@ function Shell(props: {
     <QueryClientProvider client={queryClient}>
     <AppContext.Provider value={api}>
       {route.name === "cases" && <CasesScreen />}
-      {route.name === "case" && <CaseScreen key={route.id} caseId={route.id} view={route.view} />}
+      {route.name === "case" && <CaseScreen key={route.id} caseId={route.id} view={route.view} {...(route.section ? { section: route.section } : {})} />}
       <Suspense fallback={<PageLoading />}>
         {route.name === "consult" && <ConsultScreen caseId={route.caseId} />}
         {route.name === "style" && <StyleScreen />}

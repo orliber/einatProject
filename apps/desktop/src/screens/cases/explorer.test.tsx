@@ -52,6 +52,17 @@ async function openList() {
   return { user, core, calls };
 }
 
+/** The list over the demo core, with the demo case "נועם" changed as the core would list it. */
+async function openWith(change: (c: CaseSummary) => CaseSummary) {
+  const core = new FakeCore();
+  await core.handle("unlock", { password: "x" });
+  mockIPC(async (cmd, args) => {
+    const out = await core.handle(cmd, args);
+    return cmd === "list_cases" ? (out as CaseSummary[]).map((c) => (c.child_name === "נועם" ? change(c) : c)) : out;
+  });
+  render(<App />);
+}
+
 const table = () => screen.getByRole("table");
 const caseRow = (name: string) => {
   const row = within(table()).getByText(name, { exact: false, selector: ".case-name" }).closest("tr");
@@ -104,19 +115,54 @@ describe("the case explorer", () => {
     // "עודכן": when a case inside last changed; nothing for an empty folder.
     expect(row.querySelector("td.col-when")?.textContent).not.toBe("");
     expect(folderRow("הפניות מהמכון").querySelector("td.col-when")?.textContent).toBe("");
-    // One prominent button in the list, on the case she is continuing.
-    const primaries = table().querySelectorAll(".btn-primary");
-    expect(primaries).toHaveLength(1);
-    expect(caseRow("נועם").contains(primaries[0] ?? null)).toBe(true);
+    // D-203 §2: no prominent button in the table. Beside "+ תיק חדש", the one prominent button
+    // is on the card above it, on the case she is continuing.
+    expect(table().querySelectorAll(".btn-primary")).toHaveLength(0);
+    const card = screen.getByRole("region", { name: "להמשיך איפה שהפסקת" });
+    const prominent = Array.from(screen.getByRole("main").querySelectorAll(".btn-primary")).filter((b) => b.textContent !== "+ תיק חדש");
+    expect(prominent).toEqual([within(card).getByRole("button", { name: "להמשיך לכתוב ←" })]);
     // The folder's name is its stop on the keyboard: Tab to it, Enter opens it.
     within(row).getByRole("button", { name: "פתיחת התיקייה אבחונים פרטיים" }).focus();
     await user.keyboard("{Enter}");
     expect(await screen.findByRole("button", { name: /בתיק של מאיה$/ })).toBeInTheDocument();
     expect(within(screen.getByRole("navigation", { name: "מיקום" })).getByRole("button", { name: "אבחונים פרטיים" })).toHaveAttribute("aria-current", "page");
-    // Inside a folder no case is the one being continued: no prominent button there.
+    // Inside a folder too, no row has a prominent button.
     expect(table().querySelectorAll(".btn-primary")).toHaveLength(0);
     await user.click(screen.getByRole("button", { name: "לתיקייה שמעל" }));
     await vi.waitFor(() => expect(screen.queryByRole("navigation", { name: "מיקום" })).toBeNull());
+  });
+
+  it("the sentence about dragging is gone, and the case's name is the button that opens it", async () => {
+    const { user } = await openList();
+    expect(screen.queryByText(/גוררים תיק לתיקייה/)).toBeNull();
+    // The foot still counts the cases.
+    expect(document.querySelector(".explorer-foot")).toHaveTextContent("תיק אחד");
+    const row = caseRow("נועם");
+    const name = within(row).getByRole("button", { name: "להמשיך בתיק של נועם" });
+    // Its visible words are the child's name; "⋯" is the only other control in the row.
+    expect(name).toHaveTextContent("נועם");
+    expect(within(row).getAllByRole("button")).toEqual([name, within(row).getByRole("button", { name: "פעולות על התיק של נועם" })]);
+    await user.click(name);
+    expect(await screen.findByRole("article", { name: "הדוח, כמו בקובץ" })).toBeInTheDocument();
+  });
+
+  it("a case ready to go out is one green chip, and its name says “להוציא”", async () => {
+    await openWith((c) => {
+      const ready = { ...c, approved_sections: Array.from({ length: c.total_sections }, (_, i) => `section-${i}`) };
+      delete ready.next_section;
+      return ready;
+    });
+    const name = await screen.findByRole("button", { name: "להוציא בתיק של נועם" });
+    const row = name.closest("tr") as HTMLElement;
+    expect(within(row).getByText("כל הסעיפים אושרו · מוכן להוצאה")).toHaveClass("chip", "chip-ok");
+    // No bar beside the chip: it says all there is.
+    expect(row.querySelector("progress")).toBeNull();
+  });
+
+  it("a case with no name keeps “ללא שם” inside its button's name", async () => {
+    await openWith((c) => ({ ...c, child_name: null }));
+    const name = await screen.findByRole("button", { name: "להמשיך בתיק של תיק-1024 (ללא שם)" });
+    expect(name).toHaveTextContent(/^ללא שם$/);
   });
 
   it("clicking anywhere on a folder row opens it", async () => {
@@ -182,6 +228,14 @@ describe("the case explorer", () => {
     expect(name).toHaveAttribute("draggable", "true");
     expect(drag(name, folderRow("אבחונים פרטיים"))).toBe(true);
     expect(await screen.findByText(/התיקייה "הפניות מהמכון" הועברה ל"אבחונים פרטיים"/)).toBeInTheDocument();
+  });
+
+  it("a case dragged by its name moves like one dragged by its row (D-203)", async () => {
+    await openList();
+    const name = within(caseRow("נועם")).getByRole("button", { name: "להמשיך בתיק של נועם" });
+    expect(name).toHaveAttribute("draggable", "true");
+    expect(drag(name, folderRow("הפניות מהמכון"))).toBe(true);
+    expect(await screen.findByText(/התיק של נועם הועבר ל"הפניות מהמכון"/)).toBeInTheDocument();
   });
 
   it("something dropped from outside the app is ignored", async () => {

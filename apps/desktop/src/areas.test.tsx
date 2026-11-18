@@ -112,6 +112,18 @@ describe("discreet mode in the reports too", () => {
     expect(bar).not.toHaveTextContent("נועם");
   });
 
+  it("in discreet mode the card shows initials and the row's name button is named “…בתיק של נ.”", async () => {
+    const { user } = await openApp();
+    await user.click(screen.getByRole("switch", { name: "מצב דיסקרטי" }));
+    const card = screen.getByRole("region", { name: "להמשיך איפה שהפסקת" });
+    await waitFor(() => expect(within(card).getByText("נ.")).toHaveClass("resume-name"));
+    expect(card).not.toHaveTextContent("נועם");
+    const name = screen.getByRole("button", { name: /בתיק של נ\.$/ });
+    expect(name).toHaveClass("case-open");
+    expect(name).toHaveTextContent(/^נ\.$/);
+    expect(screen.getByRole("main")).not.toHaveTextContent("נועם");
+  });
+
   it("is one switch: turned on in the reports, it is on in the clinic", async () => {
     const { user } = await openApp();
     await user.click(screen.getByRole("switch", { name: "מצב דיסקרטי" }));

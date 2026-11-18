@@ -131,17 +131,22 @@ export function casesShown(all: CaseSummary[], current: string | null, matches: 
   return all.filter((c) => (matches ? matches(c) : (c.folder_id ?? null) === current));
 }
 
-/** One word, one line and three steps (canvas "תיקים": "שהסטטוס יהיה ברור ונקי"). */
+/**
+ * One word, one line and a thin bar of the approved sections (canvas "תיקים": "שהסטטוס יהיה
+ * ברור ונקי"; D-203 §2). A case ready to go out is one green chip. The bar is aria-hidden: the
+ * line beside it says the same numbers, and a case still at its materials shows it empty.
+ */
 function StatusCell({ s }: { s: CaseStatus }) {
+  if (s.steps[2] === "now") {
+    return <span className="chip chip-ok status-ready" title={s.full}><span aria-hidden="true">✓</span> {s.detail} · {s.word}</span>;
+  }
   return (
     <div className="status-cell" title={s.full}>
       <div className="status-line">
         <span className={s.attention ? "status-word attention" : "status-word"}>{s.word}</span>
         <span className="small muted">{s.detail}</span>
       </div>
-      <div className="pips" aria-hidden="true">
-        {s.steps.map((st, i) => <span key={i} className={`pip pip-${st}`} />)}
-      </div>
+      <progress className="meter" value={s.done} max={s.total} aria-hidden="true" />
     </div>
   );
 }
@@ -411,15 +416,36 @@ export function CasesScreen() {
           </div>
         </div>
         {resume && resumeStatus && !q && !inTrash && (
-          <section className="resume" aria-label="להמשיך איפה שהפסקת">
-            <span className="resume-eyebrow">להמשיך איפה שהפסקת:</span>
-            <span className="resume-text">
-              <strong className="serif resume-name">{caseName(resume)}</strong>
-              {" · "}{resumeStatus.word}{resumeStatus.steps[1] === "now" ? `, ${resumeStatus.detail}` : ""}
-              {resume.meta.current_section ? <> · <strong>הבא:</strong> {resume.meta.current_section}</> : null}
-            </span>
-            <button type="button" className="btn btn-primary"
-              onClick={() => go({ name: "case", id: resume.id, view: resumeStatus.view })}>
+          // D-203 §2: the one prominent button of the list. It opens the report on the section it
+          // names, so "הסעיף הבא" is where she lands. A warning word stays on the card.
+          <section className="paper resume" aria-labelledby="resume-title">
+            <div className="resume-body">
+              <h2 id="resume-title" className="resume-eyebrow">להמשיך איפה שהפסקת</h2>
+              <div className="resume-who">
+                <strong className="serif resume-name">{caseName(resume)}</strong>
+                <span className="muted">{[ageOf(resume.meta.age, resume.meta.child_gender), resume.folder_id ? pathOf(resume.folder_id) : ""].filter(Boolean).join(" · ")}</span>
+              </div>
+              {(resumeStatus.attention || resumeStatus.view !== "report") && (
+                <div className="status-line">
+                  <span className={resumeStatus.attention ? "status-word attention" : "status-word"}>{resumeStatus.word}</span>
+                  <span className="muted">{resumeStatus.detail}</span>
+                </div>
+              )}
+              {resumeStatus.view === "report" && (
+                <div className="resume-progress">
+                  <progress className="meter meter-lg" value={resumeStatus.done} max={resumeStatus.total} aria-hidden="true" />
+                  <span>{resumeStatus.done} מתוך {resumeStatus.total} סעיפים אושרו</span>
+                </div>
+              )}
+              {resumeStatus.view === "report" && resume.next_section && (
+                <p className="resume-next">הסעיף הבא: <strong>{resume.next_section.title}</strong></p>
+              )}
+            </div>
+            <button type="button" className="btn btn-primary btn-big"
+              onClick={() => go({
+                name: "case", id: resume.id, view: resumeStatus.view,
+                ...(resumeStatus.view === "report" && resume.next_section ? { section: resume.next_section.key } : {}),
+              })}>
               {resumeStatus.view === "report" ? "להמשיך לכתוב ←" : "להמשיך ←"}
             </button>
           </section>
@@ -526,7 +552,7 @@ export function CasesScreen() {
                           <th>שם</th>
                           <th>איפה זה עומד</th>
                           <th className="col-when">עודכן</th>
-                          <th className="col-go"><span className="visually-hidden">פעולות</span></th>
+                          <th className="col-menu"><span className="visually-hidden">פעולות</span></th>
                         </tr>
                       </thead>
                       <RightClickArea itemsAt={rowMenu}>
@@ -581,8 +607,15 @@ export function CasesScreen() {
                                       </svg>
                                     </span>
                                     <div className="min0">
-                                      <div className="case-name serif">
-                                        {c.child_name ? shown(c.child_name) : "ללא שם"}
+                                      {/* D-203 §2, as D-113 did for a folder: the name is the row's one stop
+                                          on the keyboard, and its name for a screen reader keeps the verb.
+                                          "(ללא שם)" keeps the words she sees inside that name (WCAG 2.5.3). */}
+                                      <div className="case-title">
+                                        <button type="button" className="case-name case-open serif" draggable
+                                          aria-label={`${s.button} בתיק של ${caseName(c)}${c.child_name ? "" : " (ללא שם)"}`}
+                                          onClick={(e) => { e.stopPropagation(); open(); }}>
+                                          {c.child_name ? shown(c.child_name) : "ללא שם"}
+                                        </button>
                                         {c.meta.follows && <span className="chip chip-sand follow-chip">מעקב</span>}
                                       </div>
                                       <div className="small muted ellipsis">
@@ -596,11 +629,6 @@ export function CasesScreen() {
                                 <td className="small muted col-when">{updated(c.updated_at)}</td>
                                 <td>
                                   <div className="row-actions">
-                                    {/* D-113: one prominent button in the list, on the case she is continuing. */}
-                                    <button type="button" className={c.id === resume?.id ? "btn btn-primary" : "btn"}
-                                      onClick={(e) => { e.stopPropagation(); open(); }}>
-                                      {s.button}<span className="visually-hidden"> בתיק של {caseName(c)}</span>
-                                    </button>
                                     <ActionsMenu items={caseItems(c)} label={`פעולות על התיק של ${caseName(c)}`} />
                                   </div>
                                 </td>
@@ -617,7 +645,6 @@ export function CasesScreen() {
                   {cases.data && !emptyHere && (
                     <div className="explorer-foot small muted">
                       <span>{shownCases.length === 1 ? "תיק אחד" : `${shownCases.length} תיקים`}{q ? " בכל התיקיות" : ""}</span>
-                      <span>גוררים תיק לתיקייה כדי להעביר, או לסל המחזור. לחיצה ימנית: עוד פעולות.</span>
                     </div>
                   )}
                 </>

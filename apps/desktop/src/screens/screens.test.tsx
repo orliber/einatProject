@@ -106,6 +106,35 @@ describe("main screens", () => {
     expect(await a11yViolations(view.container)).toEqual([]);
   });
 
+  it("the card names the next section and how many are approved, and “להמשיך לכתוב ←” opens the report on that section", async () => {
+    const core = new FakeCore();
+    await core.handle("unlock", { password: "x" });
+    // A draft waiting further down, in "סיכום": the page alone would open on it. The card's
+    // section is where she lands all the same.
+    mockIPC(async (cmd, args) => {
+      const out = await core.handle(cmd, args);
+      if (cmd !== "case_detail") return out;
+      const d = out as CaseDetail;
+      const approved = d.sections.flatMap((s) => s.paragraphs).find((p) => p.status === "approved");
+      if (!approved) throw new Error("the demo case has an approved paragraph");
+      return { ...d, sections: d.sections.map((s) => (s.key === "summary" ? { ...s, paragraphs: [{ ...approved, id: "p-waiting", status: "proposed" }] } : s)) };
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    const card = await screen.findByRole("region", { name: "להמשיך איפה שהפסקת" });
+    expect(within(card).getByText("נועם")).toBeInTheDocument();
+    // The fake core's demo case: three of its 15 sections approved, the first one after them not.
+    expect(within(card).getByText("3 מתוך 15 סעיפים אושרו")).toBeInTheDocument();
+    expect(within(card).getByText(/^הסעיף הבא:/)).toHaveTextContent("הסעיף הבא: תיאור תפקוד והתנהגות (לפי ההורים)");
+    // A case in writing says no word on the card: the bar and the next section say it.
+    expect(within(card).queryByText("בכתיבה")).toBeNull();
+    await user.click(within(card).getByRole("button", { name: "להמשיך לכתוב ←" }));
+    expect(await screen.findByRole("article", { name: "הדוח, כמו בקובץ" })).toBeInTheDocument();
+    const contents = screen.getByRole("complementary", { name: "תוכן הדוח" });
+    const here = within(contents).getAllByRole("button").filter((b) => b.getAttribute("aria-current") === "location");
+    expect(here.map((b) => b.querySelector(".grow")?.textContent)).toEqual(["תיאור תפקוד והתנהגות (לפי ההורים)"]);
+  });
+
   it("the report page shows how close a draft of the AI is to her style, and only for drafts", async () => {
     const core = new FakeCore();
     await core.handle("unlock", { password: "x" });
