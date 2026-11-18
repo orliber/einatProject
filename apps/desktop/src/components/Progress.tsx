@@ -133,11 +133,11 @@ export function useLive(approval: string | undefined): { words: number; text: st
         .sendProgress(approval)
         .then((p) => {
           if (!alive) return;
-          // A moment the core was busy answers with no text: what was shown stays.
+          // A moment the core was busy: what was shown stays. Otherwise the answer is what
+          // is shown, and nothing after a lock.
           setLive((was) => {
-            const same = was.of === approval;
-            const kept = same && p.words >= was.words ? was.text : "";
-            return { of: approval, words: p.words, text: p.text || kept };
+            const kept = was.of === approval && p.words >= was.words ? was.text : "";
+            return { of: approval, words: p.words, text: p.busy ? kept : p.text };
           });
         })
         .catch(() => undefined);

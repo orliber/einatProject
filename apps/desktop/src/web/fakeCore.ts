@@ -1785,11 +1785,11 @@ export class FakeCore {
         return null;
       case "send_progress": {
         const w = this.live.get(String(a.approvalId));
-        if (!w) return { words: 0, text: "" };
+        if (!w) return { words: 0, text: "", busy: false };
         const words = w.text.split(/(\s+)/);
         const share = Math.min(1, (Date.now() - w.started) / w.ms);
         const text = words.slice(0, Math.ceil(words.length * share)).join("");
-        return { words: text.split(/\s+/).filter(Boolean).length, text };
+        return { words: text.split(/\s+/).filter(Boolean).length, text, busy: false };
       }
       case "check_update":
         return {

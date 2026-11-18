@@ -1,4 +1,4 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import { mockIPC } from "@tauri-apps/api/mocks";
 import { byPace, estimateMs, learned, leftText, ProgressLine, recordDuration, sizeBucket, timed, WaitLine } from "./Progress";
 
@@ -85,7 +85,7 @@ describe("ProgressLine while the AI writes", () => {
       if (cmd !== "send_progress") return null;
       n += 1;
       const id = (args as { approvalId: string }).approvalId;
-      return id === "a1" ? { words: 7, text: n > 1 ? "שירה הגיעה <b>בשמחה</b> לפגישה" : "שירה" } : { words: 0, text: "" };
+      return id === "a1" ? { words: 7, text: n > 1 ? "שירה הגיעה <b>בשמחה</b> לפגישה" : "שירה", busy: false } : { words: 0, text: "", busy: false };
     });
     const { rerender } = render(<ProgressLine started={Date.now()} estimate={30_000} label="כותבת" approval="a1" />);
     expect(await screen.findByText(/שירה הגיעה <b>בשמחה<\/b> לפגישה/, {}, { timeout: 3000 })).toBeInTheDocument();
@@ -95,9 +95,26 @@ describe("ProgressLine while the AI writes", () => {
   });
 
   it("shows nothing but the count when no text comes", async () => {
-    mockIPC((cmd) => (cmd === "send_progress" ? { words: 40, text: "" } : null));
+    mockIPC((cmd) => (cmd === "send_progress" ? { words: 40, text: "", busy: false } : null));
     render(<ProgressLine started={Date.now()} estimate={30_000} label="ממיינת" approval="s1" />);
     expect(await screen.findByText(/נכתבו כ-40 מילים/, {}, { timeout: 3000 })).toBeInTheDocument();
     expect(document.querySelector(".live-text")).toBeNull();
+  });
+
+  it("keeps the text through a busy moment and drops it after a lock", async () => {
+    let state: "writing" | "busy" | "locked" = "writing";
+    mockIPC((cmd) => {
+      if (cmd !== "send_progress") return null;
+      if (state === "busy") return { words: 9, text: "", busy: true };
+      if (state === "locked") return { words: 9, text: "", busy: false };
+      return { words: 8, text: "יואב צייר בית", busy: false };
+    });
+    render(<ProgressLine started={Date.now()} estimate={30_000} label="כותבת" approval="b1" />);
+    expect(await screen.findByText(/יואב צייר בית/, {}, { timeout: 3000 })).toBeInTheDocument();
+    state = "busy";
+    await new Promise((r) => setTimeout(r, 900));
+    expect(screen.getByText(/יואב צייר בית/)).toBeInTheDocument();
+    state = "locked";
+    await waitFor(() => expect(screen.queryByText(/יואב צייר בית/)).toBeNull(), { timeout: 3000 });
   });
 });

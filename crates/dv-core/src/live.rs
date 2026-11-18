@@ -22,6 +22,26 @@ pub struct LiveView {
     session: u64,
 }
 
+/// The names and the words the masks hid are wiped when the last holder lets go, as the lock
+/// wipes the core's own copies (`Core::lock`).
+impl Drop for LiveView {
+    fn drop(&mut self) {
+        use zeroize::Zeroize;
+        for i in &mut self.identities {
+            i.value.zeroize();
+            for a in &mut i.aliases {
+                a.zeroize();
+            }
+        }
+        if let Some(p) = &mut self.practitioner {
+            p.zeroize();
+        }
+        for m in &mut self.masks {
+            m.original.zeroize();
+        }
+    }
+}
+
 impl std::fmt::Debug for LiveView {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LiveView")
@@ -121,11 +141,15 @@ impl crate::Core {
     }
 }
 
-/// Up to an opening `[` with no `]` after it: half a tag ("[יל") is never shown as written.
+/// Up to an opening `[` with no `]` after it in the last line, the one still being written:
+/// half a tag ("[יל") is never shown as written. A tag never spans lines, so a stray `[` in a
+/// finished line or paragraph holds nothing back.
 fn hold_back_open_tag(text: &str) -> &str {
-    match (text.rfind('['), text.rfind(']')) {
+    let line = text.rfind('\n').map_or(0, |i| i + 1);
+    let tail = text.get(line..).unwrap_or("");
+    match (tail.rfind('['), tail.rfind(']')) {
         (Some(open), Some(close)) if close > open => text,
-        (Some(open), _) => text.get(..open).unwrap_or(""),
+        (Some(open), _) => text.get(..line + open).unwrap_or(""),
         _ => text,
     }
 }
@@ -264,6 +288,13 @@ mod tests {
     fn lists_refs_and_numbers_are_not_shown() {
         let written = r#"{"reply": "", "paragraphs": [{"text": "א", "source_refs": ["S1", "S2"], "guide": 3}], "questions": ["מה גילו?"], "missing": ["text"]"#;
         assert_eq!(view(true).show(written), "א");
+    }
+
+    #[test]
+    fn a_stray_bracket_in_a_finished_paragraph_holds_nothing_back() {
+        let written = r#"{"reply": "", "paragraphs": [{"text": "ציון [ללא סוגר", "source_refs": [], "guide": 0}, {"text": "[ילד] שיחק"#;
+        assert_eq!(view(true).show(written), "ציון [ללא סוגר\n\nנועם שיחק");
+        assert_eq!(view(false).show("שורה [א\nשורה ב [יל"), "שורה [א\nשורה ב ");
     }
 
     #[test]

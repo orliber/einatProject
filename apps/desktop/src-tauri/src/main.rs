@@ -72,7 +72,19 @@ async fn transmit(
     let progress = Arc::clone(&state.progress);
     let done = Arc::clone(&state.progress);
     let id = approval_id.clone();
-    let view = out.live();
+    let mut out = out;
+    // The view is held only here, so a lock drops (and wipes) it at once (`send_progress`).
+    if let Some(view) = out.take_live() {
+        if let Ok(mut p) = state.progress.lock() {
+            p.insert(
+                approval_id.clone(),
+                Written {
+                    view: Some(view),
+                    ..Written::default()
+                },
+            );
+        }
+    }
     // Writing the whole report takes many minutes: the laptop must not sleep meanwhile (D-141).
     let _awake = win_platform::keep_awake();
     let result = tauri::async_runtime::spawn_blocking(move || {
@@ -80,8 +92,7 @@ async fn transmit(
             if let Ok(mut p) = progress.lock() {
                 let w = p.entry(id.clone()).or_default();
                 w.words = words;
-                if let Some(v) = &view {
-                    w.view.get_or_insert_with(|| Arc::clone(v));
+                if w.view.is_some() {
                     // Only what is new is added; an answer that starts again starts empty.
                     if text.len() < w.text.len() {
                         w.text.clear();
@@ -108,25 +119,43 @@ async fn transmit(
 /// locked after it left, or while the core is busy for a moment (the next ask shows it).
 #[tauri::command]
 fn send_progress(state: tauri::State<'_, AppState>, approval_id: String) -> dv_core::SendProgress {
-    let Ok(p) = state.progress.lock() else {
+    let Ok(mut p) = state.progress.lock() else {
         return dv_core::SendProgress::default();
     };
-    let Some(w) = p.get(&approval_id) else {
+    let Some(w) = p.get_mut(&approval_id) else {
         return dv_core::SendProgress::default();
     };
-    let open = w.view.as_ref().is_some_and(|v| {
-        state
-            .core
-            .try_lock()
-            .is_ok_and(|c| c.is_session(v.session()))
-    });
-    let text = match (&w.view, open) {
-        (Some(v), true) => v.show(&w.text),
-        _ => String::new(),
+    let words = w.words;
+    let Some(view) = w.view.clone() else {
+        return dv_core::SendProgress {
+            words,
+            ..Default::default()
+        };
     };
+    let open = match state.core.try_lock() {
+        Ok(c) => c.is_session(view.session()),
+        Err(std::sync::TryLockError::WouldBlock) => {
+            return dv_core::SendProgress {
+                words,
+                text: String::new(),
+                busy: true,
+            };
+        }
+        Err(std::sync::TryLockError::Poisoned(_)) => false,
+    };
+    if !open {
+        // Locked since it left: the names and the text go now, not when the answer comes.
+        w.view = None;
+        w.text.clear();
+        return dv_core::SendProgress {
+            words,
+            ..Default::default()
+        };
+    }
     dv_core::SendProgress {
-        words: w.words,
-        text,
+        words,
+        text: view.show(&w.text),
+        busy: false,
     }
 }
 

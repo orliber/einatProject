@@ -920,6 +920,12 @@ impl Outgoing {
         self.live.clone()
     }
 
+    /// [`Outgoing::live`], taken out: the caller then holds the only copy, and dropping it
+    /// wipes the names at once (on a lock) rather than when the answer comes.
+    pub fn take_live(&mut self) -> Option<std::sync::Arc<LiveView>> {
+        self.live.take()
+    }
+
     /// The same, with the number of words Claude has written so far and the text itself (still
     /// tagged), as they arrive.
     ///

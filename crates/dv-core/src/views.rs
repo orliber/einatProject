@@ -369,6 +369,9 @@ pub struct SectionResult {
 pub struct SendProgress {
     pub words: u32,
     pub text: String,
+    /// The core was busy for a moment, so `text` was not worked out: what was shown stays.
+    /// Otherwise an empty `text` means nothing is to be shown (also after a lock).
+    pub busy: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
