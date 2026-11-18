@@ -1,10 +1,11 @@
 // The clinic's shared building blocks: how a patient's name, an amount, a visit and an alert
 // look on every tab, so the tabs only arrange them. Everything shown is plain text.
-import { createContext, useCallback, useContext, useId, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useId, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { useDiscreet } from "../../discreet";
-import { Dialog, ErrorLine, Skeleton, WarnIcon } from "../../components/ui";
+import { ChevronIcon, Dialog, ErrorLine, Skeleton, WarnIcon } from "../../components/ui";
 import { failureFor } from "../../errors";
 import type { Alert } from "../../ipc/generated/Alert";
+import type { AlertKind } from "../../ipc/generated/AlertKind";
 import type { HistoryEntry } from "../../ipc/generated/HistoryEntry";
 import type { VisitKind } from "../../ipc/generated/VisitKind";
 import type { VisitStatus } from "../../ipc/generated/VisitStatus";
@@ -278,19 +279,41 @@ export function ConfirmDialog(props: {
 
 // ------------------------------------------------------------------ what needs her
 
+/** The kinds of "מה דורש אותי" in the order she would deal with them: rows that were not read
+ *  first (every figure is without them, D-178), then what is quick to close, then what takes
+ *  a decision. */
+export const ALERT_ORDER: AlertKind[] = ["unreadable", "unmarked", "no_note", "task_overdue", "feedback_soon", "materials_missing", "report_due", "debt", "no_next_visit", "waiting"];
+
+/** How many lines of a kind show before "להציג את כולן". */
+export const ALERTS_SHOWN = 4;
+
+/** The alerts by kind, each kind keeping the order the clinic gave (oldest first). */
+export function alertGroups(alerts: Alert[]): { kind: AlertKind; alerts: Alert[] }[] {
+  // A kind that is not in the order still gets its group, after the others: no alert is dropped.
+  const kinds = [...ALERT_ORDER, ...alerts.map((a) => a.kind).filter((kind) => !ALERT_ORDER.includes(kind))];
+  return [...new Set(kinds)]
+    .map((kind) => ({ kind, alerts: alerts.filter((a) => a.kind === kind) }))
+    .filter((g) => g.alerts.length > 0);
+}
+
 /**
  * "מה דורש אותי": each alert as a line, the patient's name as a button that opens the card,
  * then the sentence the clinic wrote (which never carries the name). `onVisit` and `onTask`
  * add a step right on the line, when the tab has one to offer. `onCard`: the list is shown on
  * this patient's own card, so their name is plain text there, not a link to where she is.
  * An alert about no patient (rows that were not read, D-178) has no name at all.
+ * `grouped`: the list sits under its kind's heading (`AlertGroups`), so a line has no icon and
+ * no kind of its own, and the sentence is quiet. `holdOf`: the step that marks the visit of a
+ * "פגישה שלא סומנה" as held, when the screen offers one ("התקיימה" in place of opening it).
  */
-export function AlertList({ alerts, onVisit, onTask, empty, onCard }: {
+export function AlertList({ alerts, onVisit, onTask, empty, onCard, grouped = false, holdOf }: {
   alerts: Alert[];
-  onVisit?: (alert: Alert, visitId: string) => void;
+  onVisit?: ((alert: Alert, visitId: string) => void) | undefined;
   onTask?: (alert: Alert, taskId: string) => void;
   empty?: ReactNode;
   onCard?: string;
+  grouped?: boolean;
+  holdOf?: ((visitId: string) => (() => void) | null) | undefined;
 }) {
   if (alerts.length === 0) return <p className="muted clinic-quiet">{empty ?? "אין כרגע שום דבר שמחכה."}</p>;
   return (
@@ -298,26 +321,108 @@ export function AlertList({ alerts, onVisit, onTask, empty, onCard }: {
       {alerts.map((a) => {
         const visitId = a.visit_id;
         const taskId = a.task_id;
+        const hold = a.kind === "unmarked" && visitId !== null ? holdOf?.(visitId) ?? null : null;
         return (
           <li key={`${a.kind}-${a.patient_id ?? ""}-${visitId ?? ""}-${taskId ?? ""}-${a.since}`} className="clinic-alert">
-            <span className="clinic-alert-icon"><WarnIcon /></span>
+            {!grouped && <span className="clinic-alert-icon"><WarnIcon /></span>}
             <div className="grow stack clinic-alert-body">
-              <span className="row clinic-alert-head">
-                {a.patient_id !== null && <PatientName name={a.patient_name} id={a.patient_id === onCard ? null : a.patient_id} strong />}
-                <span className="chip chip-warn">{ALERT_KIND_LABEL[a.kind]}</span>
-              </span>
-              <span>{a.text}</span>
+              {(a.patient_id !== null || !grouped) && (
+                <span className="row clinic-alert-head">
+                  {a.patient_id !== null && <PatientName name={a.patient_name} id={a.patient_id === onCard ? null : a.patient_id} strong />}
+                  {!grouped && <span className="chip chip-warn">{ALERT_KIND_LABEL[a.kind]}</span>}
+                </span>
+              )}
+              {grouped ? <span className="muted">{a.text}</span> : <span>{a.text}</span>}
             </div>
-            {visitId !== null && onVisit && (
-              <button type="button" className="btn btn-small" onClick={() => onVisit(a, visitId)}>
-                {a.kind === "no_note" ? "לכתוב סיכום" : "לפתוח את הפגישה"}
-              </button>
-            )}
+            {hold
+              ? <button type="button" className="btn btn-small" onClick={hold}>התקיימה</button>
+              : visitId !== null && onVisit && (
+                <button type="button" className="btn btn-small" onClick={() => onVisit(a, visitId)}>
+                  {a.kind === "no_note" ? "לכתוב סיכום" : "לפתוח את הפגישה"}
+                </button>
+              )}
             {taskId !== null && onTask && <button type="button" className="btn btn-small" onClick={() => onTask(a, taskId)}>בוצע</button>}
           </li>
         );
       })}
     </ul>
+  );
+}
+
+/** The kinds that tell her of something coming, not of something late: a quiet chip. */
+const UPCOMING: AlertKind[] = ["feedback_soon", "materials_missing"];
+
+/**
+ * "מה דורש אותי" by topic (review item 4 of 18.11.2026, D-203): one row per kind that opens and
+ * folds, with its count, and under it the lines of that kind (`ALERTS_SHOWN` of them, then
+ * "להציג את כל ה-N"). The first kind is open; one she opened or folded stays so. When the line
+ * she was on goes (she dealt with it), the focus goes to its kind's row, or, when the whole
+ * kind went, to the row now in its place, or to the empty line (WCAG 2.4.3).
+ */
+export function AlertGroups({ alerts, onVisit, holdOf, empty }: {
+  alerts: Alert[];
+  onVisit?: (a: Alert, visitId: string) => void;
+  holdOf?: (visitId: string) => (() => void) | null;
+  empty: ReactNode;
+}) {
+  const groups = useMemo(() => alertGroups(alerts), [alerts]);
+  /** A kind she opened or folded herself; otherwise the first one is open. */
+  const [folds, setFolds] = useState<Partial<Record<AlertKind, boolean>>>({});
+  /** A kind whose every line she asked to see. */
+  const [all, setAll] = useState<Partial<Record<AlertKind, boolean>>>({});
+  const base = useId();
+  const toggles = useRef(new Map<AlertKind, HTMLButtonElement>());
+  const emptyRef = useRef<HTMLParagraphElement>(null);
+  /** Where the focus was last inside a kind, to find a place for it when that place goes. */
+  const last = useRef<{ el: HTMLElement; kind: AlertKind; index: number } | null>(null);
+
+  useLayoutEffect(() => {
+    const was = last.current;
+    if (!was || was.el.isConnected) return;
+    // Only when the focus fell with it: a click elsewhere (or on nothing) keeps hers.
+    const active = document.activeElement;
+    if (active && active !== document.body) return;
+    last.current = null;
+    const kinds = groups.map((g) => g.kind);
+    const sameIndex = kinds[Math.min(was.index, kinds.length - 1)];
+    (toggles.current.get(was.kind) ?? (sameIndex === undefined ? undefined : toggles.current.get(sameIndex)) ?? emptyRef.current)?.focus();
+  }, [groups]);
+
+  if (groups.length === 0) return <p ref={emptyRef} className="muted clinic-quiet" tabIndex={-1}>{empty}</p>;
+  return (
+    <div className="clinic-need-groups">
+      {groups.map((g, i) => {
+        const n = g.alerts.length;
+        const open = folds[g.kind] ?? i === 0;
+        const bodyId = `${base}-${g.kind}`;
+        return (
+          <div className="clinic-need-group" key={g.kind} onFocusCapture={(e) => { last.current = { el: e.target as HTMLElement, kind: g.kind, index: i }; }}>
+            <h3 className="clinic-need-title">
+              <button type="button" className="clinic-need-head" aria-expanded={open} aria-controls={bodyId}
+                ref={(el) => { if (el) toggles.current.set(g.kind, el); else toggles.current.delete(g.kind); }}
+                onClick={() => setFolds((f) => ({ ...f, [g.kind]: !open }))}>
+                <span className={UPCOMING.includes(g.kind) ? "chip clinic-need-count" : "chip chip-warn clinic-need-count"} aria-hidden="true">{n}</span>
+                <span className="grow">{ALERT_KIND_LABEL[g.kind] ?? "דורש תשומת לב"}</span>
+                <span className="visually-hidden">: {n}</span>
+                <span className="clinic-need-chevron"><ChevronIcon /></span>
+              </button>
+            </h3>
+            <div id={bodyId} className="clinic-need-body" hidden={!open}>
+              {open && (
+                <>
+                  <AlertList alerts={all[g.kind] ? g.alerts : g.alerts.slice(0, ALERTS_SHOWN)} grouped onVisit={onVisit} holdOf={holdOf} />
+                  {n > ALERTS_SHOWN && (
+                    <button type="button" className="link-btn" aria-expanded={all[g.kind] ?? false} onClick={() => setAll((x) => ({ ...x, [g.kind]: !x[g.kind] }))}>
+                      {all[g.kind] ? "להציג פחות" : `להציג את כל ה-${n}`}
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
@@ -330,7 +435,16 @@ export function AlertList({ alerts, onVisit, onTask, empty, onCard }: {
  * (the date, when it is shown, and the hours), so it can be asked for by what she sees, and
  * two visits at the same hour of different days are not called the same.
  */
-export function VisitRow({ view, actions, onOpen, showDate = false }: { view: VisitView; actions?: ReactNode; onOpen?: () => void; showDate?: boolean }) {
+export function VisitRow({ view, actions, onOpen, showDate = false, quietPlanned = false, soon }: {
+  view: VisitView;
+  actions?: ReactNode;
+  onOpen?: () => void;
+  showDate?: boolean;
+  /** A planned visit has no chip: "מתוכננת" is said to a screen reader only (as the calendar grid does). */
+  quietPlanned?: boolean;
+  /** When it is, said last on its quiet line ("בעוד 48 דקות"). */
+  soon?: string;
+}) {
   const v = view.visit;
   const shown = useShownName();
   const discreet = useDiscreet();
@@ -340,9 +454,9 @@ export function VisitRow({ view, actions, onOpen, showDate = false }: { view: Vi
   const openName = `${showDate ? `${formatDate(v.date)} ` : ""}${span}, פתיחת הפגישה של ${who}`;
   // What happened, in her words, may say more than a list should while a family looks on: in
   // discreet mode it stays in the visit's dialog.
-  const more = [v.kind !== "block" ? v.title : "", v.place, discreet ? "" : v.status_note, v.note].filter(Boolean).join(" · ");
+  const more = [v.kind !== "block" ? v.title : "", v.place, discreet ? "" : v.status_note, v.note, soon ?? ""].filter(Boolean).join(" · ");
   return (
-    <li className={v.status === "cancelled" ? "clinic-visit clinic-visit-off" : "clinic-visit"} data-status={v.status}>
+    <li className={v.status === "cancelled" ? "clinic-visit clinic-visit-off" : "clinic-visit"} data-status={v.status} data-kind={v.kind}>
       {onOpen
         ? <button type="button" className="clinic-visit-when clinic-visit-open" aria-label={openName} onClick={onOpen}>{showDate && <span>{formatDate(v.date)}</span>}{time}</button>
         : <span className="clinic-visit-when">{showDate && <span>{formatDate(v.date)}</span>}{time}</span>}
@@ -352,7 +466,9 @@ export function VisitRow({ view, actions, onOpen, showDate = false }: { view: Vi
             ? <span className="clinic-name clinic-name-strong">{who}</span>
             : <PatientName name={view.patient_name} id={v.patient_id} strong />}
           <KindBadge kind={v.kind} />
-          {v.kind !== "block" && <StatusBadge status={v.status} />}
+          {v.kind !== "block" && (quietPlanned && v.status === "planned"
+            ? <span className="visually-hidden">{VISIT_STATUS_LABEL.planned}</span>
+            : <StatusBadge status={v.status} />)}
           {view.has_note && <span className="chip chip-ok">יש סיכום</span>}
           {view.overlaps && <span className="chip chip-warn">חופפת לפגישה אחרת</span>}
         </span>

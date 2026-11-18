@@ -6,6 +6,7 @@ import type { PatientStatus } from "../../ipc/generated/PatientStatus";
 import type { PayMethod } from "../../ipc/generated/PayMethod";
 import type { TaskKind } from "../../ipc/generated/TaskKind";
 import type { Today } from "../../ipc/generated/Today";
+import type { Visit } from "../../ipc/generated/Visit";
 import type { VisitKind } from "../../ipc/generated/VisitKind";
 import type { VisitStatus } from "../../ipc/generated/VisitStatus";
 
@@ -195,6 +196,53 @@ export function today(now: Date = new Date()): Today {
     date: `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`,
     minute: now.getHours() * 60 + now.getMinutes(),
   };
+}
+
+// ------------------------------------------------------------------ a visit and the time
+// When a visit asks for something (review item 3 of 18.11.2026, D-203): one step that fits the
+// time is offered on the line, the rest wait in "⋯". A visit under way counts as begun: a
+// reminder makes no sense once it has started.
+
+/** The visit has begun (or its day is past). */
+export function visitStarted(v: Pick<Visit, "date" | "start">, now: Today): boolean {
+  return v.date < now.date || (v.date === now.date && v.start <= now.minute);
+}
+
+/** The visit is over: the core's own rule for "פגישה שלא סומנה". */
+export function visitEnded(v: Pick<Visit, "date" | "start" | "minutes">, now: Today): boolean {
+  return v.date < now.date || (v.date === now.date && v.start + v.minutes <= now.minute);
+}
+
+export type VisitStep = "hold" | "note" | "remind" | null;
+
+/** The one step that fits the time: begun and planned → "hold"; held without a note → "note";
+ *  still ahead and planned → "remind"; otherwise none. Time she kept for herself has none. */
+export function visitStep(v: Visit, hasNote: boolean, now: Today): VisitStep {
+  if (v.kind === "block" || v.patient_id === null) return null;
+  if (v.status === "planned") return visitStarted(v, now) ? "hold" : "remind";
+  if (v.status === "held" && !hasNote) return "note";
+  return null;
+}
+
+/** Where the "now" line goes in a day's list sorted by start: only BETWEEN two entries (the
+ *  index of the first one still ahead), else -1. */
+export function nowIndex(starts: number[], minute: number): number {
+  const i = starts.findIndex((s) => s > minute);
+  return i <= 0 ? -1 : i;
+}
+
+/** "4 בלוח · 2 אחרי עכשיו": how many visits the day holds, and how many are still ahead when
+ *  that is some of them but not all. "" for an empty day. */
+export function todayCountWords(total: number, after: number): string {
+  if (total <= 0) return "";
+  const head = total === 1 ? "פגישה אחת בלוח" : `${total} בלוח`;
+  if (after <= 0 || after >= total) return head;
+  return `${head} · ${after === 1 ? "אחת" : after} אחרי עכשיו`;
+}
+
+/** "בעוד 48 דקות", "בעוד שעה". */
+export function untilWords(minutes: number): string {
+  return `בעוד ${formatLength(minutes)}`;
 }
 
 // ------------------------------------------------------------------ Hebrew labels

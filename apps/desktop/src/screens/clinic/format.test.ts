@@ -1,9 +1,10 @@
 // Money, dates and times as the clinic shows and reads them, and a Hebrew word for every value.
+import type { Visit } from "../../ipc/generated/Visit";
 import {
   addDays, ALERT_KIND_LABEL, CONTACT_ROLE_LABEL, dayName, daysBetween, formatDate, formatDateLong, formatDateShort, formatLength,
-  formatMoney, formatMonth, formatSpan, formatTime, greeting, initials, isIsoDate, leftAloneWords, moneyInput, monthOf, monthRange, optionsWith,
-  parseMoney, parseTime, PATIENT_STATUS_LABEL, PATIENT_STATUSES, PAY_METHOD_LABEL, PAY_METHODS, TASK_KIND_LABEL, TASK_KINDS, today,
-  VISIT_KIND_LABEL, VISIT_KINDS, VISIT_STATUS_LABEL, VISIT_STATUSES, visitTitle, weekday, weekRange,
+  formatMoney, formatMonth, formatSpan, formatTime, greeting, initials, isIsoDate, leftAloneWords, moneyInput, monthOf, monthRange, nowIndex, optionsWith,
+  parseMoney, parseTime, PATIENT_STATUS_LABEL, PATIENT_STATUSES, PAY_METHOD_LABEL, PAY_METHODS, TASK_KIND_LABEL, TASK_KINDS, today, todayCountWords,
+  untilWords, VISIT_KIND_LABEL, VISIT_KINDS, VISIT_STATUS_LABEL, VISIT_STATUSES, visitEnded, visitStarted, visitStep, visitTitle, weekday, weekRange,
 } from "./format";
 
 describe("money", () => {
@@ -116,6 +117,66 @@ describe("times", () => {
     expect(formatLength(120)).toBe("שעתיים");
     expect(formatLength(180)).toBe("3 שעות");
     expect(formatLength(135)).toBe("2:15 שעות");
+  });
+});
+
+describe("the time of a visit", () => {
+  // Sunday 15.11.2026 at 10:00; the visit is 10:00–10:50.
+  const NOW = { date: "2026-11-15", minute: 600 };
+  const visit = (over: Partial<Visit> = {}): Visit => ({
+    id: "v1", patient_id: "p1", kind: "assessment", title: "", date: "2026-11-15", start: 600, minutes: 50, place: "", status: "planned",
+    status_note: "", fee: 0, charge_missed: false, series_id: null, note: "", ...over,
+  });
+
+  it("a visit has begun at its very start, and ended at its very end", () => {
+    expect(visitStarted(visit(), NOW)).toBe(true);
+    expect(visitStarted(visit({ start: 601 }), NOW)).toBe(false);
+    expect(visitEnded(visit(), { ...NOW, minute: 649 })).toBe(false);
+    expect(visitEnded(visit(), { ...NOW, minute: 650 })).toBe(true);
+    // An earlier day has begun and ended whatever the hour; a later day neither.
+    expect(visitStarted(visit({ date: "2026-11-14", start: 1200 }), NOW)).toBe(true);
+    expect(visitEnded(visit({ date: "2026-11-14", start: 1200 }), NOW)).toBe(true);
+    expect(visitStarted(visit({ date: "2026-11-16", start: 0 }), NOW)).toBe(false);
+    expect(visitEnded(visit({ date: "2026-11-16", start: 0 }), NOW)).toBe(false);
+  });
+
+  it("offers the one step that fits the time", () => {
+    // Planned: a reminder while it is ahead; "held" once it has begun (also while under way).
+    expect(visitStep(visit({ start: 660 }), false, NOW)).toBe("remind");
+    expect(visitStep(visit({ date: "2026-11-16" }), false, NOW)).toBe("remind");
+    expect(visitStep(visit(), false, NOW)).toBe("hold");
+    expect(visitStep(visit({ date: "2026-11-14" }), false, NOW)).toBe("hold");
+    // Held: a note when there is none, then nothing.
+    expect(visitStep(visit({ status: "held" }), false, NOW)).toBe("note");
+    expect(visitStep(visit({ status: "held" }), true, NOW)).toBeNull();
+    expect(visitStep(visit({ status: "cancelled" }), false, NOW)).toBeNull();
+    expect(visitStep(visit({ status: "no_show" }), false, NOW)).toBeNull();
+    // Time she kept for herself, or a visit without a patient, asks nothing.
+    expect(visitStep(visit({ kind: "block", patient_id: null }), false, NOW)).toBeNull();
+    expect(visitStep(visit({ kind: "block" }), false, NOW)).toBeNull();
+    expect(visitStep(visit({ patient_id: null }), false, NOW)).toBeNull();
+  });
+
+  it("the now line goes only between two visits", () => {
+    expect(nowIndex([660, 720, 780], 600)).toBe(-1);
+    expect(nowIndex([480, 540, 600], 600)).toBe(-1);
+    expect(nowIndex([480, 540, 660, 720], 600)).toBe(2);
+    expect(nowIndex([], 600)).toBe(-1);
+  });
+
+  it("counts the day's visits, and those still ahead when it is some of them", () => {
+    expect(todayCountWords(0, 0)).toBe("");
+    expect(todayCountWords(1, 0)).toBe("פגישה אחת בלוח");
+    expect(todayCountWords(1, 1)).toBe("פגישה אחת בלוח");
+    expect(todayCountWords(4, 1)).toBe("4 בלוח · אחת אחרי עכשיו");
+    expect(todayCountWords(4, 2)).toBe("4 בלוח · 2 אחרי עכשיו");
+    expect(todayCountWords(4, 4)).toBe("4 בלוח");
+    expect(todayCountWords(4, 0)).toBe("4 בלוח");
+  });
+
+  it("says how long until a visit", () => {
+    expect(untilWords(48)).toBe("בעוד 48 דקות");
+    expect(untilWords(60)).toBe("בעוד שעה");
   });
 });
 
