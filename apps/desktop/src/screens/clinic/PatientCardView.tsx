@@ -873,7 +873,7 @@ function TaskDialog({ patientId, task, onClose }: { patientId: string; task?: Cl
       </>}>
       <div className="stack clinic-form">
         <TextField id="task-title" label="מה צריך לעשות" value={form.title} maxLength={200} autoFocus={!task} placeholder="למשל: לשלוח שאלון לגננת"
-          onChange={(title) => set({ title })} />
+          onChange={(title) => set({ title })} className="fit-l" />
         <div className="clinic-form-row">
           <SelectField<TaskKind> id="task-kind" label="סוג" value={form.kind} onChange={(kind) => set({ kind })}
             options={optionsWith(TASK_KINDS, TASK_KIND_LABEL, form.kind)} />

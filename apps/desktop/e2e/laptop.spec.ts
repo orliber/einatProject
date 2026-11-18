@@ -101,3 +101,28 @@ test("with larger text, a dialog keeps its close button and its foot on screen",
   await page.keyboard.press("Control+Digit0");
   await expect(page.locator("html")).not.toHaveCSS("zoom", "1.25");
 });
+
+test("the patient list in a short dialog is shown whole, and Tab goes on to the next field (17.11.2026)", async ({ page }) => {
+  await unlock(page, PAGE);
+  await page.getByRole("button", { name: "ניהול הקליניקה" }).click();
+  await page.getByRole("tab", { name: "מעקבים" }).click();
+  await page.getByRole("button", { name: /^עריכת המעקב:/ }).first().click();
+  const dialog = page.getByRole("dialog", { name: "עריכת מעקב" });
+  const change = dialog.getByRole("button", { name: "החלפה" });
+  if (await change.isVisible()) await change.click();
+  const field = dialog.getByRole("combobox", { name: "מטופל" });
+  await field.click();
+  const list = dialog.getByRole("listbox", { name: "מטופלים לבחירה" });
+  await expect(list).toBeVisible();
+  // The window under the title scrolls just enough: the whole list and the field are in it.
+  const body = await dialog.locator(".dialog-body").boundingBox();
+  const shown = await dialog.locator(".clinic-picker-results").boundingBox();
+  const box = await field.boundingBox();
+  if (!body || !shown || !box) throw new Error("no box");
+  expect(shown.y + shown.height, "list bottom").toBeLessThanOrEqual(body.y + body.height + 0.5);
+  expect(box.y, "field top").toBeGreaterThanOrEqual(body.y - 0.5);
+  // A list that scrolls is not a stop for Tab: the keyboard goes on to the note, not to the window's corner.
+  await page.keyboard.press("Tab");
+  await expect(dialog.getByLabel("הערה (לא חובה)")).toBeFocused();
+  await expect(list).toBeHidden();
+});
