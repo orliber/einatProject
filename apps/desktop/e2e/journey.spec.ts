@@ -122,8 +122,9 @@ test("the report page opens a section's guide and her own section's points", asy
   await createCase(page, CHILD);
   await stage(page, /כתיבה/).click();
   await expect(page.getByRole("article", { name: "הדוח, כמו בקובץ" })).toBeVisible();
-  // The guide is beside the brief of the section in focus (round 48).
-  await page.getByRole("button", { name: "איך לכתוב את הסעיף ←" }).click();
+  // The guide is in the "⋯" of the section in focus (round 48; the brief is folded, D-203).
+  await page.locator(".a4-section.is-focus").getByRole("button", { name: /^עוד על הסעיף/ }).click();
+  await page.getByRole("menuitem", { name: "איך לכתוב את הסעיף" }).click();
   // D-168: the guide opens here, on the report page, under the section in focus.
   await expect(page.getByText(/הנוסח של המכון|הנוסח שלך, לכל התיקים/)).toBeVisible();
   await expect(page.getByRole("article", { name: "הדוח, כמו בקובץ" })).toBeVisible();
@@ -145,6 +146,8 @@ test("the report page writes and approves the section in focus with the keyboard
   await expect(report).toBeVisible();
   const section = report.locator(".a4-section.is-focus");
   await expect(section).toHaveCount(1);
+  // The brief waits behind its quiet line (D-203).
+  await section.getByRole("button", { name: "איך לנסח? (לא חובה)" }).click();
   const brief = section.getByRole("textbox", { name: /^איך לנסח את הסעיף/ });
   await brief.fill("להתחיל מהקשר עם הצוות");
   await brief.press("Enter");

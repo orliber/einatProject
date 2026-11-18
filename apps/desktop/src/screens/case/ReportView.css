@@ -141,6 +141,14 @@
   align-items: center;
   gap: 12px;
 }
+/* D-203 §3: the box folded, one row: "✦ לנסח את הסעיף", "לכתוב בעצמי", "איך לנסח? (לא חובה)". */
+.a4-brief-closed {
+  gap: 12px;
+  margin-top: 8px;
+}
+.a4-brief-toggle {
+  align-self: center;
+}
 /* An empty section out of focus: one dashed line. */
 .a4-gap-line {
   display: flex;

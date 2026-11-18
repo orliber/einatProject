@@ -6,6 +6,7 @@ import { mockIPC } from "@tauri-apps/api/mocks";
 import { App } from "../App";
 import { FakeCore } from "../web/fakeCore";
 import { a11yViolations } from "../test/a11y";
+import { checkNow } from "../components/Update";
 import type { CaseSummary } from "../ipc/generated/CaseSummary";
 import type { CaseDetail } from "../ipc/generated/CaseDetail";
 
@@ -188,6 +189,82 @@ describe("main screens", () => {
     expect(screen.getByRole("complementary", { name: "תוכן הדוח" })).toBeInTheDocument();
   });
 
+  it("the case bar shows no app status: no “מצב הדגמה” and no new version, even in demo mode with an update found", async () => {
+    // Nothing found yet, and asked just now: the cases screen does not ask again.
+    mockIPC((cmd) => (cmd === "check_update" ? null : undefined));
+    await checkNow();
+    localStorage.removeItem("dv.updateAuto");
+    const { user, calls } = await openApp();
+    await screen.findByRole("button", { name: /בתיק של נועם$/ });
+    expect(calls).not.toContain("check_update");
+    // A day later, with the case open: the case still runs the daily check (D-033), and the
+    // demo core offers a newer version.
+    localStorage.removeItem("dv.updateCheckedAt");
+    await openCase(user);
+    await waitFor(() => expect(calls).toContain("check_update"));
+    await waitFor(() => expect(calls).toContain("prepare_update"));
+    const bar = document.querySelector(".case-bar") as HTMLElement;
+    expect(bar).not.toHaveTextContent(/הדגמה|גרסה|עדכון/);
+    expect(bar.querySelector(".topbar-status, .update-chip, .case-demo")).toBeNull();
+    // The top bar outside the case tells both, in one badge.
+    await user.click(within(bar).getByRole("button", { name: "→ תיקים" }));
+    expect(await screen.findByRole("button", { name: /^הדגמה · (יש עדכון|עדכון מוכן)$/ })).toBeInTheDocument();
+  });
+
+  it("“דף מלא”, “חיפוש” and “התייעצות” each carry an icon, and “דף מלא” is a pressed toggle", async () => {
+    const { user } = await openApp();
+    await openCase(user);
+    const tools = document.querySelector(".case-bar .case-tools") as HTMLElement;
+    // One quiet family: three tools with an icon and a name each, then "⋯".
+    expect(within(tools).getAllByRole("button").map((b) => b.getAttribute("aria-label") ?? b.textContent))
+      .toEqual(["דף מלא", "חיפוש", "התייעצות", "עוד פעולות: פרטים ושמות, כתיבת כל הדוח, נעילה"]);
+    for (const name of ["דף מלא", "חיפוש", "התייעצות"]) {
+      const tool = within(tools).getByRole("button", { name });
+      expect(tool).toHaveClass("btn", "btn-quiet");
+      expect(tool.textContent).toBe(name);
+      const icon = tool.querySelector("svg");
+      expect(icon).not.toBeNull();
+      expect(icon).toHaveAttribute("aria-hidden", "true");
+    }
+    const full = within(tools).getByRole("button", { name: "דף מלא" });
+    expect(full).toHaveAttribute("aria-pressed", "false");
+    expect(full).toHaveAttribute("title", "להסתיר את תוכן הדוח שבצד");
+    await user.click(full);
+    expect(full).toHaveAttribute("aria-pressed", "true");
+    expect(full).toHaveAttribute("title", "להחזיר את תוכן הדוח שבצד");
+    // Kept while the program runs: turned off again for the tests after this one.
+    await user.click(full);
+    expect(full).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("the three stages are joined by two decorative lines, and a finished stage says so to a screen reader", async () => {
+    const { user, core } = await openApp();
+    // Every material sorted: the materials stage is done.
+    mockIPC(async (cmd, args) => {
+      const out = await core.handle(cmd, args);
+      if (cmd !== "case_detail") return out;
+      const d = structuredClone(out as CaseDetail);
+      for (const r of d.routing) r.needs_sorting = false;
+      return d;
+    });
+    await openCase(user);
+    const nav = screen.getByRole("navigation", { name: "שלבי התיק" });
+    expect(Array.from(nav.children).map((el) => el.className)).toEqual(["stage done", "step-link step-link-done", "stage on", "step-link", "stage"]);
+    for (const line of nav.querySelectorAll(".step-link")) {
+      expect(line).toHaveAttribute("aria-hidden", "true");
+      expect(line).toBeEmptyDOMElement();
+    }
+    const materials = within(nav).getByRole("button", { name: "חומרים (הושלם)" });
+    expect(materials.querySelector(".stage-dot")).toHaveTextContent("✓");
+    expect(within(nav).getByRole("button", { name: "כתיבה" })).toHaveAttribute("aria-current", "step");
+    expect(within(nav).getByRole("button", { name: "הוצאת הדוח" })).not.toHaveAttribute("aria-current");
+    // The stage she is on is never "done" in the bar, and neither is its line onward.
+    await user.click(materials);
+    const here = await within(nav).findByRole("button", { name: "חומרים" });
+    expect(here).toHaveAttribute("aria-current", "step");
+    expect(Array.from(nav.querySelectorAll(".step-link")).map((l) => l.className)).toEqual(["step-link", "step-link"]);
+  });
+
   it("material not sorted yet is a clear alert above the writing, with what to do (D-114)", async () => {
     const { user, calls } = await openApp();
     await openCase(user);
@@ -197,7 +274,7 @@ describe("main screens", () => {
     // Above "write the empty ones", not in small print under it.
     const write = within(contents).getByRole("button", { name: /^✦ לכתוב את/ });
     expect(alert.compareDocumentPosition(write) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    await user.click(within(alert).getByRole("button", { name: "למיין את החומרים" }));
+    await user.click(within(alert).getByRole("button", { name: "למיין" }));
     expect(await screen.findByRole("dialog", { name: "לפני שליחה ל-Claude" })).toHaveTextContent("מיון החומרים לסעיפים");
     expect(calls).toContain("prepare_sort_parts");
   });
@@ -212,7 +289,7 @@ describe("main screens", () => {
     await user.click(await screen.findByRole("button", { name: /בתיק של נועם$/ }));
     await user.click(within(await screen.findByRole("navigation", { name: "שלבי התיק" })).getByRole("button", { name: /כתיבה/ }));
     const alert = within(screen.getByRole("complementary", { name: "תוכן הדוח" })).getByRole("status");
-    expect(within(alert).queryByRole("button", { name: "למיין את החומרים" })).toBeNull();
+    expect(within(alert).queryByRole("button", { name: "למיין" })).toBeNull();
     expect(alert).toHaveTextContent("קודם רושמים את הסכמת ההורים");
     await user.click(within(alert).getByRole("button", { name: "רישום ההסכמה" }));
     await vi.waitFor(() => expect(screen.queryByRole("complementary", { name: "תוכן הדוח" })).toBeNull());
@@ -306,13 +383,14 @@ describe("main screens", () => {
   });
 });
 
-/** "✦ לנסח" on an empty section: a section out of focus opens its box first (D-140), and
- *  the box's own "✦ לנסח" sends. */
+/** "✦ לנסח" or "✦ לנסח את הסעיף" on an empty section: a section out of focus is brought into
+ *  focus by its line's "✦ לנסח" first (D-140), and its "✦ לנסח את הסעיף" sends (D-203). */
+const DRAFT_BUTTON = /^✦ לנסח( את הסעיף)?$/;
 async function draftFrom(user: ReturnType<typeof userEvent.setup>, button: HTMLElement) {
   const section = button.closest<HTMLElement>(".a4-section");
   await user.click(button);
   if (section && button.classList.contains("link-btn")) {
-    await user.click(await within(section).findByRole("button", { name: "✦ לנסח" }));
+    await user.click(await within(section).findByRole("button", { name: "✦ לנסח את הסעיף" }));
   }
 }
 
@@ -320,7 +398,7 @@ describe("writing the report", () => {
   it("a section is drafted only after the 'what leaves the computer' screen, then approved", async () => {
     const { user, calls } = await openApp();
     const page = await openCase(user);
-    const write = within(page).getAllByRole("button", { name: "✦ לנסח" })[0];
+    const write = within(page).getAllByRole("button", { name: "✦ לנסח את הסעיף" })[0];
     if (!write) throw new Error("no empty section to write");
     await user.click(write);
     const review = await screen.findByRole("dialog", { name: "לפני שליחה ל-Claude" });
@@ -340,7 +418,7 @@ describe("writing the report", () => {
     const { user, calls } = await openApp();
     const page = await openCase(user);
     for (let i = 0; i < 2; i++) {
-      const write = (await within(page).findAllByRole("button", { name: "✦ לנסח" }))[0];
+      const write = (await within(page).findAllByRole("button", { name: DRAFT_BUTTON }))[0];
       if (!write) throw new Error("no empty section to write");
       await draftFrom(user, write);
       const review = await screen.findByRole("dialog", { name: "לפני שליחה ל-Claude" });
@@ -365,7 +443,7 @@ describe("writing the report", () => {
       if (cmd === "send_section") sent.push((args as { approvalId: string }).approvalId);
       return out;
     });
-    const writes = await within(page).findAllByRole("button", { name: "✦ לנסח" });
+    const writes = await within(page).findAllByRole("button", { name: DRAFT_BUTTON });
     const [first, second] = writes;
     if (!first || !second) throw new Error("two empty sections are needed");
     await draftFrom(user, first);
@@ -413,7 +491,7 @@ describe("writing the report", () => {
     const user = userEvent.setup();
     render(<App />);
     const page = await openCase(user);
-    const write = within(page).getAllByRole("button", { name: "✦ לנסח" })[0];
+    const write = within(page).getAllByRole("button", { name: "✦ לנסח את הסעיף" })[0];
     if (!write) throw new Error("no empty section to write");
     await user.click(write);
     const review = await screen.findByRole("dialog", { name: "לפני שליחה ל-Claude" });
@@ -438,7 +516,7 @@ describe("writing the report", () => {
     const user = userEvent.setup();
     render(<App />);
     const page = await openCase(user);
-    const write = within(page).getAllByRole("button", { name: "✦ לנסח" })[0];
+    const write = within(page).getAllByRole("button", { name: "✦ לנסח את הסעיף" })[0];
     if (!write) throw new Error("no empty section to write");
     await user.click(write);
     await screen.findByRole("button", { name: "✓ לאשר" }, { timeout: 6000 });
@@ -461,7 +539,7 @@ describe("writing the report", () => {
     const user = userEvent.setup();
     render(<App />);
     const page = await openCase(user);
-    const write = within(page).getAllByRole("button", { name: "✦ לנסח" })[0];
+    const write = within(page).getAllByRole("button", { name: "✦ לנסח את הסעיף" })[0];
     if (!write) throw new Error("no empty section to write");
     await user.click(write);
     const line = await screen.findByText(/הבקשה לא נשלחה: שגיאה פנימית/);
@@ -489,7 +567,7 @@ describe("writing the report", () => {
     const user = userEvent.setup();
     render(<App />);
     const page = await openCase(user);
-    const write = within(page).getAllByRole("button", { name: "✦ לנסח" })[0];
+    const write = within(page).getAllByRole("button", { name: "✦ לנסח את הסעיף" })[0];
     if (!write) throw new Error("no empty section to write");
     await user.click(write);
     await user.click(await screen.findByRole("button", { name: "להעלות ל-$20 ולהמשיך" }));

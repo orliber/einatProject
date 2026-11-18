@@ -396,6 +396,13 @@
   font-weight: 600;
   padding: 8px 4px;
 }
+/* D-203 §3: a thin divider between the way back and the case itself (drawing only). */
+.case-sep {
+  width: 1px;
+  height: 24px;
+  flex-shrink: 0;
+  background: var(--line);
+}
 .case-id {
   display: flex;
   align-items: baseline;
@@ -439,7 +446,12 @@
   min-width: max-content;
   display: flex;
   justify-content: center;
-  gap: 6px;
+  align-items: center;
+  /* D-203 §3: the stages are joined by a line (.step-link) instead of a gap. */
+  gap: 0;
+}
+.stages .step-link {
+  width: 28px;
 }
 @media (max-width: 1200px) {
   .case-bar {
@@ -462,6 +474,10 @@
 }
 .stage:hover {
   background: var(--surface-alt);
+}
+/* A stage that is done (not the current one): its word in green, beside its ✓. */
+.stage.done {
+  color: var(--ok);
 }
 .stage.on {
   background: var(--primary);
@@ -486,6 +502,13 @@
   background: var(--ok-soft);
   color: var(--ok);
   border-color: transparent;
+}
+/* D-203 §3: the tools beside the stages, one quiet family: an icon and a name each, then "⋯". */
+.case-tools {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
 }
 .case-body {
   flex-grow: 1;
@@ -693,9 +716,8 @@
   .stage {
     padding: 0 10px;
   }
-  /* Demo mode stays in the bar of every screen outside the case. */
-  .case-demo {
-    display: none;
+  .stages .step-link {
+    width: 16px;
   }
 }
 /* Narrower still (a laptop with larger text): the quiet parts step back, so nothing in the
@@ -703,36 +725,43 @@
    the stages keep their words, the current one marked. */
 @container (max-width: 1000px) {
   .case-id .chip-ok,
-  .stage-dot {
+  .stage-dot,
+  .case-sep {
     display: none;
   }
-  .case-bar > .btn {
-    padding: 0 12px;
+  .case-tools > .btn {
+    padding: 0 10px;
   }
-  .stages {
-    gap: 2px;
+  .stages .step-link {
+    width: 8px;
   }
   .stage {
     padding: 0 8px;
   }
 }
-/* D-114: material not sorted yet, said above the writing: what it means and what to do. */
+/* D-114: material not sorted yet, said above the writing, with what to do. D-203 §3: one
+   quiet line with a dot (what it means is in the button's title and, for a screen reader, in
+   words). */
 .contents-alert {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 6px;
-  padding: 10px 12px;
-  border: 1px solid var(--warn-line);
-  border-radius: 10px;
-  background: var(--warn-paper);
-  color: var(--ink);
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  margin: 0;
   font-size: var(--text-sm);
   line-height: 1.45;
+  color: var(--ink-soft);
 }
-.contents-alert b {
-  font-size: var(--text-base);
-  color: var(--warn-ink);
+.contents-alert-dot {
+  width: 6px;
+  height: 6px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--warn-dot);
+}
+.contents-alert .link-btn {
+  align-self: center;
+  font-size: var(--text-sm);
 }
 /* D-161: what "approve all" did, in one quiet line; a click goes to the first one held back. */
 .contents-approved {

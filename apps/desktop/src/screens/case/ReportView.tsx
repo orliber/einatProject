@@ -300,6 +300,23 @@ function A4Section({ api, section: s, focused, onPick, onNext }: {
   const qc = useQueryClient();
   const briefs = useQuery({ queryKey: ["draftBriefs"], queryFn: ipc.draftBriefs, staleTime: 60_000 });
   const keptBrief = briefs.data?.sections[s.key] ?? "";
+  // D-203 §3: the box waits behind one quiet line, "איך לנסח? (לא חובה)", until she asks for it.
+  // A wish kept for the section, or one she wrote before, opens it by itself: a wish is never
+  // sent unseen, nor dropped without her seeing it.
+  const [briefAsked, setBriefAsked] = useState(false);
+  const briefToggle = useRef<HTMLButtonElement>(null);
+  /** Folded back by "ביטול" or Escape: the keyboard goes back to the line that opened it. */
+  const backToToggle = useRef(false);
+  const hasWish = keptBrief !== "" || brief.trim() !== "";
+  const briefShown = briefAsked || hasWish;
+  /** Her wishes are still being read: whether one is kept is not known yet. */
+  const briefWaiting = briefs.data === undefined && !briefs.isError;
+  useEffect(() => {
+    if (!briefShown && backToToggle.current) {
+      backToToggle.current = false;
+      briefToggle.current?.focus();
+    }
+  }, [briefShown]);
   // Her points for her own section, the same ones the section's page keeps (round 30).
   const [points, setPoints] = useKept(`case:${caseId}:section:${s.key}:points`, "");
   const [sourcesChanged, setSourcesChanged] = useState(false);
@@ -426,7 +443,8 @@ function A4Section({ api, section: s, focused, onPick, onNext }: {
       // approval is still saving does nothing, so holding Enter never approves the report.
       if (e.repeat || job || busy || settling) return;
       if (pending.length > 0) void approveAll();
-      else if (s.paragraphs.length === 0 && canWrite) document.getElementById(`brief-${s.key}`)?.focus();
+      // The box when it is open, else "✦ לנסח את הסעיף": a second Enter drafts.
+      else if (s.paragraphs.length === 0 && canWrite) (document.getElementById(`brief-${s.key}`) ?? document.getElementById(`draft-${s.key}`))?.focus();
       else onNext();
     }
   }
@@ -761,21 +779,42 @@ function A4Section({ api, section: s, focused, onPick, onNext }: {
           </div>
         ) : focused && canWrite ? (
           <div className="a4-brief">
-            {briefs.data !== undefined || briefs.isError ? (
+            {briefWaiting ? (
+              <WaitLine task="prepare" speed="section" label="פותחת את תיבת ההנחיה" />
+            ) : briefShown ? (
               <BriefBox id={`brief-${s.key}`} title="איך לנסח את הסעיף? (לא חובה)" chips={STYLE_CHIPS} chipsTitle="סגנון"
                 hint="כתבי מה חשוב לך, או בחרי סגנון. בלי כלום הסעיף ינוסח כמו תמיד, מתוך החומרים."
                 placeholder="למשל: להתחיל מהקשר עם הצוות בגן, ובלי מונחים מקצועיים"
                 recent={briefs.data?.recent} initial={keptBrief || brief} keep={keptBrief !== ""}
-                sendLabel="✦ לנסח" busy={busy} autoFocus={s.key !== "diagnoses"}
-                onSend={sendBrief} onCancel={() => heading.current?.focus()} />
-            ) : <WaitLine task="prepare" speed="section" label="פותחת את תיבת ההנחיה" />}
+                sendLabel="✦ לנסח" busy={busy} autoFocus={briefAsked || s.key !== "diagnoses"}
+                onSend={sendBrief}
+                onCancel={() => {
+                  // With a wish the box stays open (its words are hers to see); else it folds
+                  // back, and the keyboard returns to the line that opened it.
+                  if (hasWish) heading.current?.focus();
+                  else {
+                    backToToggle.current = true;
+                    setBriefAsked(false);
+                  }
+                }} />
+            ) : (
+              // D-203 §3: folded, one row. "✦ לנסח את הסעיף" sends what an empty box sends (no
+              // wish, the usual request), through the same review; nothing is kept or deleted.
+              <div className="row wrap-row a4-brief-row a4-brief-closed">
+                <button id={`draft-${s.key}`} type="button" className="btn btn-primary" disabled={busy} onClick={() => void write()}>✦ לנסח את הסעיף</button>
+                <button type="button" className="btn" onClick={() => edit(null, "", "end")}>לכתוב בעצמי</button>
+                <button ref={briefToggle} type="button" className="link-btn a4-brief-toggle" aria-expanded={false} onClick={() => setBriefAsked(true)}>איך לנסח? (לא חובה)</button>
+              </div>
+            )}
             {/* D-163: a closing section drafted now cannot reflect her own sections still empty. */}
             {DERIVED.includes(s.key) && ownEmptyLine(detail.sections) && <span className="small muted a4-own-empty">{ownEmptyLine(detail.sections)}</span>}
-            <div className="row a4-brief-row">
-              <button type="button" className="link-btn" onClick={() => edit(null, "", "end")}>לכתוב בעצמי</button>
-              <span className="grow" />
-              <button type="button" className="link-small" onClick={openGuide}>איך לכתוב את הסעיף ←</button>
-            </div>
+            {(briefShown || briefWaiting) && (
+              <div className="row a4-brief-row">
+                <button type="button" className="link-btn" onClick={() => edit(null, "", "end")}>לכתוב בעצמי</button>
+                <span className="grow" />
+                <button type="button" className="link-small" onClick={openGuide}>איך לכתוב את הסעיף ←</button>
+              </div>
+            )}
           </div>
         ) : canWrite ? (
           <div className="a4-gap-line">

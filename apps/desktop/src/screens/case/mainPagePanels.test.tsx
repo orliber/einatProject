@@ -1,6 +1,6 @@
 // D-168: everything on the main page, only for the section in focus. The section's guide, the
 // DSM level and the lines of her past reports are each one quiet line that opens; on the
-// diagnoses section her list leads, open, before "✦ לנסח"; on the DSM section the level is
+// diagnoses section her list leads, open, before "✦ לנסח את הסעיף"; on the DSM section the level is
 // open until she sets one. Over the demo core; every name and detail is invented.
 import { configure, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -52,7 +52,9 @@ describe("the section's panels on the report page (D-168)", () => {
     if (!section) throw new Error("no section in focus");
     // Until asked for, nothing of it is on the page.
     expect(within(page).queryByText("איך לכתוב את הסעיף הזה")).toBeNull();
-    await user.click(await within(section).findByRole("button", { name: "איך לכתוב את הסעיף ←" }));
+    // With the brief folded (D-203), the guide is in the section's "⋯".
+    await user.click(await within(section).findByRole("button", { name: /^עוד על הסעיף/ }));
+    await user.click(await screen.findByRole("menuitem", { name: "איך לכתוב את הסעיף" }));
     // Still the report page: the guide is in the section, with its editor one click away.
     expect(screen.getByRole("article", { name: "הדוח, כמו בקובץ" })).toBeInTheDocument();
     expect(within(section).getByText("איך לכתוב את הסעיף הזה")).toBeInTheDocument();
@@ -93,7 +95,7 @@ describe("the section's panels on the report page (D-168)", () => {
     const diagnoses = await focus(/^אבחנות/, "diagnoses");
     const line = await within(diagnoses).findByText("מהדוחות שלך: 2 אבחנות שחוזרות");
     expect(line.closest("details")).toHaveAttribute("open");
-    const draft = await within(diagnoses).findByRole("button", { name: "✦ לנסח" });
+    const draft = await within(diagnoses).findByRole("button", { name: "✦ לנסח את הסעיף" });
     // Her choice comes before the AI's draft on the page.
     expect(line.compareDocumentPosition(draft) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     await user.click(within(diagnoses).getByRole("checkbox", { name: /מעקב התפתחותי/ }));
