@@ -1,6 +1,6 @@
 # ניהול קליניקה (בטא) – מפרט
 
-> החלטות: D-170 עד D-179, D-194 (ייצוא לרואה החשבון) ו-D-196 עד D-200 (תכנון ותמונת מצב), ב-`DECISIONS.md`. המסך מסומן "בטא" בכל מקום שבו הוא מופיע.
+> החלטות: D-170 עד D-179, D-194 (ייצוא לרואה החשבון) ו-D-196 עד D-200 (תכנון ותמונת מצב), ב-`DECISIONS.md`. "בטא" כתוב על המתג "ניהול הקליניקה" בסרגל העליון, בכל עמוד של הקליניקה (D-203).
 
 ## מה זה ולמי
 עינת מנהלת קליניקה של אבחונים התפתחותיים. היום היומן, סיכומי הפגישות, התשלומים והמעקבים נמצאים מחוץ לתוכנה. המודול מביא אותם פנימה, לתוך הכספת המוצפנת, ומחבר אותם לתיק האבחון ולדוח.
@@ -332,6 +332,17 @@ Data through `@tanstack/react-query` (`["clinic", …]` keys, invalidated
 after a write). Loading shows `Skeleton`; search is debounced; quick actions (marking a visit, a
 task done) update the screen first and roll back on failure; long lists render in pages.
 RTL, keyboard reachable, labelled, both colour themes (only tokens from `styles/tokens.css`).
+The front page (`TodayTab.tsx`, D-203) has no beta line of its own: the bar's switch says "בטא".
+Each visit offers one step by the time, through `VisitActions` (begun and still planned →
+"התקיימה", the primary once it is over; held without a note → "לכתוב סיכום"; still ahead →
+"תזכורת"), and everything else in its "⋯", which always ends with "לפתוח את הפגישה"; reserved
+time has neither. A line "עכשיו HH:MM" stands between the visits that began and those ahead, only
+between two (`nowIndex`); the count beside the title is `todayCountWords` ("4 בלוח · אחת אחרי
+עכשיו"), and the next visit that is not reserved time or cancelled says `untilWords` ("בעוד 48
+דקות"). Marking a visit held is optimistic and also drops its "unmarked" alert; the "no_note"
+alert that follows comes with the next read, never faked. "מה דורש אותי" is `AlertGroups` (by
+kind in `ALERT_ORDER`, the first open, "N דברים" beside the title), and an "unmarked" line of a
+visit on today's list offers "התקיימה" (`holdOf`); one of an earlier day still opens the visit.
 In כספים, "ייצוא לרואה החשבון" (beside the month and beside the year) opens a dialog that picks
 a month or a whole year and calls `ipc.exportIncome(period)` (not through `clinic`: the file goes
 from the core to the disk, and the window gets only its path, said in a toast). The browser

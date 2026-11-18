@@ -1,7 +1,8 @@
-// The clinic's page (beta, D-170): the bar with the clinic's tabs under it (D-191), a quiet line
-// saying it is a beta and that nothing leaves the computer, and the open tab. The tab and the
-// open patient live in the app's route, so a link from one tab to another (or to a patient's
-// card) is one `go`.
+// The clinic's page (beta, D-170): the bar with the clinic's tabs under it (D-191), and the open
+// tab. "בטא" is on the bar's switch ("ניהול הקליניקה", TopBar's .topbar-beta), which shows on
+// every clinic page at every width; the page has no line of its own about it (D-203). The tab
+// and the open patient live in the app's route, so a link from one tab to another (or to a
+// patient's card) is one `go`.
 import { useMemo } from "react";
 import { useApp } from "../../App";
 import { TopBar } from "../../components/TopBar";
@@ -38,10 +39,6 @@ export function ClinicScreen({ tab = "today", patientId }: { tab?: ClinicTab | u
       <TopBar active="clinic" />
       <main className="page-main clinic">
         <h1 className="visually-hidden">ניהול הקליניקה: {TAB_TITLE[active]}</h1>
-        <p className="clinic-beta" role="note">
-          <span className="chip">בטא</span>
-          <span>ניהול הקליניקה בגרסת בטא. הכל נשמר מוצפן בכספת שבמחשב, ושום דבר מכאן לא נשלח לשום מקום.</span>
-        </p>
         <ClinicNavContext.Provider value={nav}>
           <div className="clinic-panel" role="tabpanel" id={`clinic-panel-${active}`} aria-labelledby={`clinic-tab-${active}`} tabIndex={0}>
             {patientId !== undefined ? <PatientCardView key={patientId} patientId={patientId} onBack={() => nav.openTab("patients")} />

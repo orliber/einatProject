@@ -1,7 +1,11 @@
 // The clinic's front page: today's visits, what needs her, what is open to do, and four small
 // figures. The reference for the other tabs: data through the hooks of clinicData, names and
 // money through parts, quick actions that show first and roll back if the vault refuses.
-import { useState } from "react";
+// Each visit offers one step, the one its time asks for, and the rest under "⋯"
+// (`VisitActions`, D-203): "התקיימה" once it has begun, "לכתוב סיכום" once it was held,
+// "תזכורת" while it is ahead. A line "עכשיו" stands between the visits that began and the
+// ones still ahead, and "מה דורש אותי" is grouped by topic (`AlertGroups`).
+import { Fragment, useState } from "react";
 import { PlusIcon, Skeleton } from "../../components/ui";
 import { clinicApi } from "../../ipc/clinic";
 import type { Alert } from "../../ipc/generated/Alert";
@@ -11,11 +15,11 @@ import type { TaskView } from "../../ipc/generated/TaskView";
 import type { Visit } from "../../ipc/generated/Visit";
 import type { VisitView } from "../../ipc/generated/VisitView";
 import { clinicKeys, useOptimistic, useOverview, useReloadClinic, useToday } from "./clinicData";
-import { formatDate, formatDateLong, formatMoney, greeting, TASK_KIND_LABEL } from "./format";
+import { formatDate, formatDateLong, formatMoney, formatTime, greeting, nowIndex, TASK_KIND_LABEL, todayCountWords, untilWords } from "./format";
 import { NoteDialog } from "./NoteDialog";
-import { AlertList, EmptyState, PatientName, ReadError, Section, useClinicNav, VisitRow } from "./parts";
+import { AlertGroups, EmptyState, PatientName, ReadError, Section, useClinicNav, VisitRow } from "./parts";
 import { PatientDialog } from "./PatientDialog";
-import { SendMenu } from "./SendMenu";
+import { VisitActions } from "./VisitActions";
 import { VisitDialog } from "./VisitDialog";
 
 /** What is open over the tab: one dialog at a time. */
@@ -34,10 +38,16 @@ export function TodayTab() {
   const [open, setOpen] = useState<Open>(null);
   const reload = useReloadClinic();
 
-  // A visit marked "held" shows so at once, on today's list and on the next day's.
+  // A visit marked "held" shows so at once, on today's list and on the next day's, and its
+  // "פגישה שלא סומנה" leaves "מה דורש אותי". The "בלי סיכום" that follows comes with the next read.
   const hold = useOptimistic<Overview, Visit>(
     clinicKeys.overview(now.date),
-    (o, visit) => ({ ...o, visits: o.visits.map((v) => markHeld(v, visit.id)), next_visits: o.next_visits.map((v) => markHeld(v, visit.id)) }),
+    (o, visit) => ({
+      ...o,
+      visits: o.visits.map((v) => markHeld(v, visit.id)),
+      next_visits: o.next_visits.map((v) => markHeld(v, visit.id)),
+      alerts: o.alerts.filter((a) => !(a.kind === "unmarked" && a.visit_id === visit.id)),
+    }),
     (visit) => clinicApi.saveVisit({ ...visit, status: "held", status_note: "", charge_missed: false }),
   );
   // A task ticked off shows done at once; the next read takes it off the list.
@@ -65,28 +75,44 @@ export function TodayTab() {
   const o = overview.data;
   const fresh = o.active === 0 && o.waiting === 0 && o.visits.length === 0 && o.next_visits.length === 0 && o.tasks.length === 0;
 
-  const actionsOf = (view: VisitView) => {
-    const v = view.visit;
-    if (v.kind === "block" || v.patient_id === null) return null;
-    const patientId = v.patient_id;
-    // A visit still ahead (the next days' list) has not happened yet: as on the card.
-    const due = v.date <= now.date;
-    return (
-      <>
-        {v.status === "planned" && due && <button type="button" className="btn btn-small" onClick={() => void hold(v)}>התקיימה</button>}
-        {v.status !== "cancelled" && (
-          <button type="button" className="btn btn-small" onClick={() => setOpen({ kind: "note", patientId, visit: v })}>סיכום</button>
-        )}
-        {v.status === "planned" && <SendMenu kind="reminder" patientId={patientId} visitId={v.id} label="תזכורת" />}
-      </>
-    );
-  };
-  const rows = (views: VisitView[]) => (
+  // Today's list: "עכשיו" goes between the visits that began and the ones ahead (never above
+  // the first or under the last), and the next visit she has says how soon it is, even when
+  // no line is drawn. Time she kept for herself and a cancelled visit are not "next".
+  const at = nowIndex(o.visits.map((v) => v.visit.start), now.minute);
+  const after = at > 0 ? o.visits.length - at : 0;
+  const next = o.visits.find((v) => v.visit.start > now.minute && v.visit.kind !== "block" && v.visit.status !== "cancelled");
+  const soon = next ? { id: next.visit.id, text: untilWords(next.visit.start - now.minute) } : null;
+
+  /** A list of visits, each with its one step and its "⋯". The key is the visit's, and the line
+   *  "עכשיו" sits inside its fragment: a visit keeps its row (and the focus on its button)
+   *  when it is marked, and when the line moves past it. */
+  const rows = (views: VisitView[], line = -1, ahead: { id: string; text: string } | null = null) => (
     <ul className="clinic-list clinic-visits">
-      {views.map((view) => <VisitRow key={view.visit.id} view={view} actions={actionsOf(view)} onOpen={() => setOpen({ kind: "visit", view })} />)}
+      {views.map((view, i) => {
+        const v = view.visit;
+        // Time she kept for herself has no step and no "⋯" (and no empty actions box).
+        const pid = v.kind !== "block" ? v.patient_id : null;
+        return (
+          <Fragment key={v.id}>
+            {i === line && <NowLine minute={now.minute} />}
+            <VisitRow view={view} quietPlanned {...(ahead?.id === v.id ? { soon: ahead.text } : {})}
+              onOpen={() => setOpen({ kind: "visit", view })}
+              actions={pid !== null
+                ? <VisitActions view={view} patientId={pid} now={now} onHold={(x) => void hold(x)}
+                    onNote={(x) => setOpen({ kind: "note", patientId: pid, visit: x })} onOpen={() => setOpen({ kind: "visit", view })} />
+                : undefined} />
+          </Fragment>
+        );
+      })}
     </ul>
   );
   const visitOf = (id: string) => [...o.visits, ...o.next_visits].find((v) => v.visit.id === id);
+  /** "התקיימה" on a line of "פגישה שלא סומנה", for a visit of today's list; one of an earlier
+   *  day keeps "לפתוח את הפגישה". */
+  const holdOf = (id: string) => {
+    const view = o.visits.find((x) => x.visit.id === id);
+    return view && view.visit.status === "planned" ? () => void hold(view.visit) : null;
+  };
 
   /** The step an alert about a visit offers: its note, or the visit itself. A visit that is
    *  not on this page is on the patient's card. */
@@ -130,10 +156,10 @@ export function TodayTab() {
 
           <div className="clinic-columns">
             <div className="stack clinic-column">
-              <Section title="הפגישות של היום" aside={<span className="muted small">{o.visits.length === 0 ? "" : o.visits.length === 1 ? "פגישה אחת" : `${o.visits.length} פגישות`}</span>}>
+              <Section title="הפגישות של היום" aside={<span className="muted small">{todayCountWords(o.visits.length, after)}</span>}>
                 {o.visits.length === 0
                   ? <p className="muted clinic-quiet">אין פגישות היום.</p>
-                  : rows(o.visits)}
+                  : rows(o.visits, at, soon)}
               </Section>
               {o.next_day !== null && (
                 <Section title={`הפגישות הבאות: ${formatDateLong(o.next_day)}`}>
@@ -143,8 +169,8 @@ export function TodayTab() {
             </div>
 
             <div className="stack clinic-column">
-              <Section title="מה דורש אותי" aside={o.alerts.length > 0 ? <span className="chip chip-warn">{o.alerts.length}</span> : undefined}>
-                <AlertList alerts={o.alerts} onVisit={openAlertVisit} empty="אין כרגע שום דבר שמחכה לטיפול." />
+              <Section title="מה דורש אותי" aside={o.alerts.length > 0 ? <span className="muted small">{o.alerts.length === 1 ? "דבר אחד" : `${o.alerts.length} דברים`}</span> : undefined}>
+                <AlertGroups alerts={o.alerts} onVisit={openAlertVisit} holdOf={holdOf} empty="אין כרגע שום דבר שמחכה לטיפול." />
               </Section>
               <Section title="משימות פתוחות" aside={<button type="button" className="link-btn" onClick={() => nav.openTab("tasks")}>לכל המעקבים</button>}>
                 {o.tasks.length === 0
@@ -166,6 +192,17 @@ export function TodayTab() {
       {open?.kind === "patient" && <PatientDialog onClose={() => setOpen(null)} />}
       {open?.kind === "note" && <NoteDialog patientId={open.patientId} visit={open.visit} onClose={() => setOpen(null)} />}
     </div>
+  );
+}
+
+/** "עכשיו 15:12" with a line across, between two visits of today's list. Plain text in the
+ *  list, read in its place: no label of its own and no live region (it moves once a minute). */
+function NowLine({ minute }: { minute: number }) {
+  return (
+    <li className="clinic-now">
+      <span className="clinic-now-label">עכשיו <span className="clinic-visit-time" dir="ltr">{formatTime(minute)}</span></span>
+      <span className="clinic-now-rule" aria-hidden="true" />
+    </li>
   );
 }
 

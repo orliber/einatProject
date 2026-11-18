@@ -114,8 +114,12 @@ describe("rows that could not be read (D-178)", () => {
   it("are said first on the front page, about no patient and with nothing to open", async () => {
     await openOn(TODAY, unread);
     const needs = await region("מה דורש אותי");
-    const first = within(needs).getAllByRole("listitem")[0] as HTMLElement;
-    expect(within(first).getByText("רישום שלא נקרא")).toBeInTheDocument();
+    // Their topic is the first, and so the open one (D-203).
+    const topic = within(within(needs).getAllByRole("heading", { level: 3 })[0] as HTMLElement).getByRole("button");
+    expect(topic).toHaveAccessibleName("רישום שלא נקרא: 1");
+    expect(topic).toHaveAttribute("aria-expanded", "true");
+    const panel = document.getElementById(topic.getAttribute("aria-controls") ?? "") as HTMLElement;
+    const first = within(panel).getAllByRole("listitem")[0] as HTMLElement;
     expect(first).toHaveTextContent(UNREADABLE.text);
     expect(within(first).queryByRole("button")).toBeNull();
   });
@@ -272,9 +276,19 @@ describe("the small things", () => {
   });
 
   it("the same alert on the front page does lead to the card", async () => {
-    await openOn(TODAY);
+    const { user, went } = await openOn(TODAY);
     const needs = await region("מה דורש אותי");
-    expect(within(needs).getAllByRole("button", { name: "נועם" }).length).toBeGreaterThan(0);
+    // The alert is under its topic (D-203), here the first one and so open; the name in it is
+    // a way to the card.
+    const topic = within(within(needs).getAllByRole("heading", { level: 3 })[0] as HTMLElement).getByRole("button");
+    expect(topic).toHaveAccessibleName("פגישה בלי סיכום: 2");
+    expect(topic).toHaveAttribute("aria-expanded", "true");
+    const group = document.getElementById(topic.getAttribute("aria-controls") ?? "") as HTMLElement;
+    const noam = within(group).getByRole("button", { name: "נועם" });
+    expect(within(noam.closest("li") as HTMLElement).getByRole("button", { name: "לכתוב סיכום" })).toBeInTheDocument();
+    await user.click(noam);
+    expect(went[went.length - 1]).toMatchObject({ name: "clinic", tab: "patients" });
+    expect((went[went.length - 1] as { patientId?: string }).patientId).toMatch(/^patient-/);
   });
 
   it("a read that failed can always be tried again, also after “הבנתי”", async () => {
