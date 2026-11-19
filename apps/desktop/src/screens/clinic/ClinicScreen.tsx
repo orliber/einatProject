@@ -2,12 +2,12 @@
 // tab. "בטא" is on the bar's switch ("ניהול הקליניקה", TopBar's .topbar-beta), which shows on
 // every clinic page at every width; the page has no line of its own about it (D-204). The tab
 // and the open patient live in the app's route, so a link from one tab to another (or to a
-// patient's card) is one `go`.
+// patient's card) is one `go`. The clinic's settings are a part of the program's settings
+// (D-205), not a tab here.
 import { useMemo } from "react";
 import { useApp } from "../../App";
 import { TopBar } from "../../components/TopBar";
 import { CalendarTab } from "./CalendarTab";
-import { ClinicSettingsTab } from "./ClinicSettingsTab";
 import { InsightsTab } from "./InsightsTab";
 import { MoneyTab } from "./MoneyTab";
 import { ClinicNavContext, type ClinicNav } from "./parts";
@@ -48,8 +48,7 @@ export function ClinicScreen({ tab = "today", patientId }: { tab?: ClinicTab | u
               : active === "waiting" ? <WaitingTab />
               : active === "tasks" ? <TasksTab />
               : active === "money" ? <MoneyTab />
-              : active === "insights" ? <InsightsTab />
-              : <ClinicSettingsTab />}
+              : <InsightsTab />}
           </div>
         </ClinicNavContext.Provider>
       </main>

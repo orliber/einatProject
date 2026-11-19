@@ -1,5 +1,5 @@
-// What the tests of the follow-ups, the money and the settings tabs share: the clinic as the
-// app shows it over the demo core (the route is the app's, and `go` changes it), a refusal
+// What the tests of the follow-ups, the money and the clinic's settings share: the clinic as the
+// app shows it (and the program's settings, where the clinic's are a part, D-205) over the demo core (the route is the app's, and `go` changes it), a refusal
 // for one request, and direct questions to the demo core. Every name is invented.
 import { render } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -9,6 +9,7 @@ import { dataOf, type ReplyData, type ReplyKind } from "../../ipc/clinic";
 import type { ClinicReply } from "../../ipc/generated/ClinicReply";
 import type { ClinicRequest } from "../../ipc/generated/ClinicRequest";
 import { appApi, Host, serve, type Override, type Served } from "../../test/host";
+import { SettingsScreen } from "../SettingsScreen";
 import { ClinicScreen } from "./ClinicScreen";
 
 /** The Sunday morning the tests hold the clock at. */
@@ -19,7 +20,10 @@ function Clinic({ first, onGo, notify }: { first: Route; onGo: (r: Route) => voi
   const app = appApi({ route, notify, go: (r) => { onGo(r); setRoute(r); } });
   return (
     <Host app={app}>
-      {route.name === "clinic" ? <ClinicScreen tab={route.tab} patientId={route.patientId} /> : <p>מסך אחר: {route.name}</p>}
+      {route.name === "clinic" ? <ClinicScreen tab={route.tab} patientId={route.patientId} />
+        // The clinic's settings are a part of the program's settings (D-205).
+        : route.name === "settings" ? <SettingsScreen key={route.pane ?? ""} pane={route.pane} />
+        : <p>מסך אחר: {route.name}</p>}
     </Host>
   );
 }
