@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useState, type ReactNode } from "react";
 import { BugReportSettings } from "../components/BugReport";
 import { SystemCheckSettings } from "../components/SystemCheck";
 import { useApp } from "../App";
@@ -19,7 +19,7 @@ import { CriticalValuesSettings } from "../components/CriticalValuesSettings";
 import { SecuritySettings } from "../components/SecuritySettings";
 import { PrivacyStatus } from "../components/PrivacyStatus";
 import { Segmented, Switch } from "../components/Switch";
-import { ErrorLine } from "../components/ui";
+import { ErrorLine, Skeleton } from "../components/ui";
 import { ipc, type LogoView, type ReportSettings, type TemplateView } from "../ipc/client";
 import { PROVIDERS, providerOf } from "../ai";
 
@@ -28,6 +28,9 @@ import { THEMES, applyTheme, readTheme } from "../theme";
 import { SectionModesSettings } from "../components/SectionModes";
 import { SETTINGS_PANES, type SettingsPane } from "./settingsPanes";
 import "./SettingsScreen.css";
+
+/** The clinic's settings (D-205): a part of these settings, loaded with the clinic's code only when opened. */
+const ClinicSettingsTab = lazy(() => import("./clinic/ClinicSettingsTab").then((m) => ({ default: m.ClinicSettingsTab })));
 
 /** The screen-capture switch is hidden while that protection is off (D-039). */
 const SCREEN_PROTECTION_SETTING = false;
@@ -336,6 +339,12 @@ export function SettingsScreen({ pane: initial }: { pane?: SettingsPane | undefi
               <InstrumentSettings />
               <CriticalValuesSettings />
             </>
+          )}
+
+          {pane === "clinic" && (
+            <Suspense fallback={<Skeleton card lines={4} label="טוען את הגדרות הקליניקה" />}>
+              <ClinicSettingsTab />
+            </Suspense>
           )}
 
           {pane === "backup" && (

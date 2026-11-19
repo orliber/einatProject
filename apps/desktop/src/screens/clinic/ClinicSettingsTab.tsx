@@ -6,7 +6,8 @@
 // thresholds of "מה דורש אותי". Everything is saved at
 // once, with "שמירה": the core tidies and checks it, and its refusal is the message shown.
 // What she changed and did not save yet is kept while the program is open (in memory only),
-// so going to another tab and back loses nothing.
+// so going to another page and back loses nothing. They are the part "הקליניקה" of the
+// program's settings (D-205), no longer a tab of the clinic: the page's own look comes along.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useApp } from "../../App";
 import { CloseIcon, ErrorLine, PlusIcon, Skeleton } from "../../components/ui";
@@ -19,6 +20,7 @@ import { useClinicSettings, useReloadClinic, useSaveSettings } from "./clinicDat
 import { defaultClinicSettings, fillPreview, PLACEHOLDERS, sampleValues } from "./clinicDefaults";
 import { formatTime, moneyInput, parseMoney, parseTime, TASK_KIND_LABEL, TASK_KINDS, VISIT_KIND_LABEL, VISIT_KINDS } from "./format";
 import { CheckField, ConfirmDialog, ReadError, Section, SelectField, TextAreaField, TextField, TimeField } from "./parts";
+import "./ClinicScreen.css";
 import "./ClinicSettingsTab.css";
 
 // ------------------------------------------------------------------ the form's own shape
@@ -202,7 +204,7 @@ function SettingsForm({ stored }: { stored: ClinicSettings }) {
     kept = dirty ? draft : null;
   }, [draft, dirty]);
 
-  // Leaving the tab with unsaved changes: they are kept, and she is told where they wait.
+  // Leaving the part with unsaved changes: they are kept, and she is told where they wait.
   // (The timer lets a remount in development pass without a word.)
   const say = useRef(notify);
   useEffect(() => {
@@ -212,7 +214,7 @@ function SettingsForm({ stored }: { stored: ClinicSettings }) {
     window.clearTimeout(leaving);
     return () => {
       leaving = window.setTimeout(() => {
-        if (kept !== null) say.current("השינויים בהגדרות הקליניקה עוד לא נשמרו. הם מחכים בלשונית \"הגדרות\".");
+        if (kept !== null) say.current("השינויים בהגדרות הקליניקה עוד לא נשמרו. הם מחכים בהגדרות, בחלק \"הקליניקה\".");
       }, 0);
     };
   }, []);
