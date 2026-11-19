@@ -182,7 +182,7 @@ export function NewCaseDialog({ onClose, onCreated, folderId = null }: { onClose
   }
 
   return (
-    <Dialog title="תיק חדש" subtitle={`השמות נשמרים מוצפנים ומוסתרים לפני כל שליחה ל-${ai}.`} onClose={onClose}
+    <Dialog help="new-case" title="תיק חדש" subtitle={`השמות נשמרים מוצפנים ומוסתרים לפני כל שליחה ל-${ai}.`} onClose={onClose}
       dirty={!busy && (years !== "" || months !== "" || rows.some((r) => r.value.trim() !== ""))}
       footer={
         <>

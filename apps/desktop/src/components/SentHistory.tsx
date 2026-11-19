@@ -95,7 +95,7 @@ export function SentHistoryDialog(props: { caseId?: string; place?: string; onCl
   const readTo = pages[pages.length - 1]?.next?.at;
   const where = place ? `"${placeLabel(place)}"` : caseId ? "בתיק הזה" : "בכל התיקים";
   return (
-    <Dialog wide title="מה יצא מהמחשב" onClose={props.onClose}
+    <Dialog help="sent-history" wide title="מה יצא מהמחשב" onClose={props.onClose}
       subtitle={`כל בקשה ${where}, מהחדשה לישנה: מתי, בשביל מה, מה הוסתר בה, והטקסט המדויק שיצא.`}
       footer={<>
         <span className="muted small grow">נשמר מוצפן בכספת, עם התיק.</span>

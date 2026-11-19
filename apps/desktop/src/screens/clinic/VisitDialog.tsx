@@ -245,7 +245,7 @@ export function VisitDialog(props: VisitDialogProps) {
   }
 
   return (
-    <Dialog title={title} dirty={dirty} onClose={onClose}
+    <Dialog help="visit" title={title} dirty={dirty} onClose={onClose}
       footer={(close) => <>
         {existing?.status === "planned" && (
           <button type="button" className="btn btn-danger-quiet" disabled={busy} onClick={() => setConfirmDelete(true)}>מחיקת הפגישה</button>

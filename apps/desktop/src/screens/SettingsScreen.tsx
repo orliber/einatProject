@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
+import { useHelpTopic } from "../help/where";
 import { BugReportSettings } from "../components/BugReport";
 import { SystemCheckSettings } from "../components/SystemCheck";
 import { useApp } from "../App";
@@ -50,6 +51,8 @@ export function SettingsScreen({ pane: initial }: { pane?: SettingsPane | undefi
   const { status, refresh, notify, fail } = useApp();
   const [pane, setPane] = useState<SettingsPane>(initial ?? "general");
   const current = SETTINGS_PANES.find((p) => p.id === pane);
+  // F1 and "?" explain the pane she is in (D-206).
+  useHelpTopic(`settings-${pane}`);
   const [apiKey, setApiKey] = useState("");
   const [ack, setAck] = useState(false);
   const provider = providerOf(status.model);

@@ -62,7 +62,7 @@ export function StyleImportDialog(props: {
   }
 
   return (
-    <Dialog wide title="דוח ישן לפרופיל הסגנון" icon={<ShieldIcon />}
+    <Dialog help="style-import" wide title="דוח ישן לפרופיל הסגנון" icon={<ShieldIcon />}
       subtitle="כך ייראה הטקסט שיישמר. הקובץ עצמו לא נשמר."
       onClose={close}
       footer={<>

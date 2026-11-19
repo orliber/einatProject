@@ -39,7 +39,7 @@ const EyeIcon = ({ shut }: { shut: boolean }) => (
  * pages of the part she is in.
  */
 export function TopBar({ active }: { active: Route["name"] }) {
-  const { go, lockNow, status, showShortcuts, route } = useApp();
+  const { go, lockNow, status, showHelp, route } = useApp();
   const discreet = useDiscreet();
   const area = areaOf(active);
   const part = (a: Area, icon: ReactNode, extra?: ReactNode) => (
@@ -66,8 +66,8 @@ export function TopBar({ active }: { active: Route["name"] }) {
             className={discreet ? "btn icon-btn topbar-discreet-on" : "btn icon-btn"} onClick={() => setDiscreet(!discreet)}>
             <EyeIcon shut={discreet} />
           </button>
-          {showShortcuts && (
-            <button type="button" className="btn icon-btn" aria-label="קיצורי מקלדת (F1)" title="קיצורי מקלדת (F1)" onClick={showShortcuts}>
+          {showHelp && (
+            <button type="button" className="btn icon-btn" aria-label="עזרה למסך הזה (F1)" title="עזרה למסך הזה (F1)" onClick={() => showHelp()}>
               <HelpIcon size={20} />
             </button>
           )}

@@ -112,7 +112,7 @@ export function PatientDialog({ patient, waiting = false, onClose, onSaved }: Pa
   }
 
   return (
-    <Dialog title={patient ? "פרטי המטופל" : "מטופל חדש"} dirty={dirty} onClose={onClose}
+    <Dialog help="patient" title={patient ? "פרטי המטופל" : "מטופל חדש"} dirty={dirty} onClose={onClose}
       subtitle="הפרטים נשמרים מוצפנים בכספת שבמחשב, ולא נשלחים לשום מקום."
       footer={(close) => <>
         <span className="grow" />

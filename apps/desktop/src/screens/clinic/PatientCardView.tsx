@@ -830,7 +830,7 @@ function PaymentDialog({ patientId, today, due, onClose }: { patientId: string; 
     }
   }
   return (
-    <Dialog narrow title="תקבול חדש" dirty={JSON.stringify(form) !== JSON.stringify(first)} onClose={onClose}
+    <Dialog help="payment" narrow title="תקבול חדש" dirty={JSON.stringify(form) !== JSON.stringify(first)} onClose={onClose}
       footer={(close) => <>
         <span className="grow" />
         <button type="button" className="btn" onClick={close}>ביטול</button>
@@ -956,7 +956,7 @@ function TaskDialog({ patientId, task, onClose }: { patientId: string; task?: Cl
     }
   }
   return (
-    <Dialog narrow title={task ? "עריכת מעקב" : "מעקב חדש"} dirty={JSON.stringify(form) !== JSON.stringify(first)} onClose={onClose}
+    <Dialog help="task" narrow title={task ? "עריכת מעקב" : "מעקב חדש"} dirty={JSON.stringify(form) !== JSON.stringify(first)} onClose={onClose}
       footer={(close) => <>
         <span className="grow" />
         <button type="button" className="btn" onClick={close}>ביטול</button>

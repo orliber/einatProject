@@ -417,7 +417,7 @@ function TaskDialog({ task, onClose }: { task: ClinicTask; onClose: () => void }
   }
 
   return (
-    <Dialog title="עריכת מעקב" dirty={dirty} onClose={onClose}
+    <Dialog help="task" title="עריכת מעקב" dirty={dirty} onClose={onClose}
       footer={(close) => <>
         <span className="grow" />
         <button type="button" className="btn" onClick={close}>ביטול</button>

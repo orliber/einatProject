@@ -74,7 +74,7 @@ export function PathwayDialog({ patientId, patientName, onClose }: { patientId: 
   const refused = !noStart && proposal.error && !proposal.isFetching ? proposal.error.message : null;
   const shown = !noStart && !loading && !refused && rows !== null && rows.length > 0;
   return (
-    <Dialog wide title="לקבוע את מסלול האבחון" subtitle={<PatientName name={patientName} />} onClose={onClose} dirty={rows !== null && rows.length > 0}
+    <Dialog help="pathway" wide title="לקבוע את מסלול האבחון" subtitle={<PatientName name={patientName} />} onClose={onClose} dirty={rows !== null && rows.length > 0}
       footer={(close) => <>
         <span className="grow" />
         <button type="button" className="btn" onClick={close}>ביטול</button>

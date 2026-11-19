@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent } from "react";
+import { useHelpTopic } from "../help/where";
 import { useApp } from "../App";
 import { ipc, type CaseInput, type Instrument, type ScoreSheet } from "../ipc/client";
 import type { Age } from "../ipc/generated/Age";
@@ -139,6 +140,8 @@ export function ScoresView(props: {
   onClose: () => void;
   onSaved: (id: string) => Promise<void>;
 }) {
+  // F1 and "?" explain the score table while it is open (D-206).
+  useHelpTopic("case-scores");
   const { fail } = useApp();
   const ai = useAi();
   const inputId = props.input?.id ?? null;

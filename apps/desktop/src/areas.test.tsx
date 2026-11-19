@@ -69,14 +69,14 @@ describe("two parts: writing reports and running the clinic", () => {
 });
 
 describe("the bar's tools (D-204)", () => {
-  it("the bar's tools are one family: an eye switch with no word, “קיצורי מקלדת (F1)”, “הגדרות”, then “נעילה”", async () => {
+  it("the bar's tools are one family: an eye switch with no word, “עזרה למסך הזה (F1)”, “הגדרות”, then “נעילה”", async () => {
     const { user } = await openApp();
     const header = document.querySelector(".topbar") as HTMLElement;
     const tools = header.querySelector(".topbar-tools") as HTMLElement;
     const eye = within(tools).getByRole("switch", { name: "מצב דיסקרטי" });
     expect(Array.from(tools.querySelectorAll("button"))).toEqual([
       eye,
-      within(tools).getByRole("button", { name: "קיצורי מקלדת (F1)" }),
+      within(tools).getByRole("button", { name: "עזרה למסך הזה (F1)" }),
       within(tools).getByRole("button", { name: "הגדרות" }),
       within(tools).getByRole("button", { name: "נעילה" }),
     ]);

@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
-import { Dialog } from "./ui";
 import { isCombo, KEYS, SHEET } from "../shortcuts";
+import { setHelpOpener } from "../help/where";
+import type { HelpId } from "../help/types";
 
-/** The keyboard shortcuts sheet (UX-5): F1 or Ctrl+/ anywhere, or from the menu. */
-export function ShortcutsSheet({ onClose }: { onClose: () => void }) {
+/** The keyboard shortcuts (UX-5), folded at the bottom of the help since D-206. */
+export function ShortcutsList() {
   return (
-    <Dialog title="קיצורי מקלדת" subtitle="אפשר לפתוח את הדף הזה בכל רגע עם F1." onClose={onClose}>
+    <>
       {SHEET.map((g) => (
         <section key={g.group} className="shortcuts-group" aria-label={g.group}>
           <h3>{g.group}</h3>
@@ -23,27 +24,34 @@ export function ShortcutsSheet({ onClose }: { onClose: () => void }) {
         הכתבה בקול: ההכתבה של Windows (Win+H) שולחת את הקול לשרתים של Microsoft, בלי הסתרת השמות של התוכנה, ועוד לא תומכת בעברית.
         לכן לא משתמשים בה לפרטי התיק.
       </p>
-    </Dialog>
+    </>
   );
 }
 
-/** Opens the sheet on F1 or Ctrl+/, and lets a menu item open it too. */
-export function useShortcutsSheet(enabled: boolean) {
-  const [open, setOpen] = useState(false);
+/**
+ * The help (D-206): F1 or Ctrl+/ anywhere, the "?" of the top bar, the case's bar or a window.
+ * `open` is the topic to open on, or null while closed; without a topic the caller picks the
+ * help of what is on the screen when it opens.
+ */
+export function useHelpSheet(enabled: boolean, here: () => HelpId) {
+  const [open, setOpen] = useState<HelpId | null>(null);
+  const show = useCallback((id?: HelpId) => setOpen(id ?? here()), [here]);
   useEffect(() => {
     if (!enabled) return;
     const onKey = (e: KeyboardEvent) => {
       if (isCombo(e, KEYS.help) || isCombo(e, KEYS.helpAlt)) {
         e.preventDefault();
-        setOpen(true);
+        // Already open: F1 again does not change the topic she is reading.
+        setOpen((now) => now ?? here());
       }
     };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [enabled]);
-  // The same functions on every render: the app's context value (and every screen in it) is
-  // not redrawn for them.
-  const show = useCallback(() => setOpen(true), []);
-  const close = useCallback(() => setOpen(false), []);
+    setHelpOpener(show);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      setHelpOpener(null);
+    };
+  }, [enabled, here, show]);
+  const close = useCallback(() => setOpen(null), []);
   return { open, show, close };
 }

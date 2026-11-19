@@ -141,7 +141,7 @@ function NoteForm(props: Omit<NoteDialogProps, "visit"> & {
   }
 
   return (
-    <Dialog title={title} subtitle={subtitle} dirty={dirty} onClose={onClose}
+    <Dialog help="visit-note" title={title} subtitle={subtitle} dirty={dirty} onClose={onClose}
       footer={(close) => <>
         <span className="grow" />
         <button type="button" className="btn" onClick={close}>ביטול</button>

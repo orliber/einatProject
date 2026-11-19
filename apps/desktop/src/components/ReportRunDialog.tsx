@@ -165,7 +165,7 @@ export function ReportRunDialog({ api, onClose }: { api: CaseApi; onClose: () =>
   };
 
   return (
-    <Dialog title={`כתיבת כל הדוח עם ${ai}`} onClose={onClose}
+    <Dialog help="report-run" title={`כתיבת כל הדוח עם ${ai}`} onClose={onClose}
       subtitle="כל סעיף נשלח בנפרד, בלי שמות. נכנס לדוח רק באישורך."
       footer={
         <>
