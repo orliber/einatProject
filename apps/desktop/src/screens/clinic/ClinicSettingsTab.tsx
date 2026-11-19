@@ -16,6 +16,7 @@ import type { ClinicSettings } from "../../ipc/generated/ClinicSettings";
 import type { NoteTemplate } from "../../ipc/generated/NoteTemplate";
 import type { TaskKind } from "../../ipc/generated/TaskKind";
 import type { VisitKind } from "../../ipc/generated/VisitKind";
+import { toTop } from "../settingsPanes";
 import { CalendarSyncSection } from "./CalendarSyncSection";
 import { useClinicSettings, useReloadClinic, useSaveSettings } from "./clinicData";
 import { defaultClinicSettings, fillPreview, PLACEHOLDERS, sampleValues } from "./clinicDefaults";
@@ -211,7 +212,7 @@ function SettingsForm({ stored }: { stored: ClinicSettings }) {
   const [resetting, setResetting] = useState(false);
   const [newPlace, setNewPlace] = useState("");
   const [group, setGroupState] = useState<SettingsGroup>(lastGroup);
-  const setGroup = (g: SettingsGroup) => { lastGroup = g; setGroupState(g); };
+  const setGroup = (g: SettingsGroup) => { lastGroup = g; if (g !== group) toTop(); setGroupState(g); };
   /** Every section stays in the form (one draft, one save); only the chosen tab's are shown. */
   const hide = (g: SettingsGroup) => group !== g;
   const dirty = !same(draft, base);

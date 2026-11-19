@@ -26,7 +26,7 @@ import { PROVIDERS, providerOf } from "../ai";
 import { TEXT_SIZES, applyTextSize, readTextSize } from "../textSize";
 import { THEMES, applyTheme, readTheme } from "../theme";
 import { SectionModesSettings } from "../components/SectionModes";
-import { SETTINGS_PANES, type SettingsPane } from "./settingsPanes";
+import { lastSettingsPane, rememberSettingsPane, SETTINGS_PANES, toTop, type SettingsPane } from "./settingsPanes";
 import "./SettingsScreen.css";
 
 /** The clinic's settings (D-205): a part of these settings, loaded with the clinic's code only when opened. */
@@ -51,7 +51,17 @@ function Row({ label, htmlFor, hint, children }: { label: string; htmlFor?: stri
 /** Settings as in other professional programs: the parts on the side, one part at a time. */
 export function SettingsScreen({ pane: initial }: { pane?: SettingsPane | undefined }) {
   const { status, refresh, notify, fail } = useApp();
-  const [pane, setPane] = useState<SettingsPane>(initial ?? "general");
+  // A link names its part; the gear opens the part she was in last (D-205).
+  const [pane, setPaneState] = useState<SettingsPane>(() => {
+    const first = initial ?? lastSettingsPane();
+    rememberSettingsPane(first);
+    return first;
+  });
+  const setPane = (next: SettingsPane) => {
+    rememberSettingsPane(next);
+    if (next !== pane) toTop();
+    setPaneState(next);
+  };
   const current = SETTINGS_PANES.find((p) => p.id === pane);
   const [apiKey, setApiKey] = useState("");
   const [ack, setAck] = useState(false);

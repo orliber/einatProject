@@ -48,6 +48,17 @@ describe("settings", () => {
     expect(within(nav).getByRole("button", { name: "גיבוי" })).toHaveAttribute("aria-current", "page");
   });
 
+  it("the gear opens the part she was in last, while the program is open (D-205)", async () => {
+    const first = await openSettings();
+    expect(paneTitle()).toBe("כללי");
+    await first.user.click(within(first.nav).getByRole("button", { name: "הקליניקה" }));
+    first.view.unmount();
+    // Opened again with no part named: where she was.
+    const again = await openSettings();
+    expect(paneTitle()).toBe("הקליניקה");
+    expect(within(again.nav).getByRole("button", { name: "הקליניקה" })).toHaveAttribute("aria-current", "page");
+  });
+
   it("the parts are reached from the keyboard", async () => {
     const { user, nav } = await openSettings();
     within(nav).getByRole("button", { name: "כללי" }).focus();
