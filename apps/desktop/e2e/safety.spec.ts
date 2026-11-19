@@ -88,10 +88,13 @@ test("Ctrl+L locks at once, also with the Hebrew layout", async ({ page }) => {
   await expect(page.getByRole("button", { name: "+ תיק חדש" })).toHaveCount(0);
 });
 
-test("F1 opens the shortcuts sheet and Escape closes it", async ({ page }) => {
+test("F1 opens the help of the screen (D-206), with its picture, and Escape closes it", async ({ page }) => {
   await unlock(page);
   await page.keyboard.press("F1");
-  const sheet = page.getByRole("dialog", { name: "קיצורי מקלדת" });
+  const sheet = page.getByRole("dialog", { name: "עזרה: רשימת התיקים" });
+  // The picture is a file inside the program: it loads with no network.
+  await expect(sheet.getByRole("img")).toBeVisible();
+  expect(await sheet.getByRole("img").evaluate((i) => (i as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
   await expect(sheet).toBeVisible();
   await expectAccessible(page, "[role=dialog]");
   await page.keyboard.press("Escape");
