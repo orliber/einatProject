@@ -100,10 +100,10 @@ export function EmptyState({ title, children, actions }: { title: string; childr
 }
 
 /** A titled card of a tab: a heading, something at its end (a count, a button), and the content. */
-export function Section({ title, aside, children, label }: { title: string; aside?: ReactNode; children: ReactNode; label?: string }) {
+export function Section({ title, aside, children, label, hidden }: { title: string; aside?: ReactNode; children: ReactNode; label?: string; hidden?: boolean }) {
   const id = useId();
   return (
-    <section className="card clinic-section" aria-labelledby={label ? undefined : id} aria-label={label}>
+    <section className="card clinic-section" aria-labelledby={label ? undefined : id} aria-label={label} hidden={hidden}>
       <header className="clinic-section-head">
         <h2 id={id}>{title}</h2>
         <span className="grow" />

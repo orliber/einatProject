@@ -129,6 +129,7 @@ describe("free times and holidays", () => {
 describe("the new settings", () => {
   it("keeps a longer pathway, a package and a new starter follow-up", async () => {
     const { user, notes, ...served } = await openOn({ name: "settings", pane: "clinic" });
+    await user.click(await screen.findByRole("radio", { name: "מסלול ומשפחה חדשה" }));
     await user.click(await screen.findByRole("button", { name: "שלב נוסף" }));
     const fee = screen.getByLabelText("מחיר חבילת אבחון (₪)");
     await user.type(fee, "4500");
