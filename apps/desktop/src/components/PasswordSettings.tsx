@@ -79,7 +79,7 @@ function ChangePasswordDialog({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <Dialog narrow title="החלפת סיסמה" onClose={onClose}
+    <Dialog help="password" narrow title="החלפת סיסמה" onClose={onClose}
       footer={<>
         <button type="button" className="btn" onClick={onClose}>ביטול</button>
         <button type="button" className="btn btn-primary" disabled={busy || !current || !pw} onClick={() => void save()}>{busy ? "מחליפה…" : "החלפה"}</button>

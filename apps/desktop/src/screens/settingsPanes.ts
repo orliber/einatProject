@@ -62,6 +62,10 @@ export function groupOf(pane: SettingsPane): GroupEntry | null {
   return SETTINGS_NAV.find((e): e is GroupEntry => isGroup(e) && e.panes.some((p) => p.id === pane)) ?? null;
 }
 
+/** The clinic's four panes. */
+export type ClinicPane = Extract<SettingsPane, `clinic-${string}`>;
+export const isClinicPane = (pane: SettingsPane): pane is ClinicPane => pane.startsWith("clinic-");
+
 /** The clinic's part a pane shows, or null for the program's own parts. */
 export type ClinicGroup = "calendar" | "visits" | "pathway" | "messages";
 export function clinicGroupOf(pane: SettingsPane): ClinicGroup | null {

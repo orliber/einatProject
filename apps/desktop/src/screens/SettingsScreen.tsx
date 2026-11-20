@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from "react";
+import { useHelpTopic } from "../help/where";
 import { BugReportSettings } from "../components/BugReport";
 import { SystemCheckSettings } from "../components/SystemCheck";
 import { useApp } from "../App";
@@ -28,7 +29,7 @@ import { THEMES, applyTheme, readTheme } from "../theme";
 import { SectionModesSettings } from "../components/SectionModes";
 import { SettingsIcon } from "../components/SettingsIcon";
 import {
-  clinicGroupOf, groupOf, isGroup, lastSettingsPane, rememberSettingsPane, searchSettings, SETTINGS_NAV, SETTINGS_PANES, toTop,
+  clinicGroupOf, groupOf, isClinicPane, isGroup, lastSettingsPane, rememberSettingsPane, searchSettings, SETTINGS_NAV, SETTINGS_PANES, toTop,
   type GroupEntry, type PaneEntry, type SettingsPane,
 } from "./settingsPanes";
 import "./SettingsScreen.css";
@@ -116,6 +117,8 @@ export function SettingsScreen({ pane: initial }: { pane?: SettingsPane | undefi
     setPane(p.id);
     setTarget(inside);
   }
+  // F1 and "?" explain the pane she is in (D-206); the clinic's four parts share one topic.
+  useHelpTopic(isClinicPane(pane) ? "settings-clinic" : `settings-${pane}`);
   const [apiKey, setApiKey] = useState("");
   const [ack, setAck] = useState(false);
   const provider = providerOf(status.model);

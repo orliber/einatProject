@@ -1,5 +1,7 @@
 // Small shared pieces: icons, dialog frame, marked text, toast.
 import { useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import { canOpenHelp, openHelp } from "../help/where";
+import type { HelpId } from "../help/types";
 import { useQueryClient } from "@tanstack/react-query";
 import { AppContext } from "../App";
 import { failureFor, rememberFailure, replayFor } from "../errors";
@@ -188,6 +190,10 @@ export function Dialog(props: {
   /** The buttons at the bottom. As a function it gets the dialog's own close, which asks
    *  first like Escape and × do, for a "ביטול" button of its own. */
   footer?: ReactNode | ((close: () => void) => ReactNode);
+  /** The window's own help (D-206): a "?" beside ×, and what F1 opens while it is on top. */
+  help?: HelpId;
+  /** The help window itself: never the window F1 explains. */
+  helpPanel?: boolean;
   children: ReactNode;
 }) {
   const ref = useRef<HTMLElement>(null);
@@ -254,6 +260,7 @@ export function Dialog(props: {
   return (
     <div className="overlay">
       <section ref={ref} tabIndex={-1} role="dialog" aria-modal="true" aria-label={props.title}
+        data-help={props.help} data-help-panel={props.helpPanel ? "" : undefined}
         className={props.narrow ? "dialog dialog-narrow" : props.wide ? "dialog dialog-wide" : "dialog"}>
         <header className="dialog-head">
           {props.icon}
@@ -261,6 +268,10 @@ export function Dialog(props: {
             <h2>{props.title}</h2>
             {props.subtitle && <span className="muted small">{props.subtitle}</span>}
           </div>
+          {props.help && canOpenHelp() && (
+            <button type="button" className="btn icon-btn" aria-label="עזרה לחלון הזה (F1)" title="עזרה לחלון הזה (F1)"
+              onClick={() => openHelp(props.help)}><HelpIcon /></button>
+          )}
           {onClose && (
             <button type="button" className="btn icon-btn" aria-label="סגירה" onClick={close}><CloseIcon /></button>
           )}

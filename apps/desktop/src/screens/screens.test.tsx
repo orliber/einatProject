@@ -215,9 +215,9 @@ describe("main screens", () => {
     const { user } = await openApp();
     await openCase(user);
     const tools = document.querySelector(".case-bar .case-tools") as HTMLElement;
-    // One quiet family: three tools with an icon and a name each, then "⋯".
+    // One quiet family: three tools with an icon and a name each, the help (D-206), then "⋯".
     expect(within(tools).getAllByRole("button").map((b) => b.getAttribute("aria-label") ?? b.textContent))
-      .toEqual(["דף מלא", "חיפוש", "התייעצות", "עוד פעולות: פרטים ושמות, כתיבת כל הדוח, נעילה"]);
+      .toEqual(["דף מלא", "חיפוש", "התייעצות", "עזרה למסך הזה (F1)", "עוד פעולות: פרטים ושמות, כתיבת כל הדוח, נעילה"]);
     for (const name of ["דף מלא", "חיפוש", "התייעצות"]) {
       const tool = within(tools).getByRole("button", { name });
       expect(tool).toHaveClass("btn", "btn-quiet");
@@ -804,15 +804,42 @@ describe("text being typed (F1a)", () => {
 });
 
 describe("keyboard", () => {
-  it("F1 opens the shortcuts sheet, and Escape closes it", async () => {
+  it("F1 opens the help of the screen (D-206), with the shortcuts folded in it; Escape closes it", async () => {
     await openApp();
     await screen.findByRole("button", { name: /בתיק של נועם$/ });
     fireEvent.keyDown(window, { key: "F1", code: "F1" });
-    const sheet = await screen.findByRole("dialog", { name: "קיצורי מקלדת" });
+    const sheet = await screen.findByRole("dialog", { name: "עזרה: רשימת התיקים" });
+    expect(within(sheet).getByRole("heading", { name: "מה אפשר לעשות כאן" })).toBeInTheDocument();
+    expect(within(sheet).getByText("קיצורי מקלדת").closest("details")).not.toHaveAttribute("open");
     expect(within(sheet).getByText("Ctrl+L")).toBeInTheDocument();
     expect(await a11yViolations(sheet)).toEqual([]);
     fireEvent.keyDown(window, { key: "Escape", code: "Escape" });
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: "קיצורי מקלדת" })).toBeNull());
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "עזרה: רשימת התיקים" })).toBeNull());
+  });
+
+  it("the help follows what is open (D-206): a case's stage, and a window's own \"?\"", async () => {
+    const { user } = await openApp();
+    await openCase(user);
+    fireEvent.keyDown(window, { key: "F1", code: "F1" });
+    const report = await screen.findByRole("dialog", { name: "עזרה: כתיבת הדוח (שלב 2)" });
+    // Another topic is one search away, and "חזרה" leads back.
+    await user.type(within(report).getByRole("searchbox", { name: "חיפוש בעזרה" }), "גיבוי");
+    await user.click(within(report).getAllByRole("button", { name: /^גיבוי/ })[0] as HTMLElement);
+    await screen.findByRole("dialog", { name: "עזרה: גיבוי" });
+    await user.click(screen.getByRole("button", { name: "→ חזרה לכתיבת הדוח (שלב 2)" }));
+    await screen.findByRole("dialog", { name: "עזרה: כתיבת הדוח (שלב 2)" });
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await user.click(screen.getByRole("button", { name: "→ תיקים" }));
+    await user.click(await screen.findByRole("button", { name: "+ תיק חדש" }));
+    const form = await screen.findByRole("dialog", { name: "תיק חדש" });
+    await user.click(within(form).getByRole("button", { name: "עזרה לחלון הזה (F1)" }));
+    const help = await screen.findByRole("dialog", { name: "עזרה: תיק חדש" });
+    expect(await a11yViolations(help)).toEqual([]);
+    // Escape closes the help only; the window she was filling stays.
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "עזרה: תיק חדש" })).toBeNull());
+    expect(screen.getByRole("dialog", { name: "תיק חדש" })).toBeInTheDocument();
   });
 
   it("Ctrl+L locks with the Hebrew layout on (the key types ך)", async () => {
@@ -846,7 +873,7 @@ describe("keyboard", () => {
     const headings = screen.getAllByRole("heading", { level: 3 });
     const at = headings.findIndex((h) => h.tabIndex === 0);
     fireEvent.keyDown(window, { key: "F1", code: "F1" });
-    const sheet = await screen.findByRole("dialog", { name: "קיצורי מקלדת" });
+    const sheet = await screen.findByRole("dialog", { name: /^עזרה: / });
     act(() => {
       fireEvent.keyDown(window, { key: "ArrowDown", code: "ArrowDown", altKey: true });
     });

@@ -1,0 +1,155 @@
+/* The help of the screen she is in (HelpPanel.tsx, D-206). Tokens only. */
+.help-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  max-width: 820px;
+  line-height: 1.65;
+}
+.help-find {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  flex-wrap: wrap;
+}
+.help-find .input {
+  flex: 1 1 260px;
+  max-width: var(--field-l, 560px);
+}
+.help-topic {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.help-topic h3 {
+  margin: 0;
+  font-size: var(--text-xl);
+}
+.help-topic h3:focus {
+  outline: none;
+}
+.help-topic h3:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 4px;
+}
+.help-topic h4,
+.help-list h4 {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-md);
+}
+.help-intro {
+  margin: 0;
+  font-size: var(--text-md);
+}
+.help-shot {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.help-shot-btn {
+  display: block;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: zoom-in;
+  max-width: 560px;
+  border-radius: var(--radius-md);
+}
+.help-shot-big .help-shot-btn {
+  max-width: 100%;
+  cursor: zoom-out;
+}
+.help-shot-btn:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 3px;
+}
+.help-shot img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-1, none);
+  background: var(--surface);
+}
+.help-can,
+.help-tips {
+  margin: 0;
+  padding-inline-start: 1.2em;
+  display: grid;
+  gap: var(--space-2);
+}
+.help-faq {
+  display: grid;
+  gap: var(--space-2);
+}
+.help-faq details,
+.help-keys {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  padding: var(--space-2) var(--space-4);
+}
+.help-faq summary,
+.help-keys summary {
+  cursor: pointer;
+  font-weight: 600;
+  min-height: 32px;
+  display: list-item;
+  padding-block: var(--space-1);
+}
+.help-faq details p {
+  margin: var(--space-2) 0 var(--space-1);
+}
+.help-keys[open] summary {
+  margin-bottom: var(--space-3);
+}
+.help-links,
+.help-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.help-chips {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.help-chips .btn[aria-current="true"] {
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+.help-all {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.help-list ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-2);
+}
+.help-list-item {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: start;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+}
+.help-list-item:hover {
+  border-color: var(--primary);
+}
+.help-list-item:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}

@@ -587,7 +587,7 @@ function WriteDialog(props: { caseId: string; kind: InputKind; input?: CaseInput
   }
 
   return (
-    <Dialog title={props.input ? "עריכת חומר" : kind === "session_note" ? "רישום מפגש" : "הוספת טקסט"}
+    <Dialog help="material" title={props.input ? "עריכת חומר" : kind === "session_note" ? "רישום מפגש" : "הוספת טקסט"}
       subtitle="אפשר לכתוב עם שמות. הם מוסתרים לפני כל שליחה."
       onClose={() => { letGo(); props.onClose(); }} dirty={!saving && changed && !empty}
       footer={<><span className="grow" /><button type="button" className="btn" onClick={props.onClose}>ביטול</button><button type="button" className="btn btn-primary" disabled={saving} onClick={() => void save()}>שמירה בתיק</button></>}>

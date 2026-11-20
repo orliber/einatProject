@@ -103,7 +103,7 @@ export function ReviewDialog(props: {
   }
 
   return (
-    <Dialog title={`לפני שליחה ל-${ai}`}
+    <Dialog help="review" title={`לפני שליחה ל-${ai}`}
       subtitle={<>{props.title} · שום דבר לא נשלח עד שתלחצי "שליחה"</>}
       icon={<span className="review-shield"><ShieldIcon /></span>}
       onClose={props.onClose}
