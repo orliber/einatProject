@@ -89,7 +89,7 @@ export function ExportDialog({ api, onClose, letter }: { api: CaseApi; onClose: 
   }
 
   return (
-    <Dialog title={letter ? "הפקת מכתב Word" : pdf ? "הפקת דוח PDF" : "הפקת דוח Word"} subtitle={`${api.detail.meta.code}${child ? ` · ${shown(child)}` : ""} · רק פסקאות שאישרת נכנסות ל${letter ? "מכתב" : "דוח"}`} onClose={onClose}
+    <Dialog help="export" title={letter ? "הפקת מכתב Word" : pdf ? "הפקת דוח PDF" : "הפקת דוח Word"} subtitle={`${api.detail.meta.code}${child ? ` · ${shown(child)}` : ""} · רק פסקאות שאישרת נכנסות ל${letter ? "מכתב" : "דוח"}`} onClose={onClose}
       footer={
         <>
           <span className="grow" />

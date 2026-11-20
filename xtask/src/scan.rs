@@ -72,6 +72,7 @@ const FORBIDDEN_EXTENSIONS: &[&str] = &[
     "heic",
     // Photos and scans of a page are importable (OCR), so they may carry patient data too.
     "png",
+    "webp",
     "tif",
     "tiff",
     "mp3",
@@ -87,6 +88,9 @@ fn extension_allowed(path: &str, ext: &str) -> bool {
         || (ext == "png"
             && (path.starts_with("apps/desktop/src-tauri/icons/")
                 || path.starts_with("docs/design/")))
+        // The help's pictures, taken from the preview's invented cases by
+        // apps/desktop/e2e/help-shots.spec.ts (D-206). WebP only, and only there.
+        || (ext == "webp" && path.starts_with("apps/desktop/src/help/shots/"))
         // Scans of an invented letter for the OCR tests (D-048).
         || (matches!(ext, "png" | "tif") && path.starts_with("crates/dv-ingest/tests/fixtures/"))
 }
@@ -97,6 +101,7 @@ fn content_exempt(path: &str) -> bool {
         || path.ends_with("pnpm-lock.yaml")
         || path.starts_with("apps/desktop/src-tauri/icons/")
         || path.starts_with("docs/design/")
+        || path.starts_with("apps/desktop/src/help/shots/")
 }
 
 static ID_RE: LazyLock<Option<Regex>> =
@@ -265,6 +270,13 @@ mod tests {
         assert!(scan_file("templates/report.docx", b"x").is_empty());
         assert_eq!(scan_file("kit.zip", b"x").len(), 1);
         assert_eq!(scan_file("vault/main.db", b"x").len(), 2);
+        // D-206: a picture is allowed only as the help's own WebP.
+        assert_eq!(scan_file("scan.webp", b"x").len(), 1);
+        assert!(scan_file("apps/desktop/src/help/shots/cases.webp", b"x").is_empty());
+        assert_eq!(
+            scan_file("apps/desktop/src/help/shots/cases.png", b"x").len(),
+            1
+        );
         assert_eq!(
             scan_file("big.txt", &vec![b'a'; MAX_FILE_BYTES + 1]).len(),
             1

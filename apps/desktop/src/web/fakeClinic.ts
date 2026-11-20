@@ -500,7 +500,7 @@ export class FakeClinic {
     if (!p) refuse(NO_PATIENT, "not_found");
     need(clinicDate(from), "צריך לבחור תאריך תקין להתחלה.");
     const s = this.settings;
-    need(s.pathway.length > 0, "עוד אין מסלול אבחון. אפשר להגדיר אותו בהגדרות, בחלק \"הקליניקה\".");
+    need(s.pathway.length > 0, "עוד אין מסלול אבחון. אפשר להגדיר אותו בהגדרות, בחלק \"מסלול ומשפחה חדשה\".");
     const out: Visit[] = [];
     let earliest = from;
     s.pathway.forEach((step, i) => {
@@ -541,7 +541,7 @@ export class FakeClinic {
     }
     let charge: Charge | null = null;
     if (packaged) {
-      need(this.settings.package_fee > 0, "עוד אין מחיר לחבילת האבחון. אפשר לקבוע אותו בהגדרות, בחלק \"הקליניקה\".");
+      need(this.settings.package_fee > 0, "עוד אין מחיר לחבילת האבחון. אפשר לקבוע אותו בהגדרות, בחלק \"מסלול ומשפחה חדשה\".");
       const first = rows.map((v) => v.date).sort()[0] ?? today.date;
       charge = { id: "", patient_id: patientId, date: first, amount: this.settings.package_fee, what: cleanLine(this.settings.package_name), voided: false, void_reason: "" };
       // The charge's checks (`validate_charge`), before anything is written.
@@ -566,7 +566,7 @@ export class FakeClinic {
   private starterTasks(patientId: string, today: Today): TaskView[] {
     const p = this.patients.find((x) => x.id === patientId);
     if (!p) refuse(NO_PATIENT, "not_found");
-    need(this.settings.starter_tasks.length > 0, "עוד אין ערכת פתיחה. אפשר להגדיר אותה בהגדרות, בחלק \"הקליניקה\".");
+    need(this.settings.starter_tasks.length > 0, "עוד אין ערכת פתיחה. אפשר להגדיר אותה בהגדרות, בחלק \"מסלול ומשפחה חדשה\".");
     const key = (t: string) => cleanLine(t).toLowerCase();
     const have = new Set(this.tasks.filter((t) => t.patient_id === patientId && t.done_on === null).map((t) => key(t.title)));
     const made: ClinicTask[] = [];

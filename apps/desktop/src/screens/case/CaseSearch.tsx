@@ -134,7 +134,7 @@ export function CaseSearch({ detail, onClose, onOpen }: {
       </section>
     );
   return (
-    <Dialog title="חיפוש בתיק" subtitle="בחומרים ובפסקאות של התיק הזה. החיפוש נעשה במחשב בלבד." onClose={onClose}>
+    <Dialog help="case-search" title="חיפוש בתיק" subtitle="בחומרים ובפסקאות של התיק הזה. החיפוש נעשה במחשב בלבד." onClose={onClose}>
       <input className="input" type="search" autoFocus placeholder="מילה או ביטוי" aria-label="חיפוש בתיק"
         value={query} onChange={(e) => setQuery(e.target.value)} />
       {fold(query.trim()).length >= 2 && hits.length === 0 && <p className="muted">לא נמצא בתיק.</p>}

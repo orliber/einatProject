@@ -471,6 +471,8 @@ test("settings: a backup is written and checked, the password is changed, a new 
   const before = Number(/(\d+) מתוך/.exec(await ready.locator(".ready-count").innerText())?.[1]);
   await ready.getByRole("button", { name: /^אישרתי:/ }).first().click();
   await expect(ready.locator(".ready-count")).toContainText(`${before + 1} מתוך`);
+  // What is ready is folded under "מה כבר מוכן"; opened, the confirmed item can be undone.
+  await ready.getByText(/^מה כבר מוכן/).click();
   await expect(ready.getByRole("button", { name: /^ביטול האישור:/ }).first()).toBeVisible();
 });
 

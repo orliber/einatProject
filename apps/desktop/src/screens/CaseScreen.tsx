@@ -6,7 +6,7 @@ import { ReviewDialog } from "../components/ReviewDialog";
 import { ExportDialog } from "../components/ExportDialog";
 import { ReportRunDialog } from "../components/ReportRunDialog";
 import { ProgressLine, estimateMs, recordDuration, timed, WaitLine, type Task } from "../components/Progress";
-import { ErrorLine, CloseIcon, Skeleton, dialogOpen, SearchIcon, FullPageIcon, ChatIcon } from "../components/ui";
+import { ErrorLine, CloseIcon, Skeleton, dialogOpen, SearchIcon, FullPageIcon, ChatIcon, HelpIcon } from "../components/ui";
 import { useDailyUpdateCheck } from "../components/Update";
 import { ActionsMenu, type MenuItem } from "../components/Menu";
 import { SampleGuide } from "./case/SampleGuide";
@@ -145,7 +145,7 @@ async function cardOfCase(caseId: string): Promise<string | null> {
 }
 
 export function CaseScreen({ caseId, view, section }: { caseId: string; view: string; section?: string }) {
-  const { go, fail, lockNow, status, notify, showShortcuts } = useApp();
+  const { go, fail, lockNow, status, notify, showHelp } = useApp();
   const shown = useShownName();
   // The case bar shows no app status (D-204 §3): demo mode and a new version are in the top bar
   // and on the lock screen. The hourly look for a version still runs while a case is open.
@@ -533,7 +533,7 @@ export function CaseScreen({ caseId, view, section }: { caseId: string; view: st
     ...(cardId ? [{ label: "כרטיס המטופל בקליניקה", run: () => go({ name: "clinic", tab: "patients", patientId: cardId }) }] : []),
     { label: current ? `מה יצא מהמחשב בסעיף "${current.title}"` : "מה יצא מהמחשב בתיק הזה", run: () => setSentFor(current?.key ?? "") },
     { label: `כתיבת כל הדוח עם ${ai}`, run: writeAll },
-    ...(showShortcuts ? [{ label: "קיצורי מקלדת (F1)", run: showShortcuts }] : []),
+    ...(showHelp && narrowBar ? [{ label: "עזרה למסך הזה (F1)", run: () => showHelp() }] : []),
     { label: "נעילה (Ctrl+L)", run: () => void lockNow() },
   ];
 
@@ -577,6 +577,12 @@ export function CaseScreen({ caseId, view, section }: { caseId: string; view: st
           )}
           {!narrowBar && <button type="button" className="btn btn-quiet" onClick={() => setSearching(true)}><SearchIcon />חיפוש</button>}
           {!narrowBar && <button type="button" className="btn btn-quiet" onClick={() => go({ name: "consult", caseId })}><ChatIcon />התייעצות</button>}
+          {/* D-206: the help of the stage she is in, a quiet icon like the top bar's. */}
+          {showHelp && !narrowBar && (
+            <button type="button" className="btn icon-btn" aria-label="עזרה למסך הזה (F1)" title="עזרה למסך הזה (F1)" onClick={() => showHelp()}>
+              <HelpIcon size={20} />
+            </button>
+          )}
           <ActionsMenu items={more} label="עוד פעולות: פרטים ושמות, כתיבת כל הדוח, נעילה" />
         </div>
       </header>

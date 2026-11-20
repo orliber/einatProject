@@ -27,11 +27,13 @@ afterEach(() => {
 });
 
 /** The clinic's settings are the part "הקליניקה" of the program's settings (D-205). */
-const SETTINGS = { name: "settings", pane: "clinic" } as const;
+const SETTINGS = { name: "settings", pane: "clinic-calendar" } as const;
 const paneButton = (name: string) => within(screen.getByRole("navigation", { name: "חלקי ההגדרות" })).getByRole("button", { name });
 const form = () => screen.findByRole("form", { name: "הגדרות הקליניקה" });
-/** One of the four small tabs of the settings (D-205). */
-const topic = (name: string) => screen.getByRole("radio", { name });
+/** One of the clinic's four parts of the settings, in the side (D-205). */
+const topic = (name: string) => paneButton(name);
+/** The way back from the clinic's parts to all the settings. */
+const back = () => within(screen.getByRole("navigation", { name: "חלקי ההגדרות" })).getByRole("button", { name: /כל ההגדרות/ });
 const part = (name: string) => screen.getByRole("region", { name });
 const saveButton = () => screen.getByRole("button", { name: "שמירה" });
 const bar = () => screen.getByRole("group", { name: "שמירת ההגדרות" });
@@ -95,9 +97,12 @@ describe("the clinic's settings", () => {
     expect(within(hours).getByLabelText("ומסתיים ב-")).toHaveValue("20:00");
     const days = within(hours).getByRole("group", { name: "ימי עבודה" });
     expect(within(days).getAllByRole("checkbox").map((c) => (c as HTMLInputElement).checked)).toEqual([true, true, true, true, true, false, false]);
-    // Four small tabs, the first open; the other tabs' parts are not shown.
-    expect(screen.getAllByRole("radio").map((r) => r.textContent)).toEqual(["יומן ושעות", "פגישות ומחירים", "מסלול ומשפחה חדשה", "הודעות ותזכורות"]);
-    expect(topic("יומן ושעות")).toHaveAttribute("aria-checked", "true");
+    // The clinic's four parts in the side, the first open, with where she is above the page;
+    // the other parts' sections are not shown.
+    const nav = screen.getByRole("navigation", { name: "חלקי ההגדרות" });
+    expect(within(nav).getAllByRole("button").map((b) => b.textContent)).toEqual(["→ כל ההגדרות", "יומן ושעות", "פגישות ומחירים", "מסלול ומשפחה חדשה", "הודעות ותזכורות"]);
+    expect(topic("יומן ושעות")).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("navigation", { name: "איפה את בהגדרות" })).toHaveTextContent("הגדרות › הקליניקה › יומן ושעות");
     expect(screen.queryByRole("region", { name: "סוגי הפגישות" })).toBeNull();
     expect(await a11yViolations(view.container)).toEqual([]);
 
@@ -342,14 +347,14 @@ describe("the clinic's settings", () => {
     await user.click(topic("הודעות ותזכורות"));
     await user.clear(screen.getByLabelText("ימים עד שמצביעים על חוב"));
     await user.type(screen.getByLabelText("ימים עד שמצביעים על חוב"), "45");
-    await user.click(paneButton("כללי"));
-    await waitFor(() => expect(notes).toEqual(["השינויים בהגדרות הקליניקה עוד לא נשמרו. הם מחכים בהגדרות, בחלק \"הקליניקה\"."]));
+    await user.click(back());
+    await waitFor(() => expect(notes).toEqual(["השינויים בהגדרות הקליניקה עוד לא נשמרו. הם מחכים בהגדרות, בחלקים של הקליניקה."]));
     expect(sentSettings(requests)).toHaveLength(0);
 
     await user.click(paneButton("הקליניקה"));
     await form();
-    // She comes back to the small tab she was on, with every change on every tab.
-    expect(topic("הודעות ותזכורות")).toHaveAttribute("aria-checked", "true");
+    // She comes back to the part of the clinic she was on, with every change on every tab.
+    expect(topic("הודעות ותזכורות")).toHaveAttribute("aria-current", "page");
     expect(screen.getByLabelText("ימים עד שמצביעים על חוב")).toHaveValue("45");
     await user.click(topic("יומן ושעות"));
     expect(screen.getByLabelText("שישי")).toBeChecked();
@@ -361,7 +366,7 @@ describe("the clinic's settings", () => {
     expect(screen.getByLabelText("שישי")).not.toBeChecked();
     expect(screen.getByLabelText("ימים עד שמצביעים על חוב")).toHaveValue("30");
     expect(saveButton()).toBeDisabled();
-    await user.click(paneButton("כללי"));
+    await user.click(back());
     await user.click(paneButton("הקליניקה"));
     await form();
     expect(screen.queryByText(/עוד לא נשמרו, והם כאן/)).toBeNull();
@@ -371,7 +376,7 @@ describe("the clinic's settings", () => {
   it("leaving with everything saved says nothing", async () => {
     const { user, notes } = await openOn(SETTINGS);
     await form();
-    await user.click(paneButton("כללי"));
+    await user.click(back());
     await new Promise((r) => setTimeout(r, 30));
     expect(notes).toEqual([]);
   });

@@ -198,12 +198,29 @@
   margin-top: 6px;
 }
 
-/* ---------- the four small tabs (D-205): one subject at a time ---------- */
-.clinic-settings-groups {
-  display: flex;
-  flex-wrap: wrap;
-}
-/* A section of another tab stays in the form (one draft, one save) but is not shown. */
+/* ---------- inside the program's settings (D-205) ---------- */
+/* A section of another part stays in the form (one draft, one save) but is not shown. */
 .clinic-settings > [hidden] {
   display: none;
+}
+/* The same look as every other part of the settings: plain groups divided by thin lines,
+   not cards; the bar that saves stays a card, since it floats over the page. */
+.settings-pane .clinic-settings {
+  gap: 0;
+}
+.settings-pane .clinic-section {
+  padding: 24px 0;
+  gap: 16px;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  box-shadow: none;
+}
+.settings-pane .clinic-section-head h2 {
+  font-size: var(--text-lg);
+  font-weight: 600;
+}
+.settings-pane .clinic-save-bar {
+  margin-top: 16px;
 }

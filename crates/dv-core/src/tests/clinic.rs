@@ -4272,7 +4272,7 @@ fn the_pathway_is_proposed_and_saved_with_its_package_in_one_go() {
             today: now(),
         },
     );
-    assert!(text.contains("בחלק \"הקליניקה\""), "{text}");
+    assert!(text.contains("בחלק \"מסלול ומשפחה חדשה\""), "{text}");
     assert!(card(&mut core, &yoav.id).visits.is_empty());
     let settings = ClinicSettings {
         package_fee: 600_000,

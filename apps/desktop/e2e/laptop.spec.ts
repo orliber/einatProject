@@ -114,9 +114,11 @@ test("with larger text, a dialog keeps its close button and its foot on screen",
   await page.keyboard.press("Control+Equal");
   await expect(page.locator("html")).toHaveCSS("zoom", "1.25");
   await page.keyboard.press("F1");
-  const dialog = page.getByRole("dialog", { name: "קיצורי מקלדת" });
+  const dialog = page.getByRole("dialog", { name: /^עזרה: / });
   await expectOnScreen(page, dialog);
-  await expectOnScreen(page, dialog.getByRole("button", { name: /סגירה/ }));
+  // The × in the head and "סגירה" in the foot.
+  await expectOnScreen(page, dialog.getByRole("button", { name: "סגירה" }).first());
+  await expectOnScreen(page, dialog.getByRole("button", { name: "סגירה" }).last());
   await expectNoSidewaysScroll(page, page.locator(".topbar"));
   await expectNoSidewaysScroll(page, page.locator(".case-bar").or(page.locator(".topbar")).first());
   await page.keyboard.press("Escape");

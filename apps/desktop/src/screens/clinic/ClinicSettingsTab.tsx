@@ -10,13 +10,12 @@
 // program's settings (D-205), no longer a tab of the clinic: the page's own look comes along.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useApp } from "../../App";
-import { Segmented } from "../../components/Switch";
 import { CloseIcon, ErrorLine, PlusIcon, Skeleton } from "../../components/ui";
 import type { ClinicSettings } from "../../ipc/generated/ClinicSettings";
 import type { NoteTemplate } from "../../ipc/generated/NoteTemplate";
 import type { TaskKind } from "../../ipc/generated/TaskKind";
 import type { VisitKind } from "../../ipc/generated/VisitKind";
-import { toTop } from "../settingsPanes";
+import type { ClinicGroup } from "../settingsPanes";
 import { CalendarSyncSection } from "./CalendarSyncSection";
 import { useClinicSettings, useReloadClinic, useSaveSettings } from "./clinicData";
 import { defaultClinicSettings, fillPreview, PLACEHOLDERS, sampleValues } from "./clinicDefaults";
@@ -163,21 +162,9 @@ export function moved<T>(list: T[], from: number, by: -1 | 1): T[] {
 let kept: SettingsDraft | null = null;
 let leaving: number | undefined;
 
-/** The four small tabs of the settings (D-205): one subject at a time, one "שמירה" for all. */
-export type SettingsGroup = "calendar" | "visits" | "pathway" | "messages";
-export const SETTINGS_GROUPS: { value: SettingsGroup; label: string }[] = [
-  { value: "calendar", label: "יומן ושעות" },
-  { value: "visits", label: "פגישות ומחירים" },
-  { value: "pathway", label: "מסלול ומשפחה חדשה" },
-  { value: "messages", label: "הודעות ותזכורות" },
-];
-/** The tab she was on, while the program is open (in memory only, like the unsaved changes). */
-let lastGroup: SettingsGroup = "calendar";
-
-/** For the tests: each starts with nothing kept, on the first tab. */
+/** For the tests: each starts with nothing kept. */
 export function forgetSettingsDraft() {
   kept = null;
-  lastGroup = "calendar";
   window.clearTimeout(leaving);
 }
 
@@ -185,7 +172,10 @@ const same = (a: SettingsDraft, b: SettingsDraft) => JSON.stringify(a) === JSON.
 
 // ------------------------------------------------------------------ the tab
 
-export function ClinicSettingsTab() {
+/** The clinic's settings, as four parts of the program's settings (D-205): `group` is the part
+ *  on screen. The form is one (one draft, one "שמירה"), and stays open while she moves between
+ *  the four parts; only the part's own sections are shown. */
+export function ClinicSettingsTab({ group }: { group: ClinicGroup }) {
   const settings = useClinicSettings();
   const reload = useReloadClinic();
   if (settings.error && !settings.data) return <ReadError error={settings.error.message} retry={reload} />;
@@ -197,10 +187,10 @@ export function ClinicSettingsTab() {
       </div>
     );
   }
-  return <SettingsForm stored={settings.data} />;
+  return <SettingsForm stored={settings.data} group={group} />;
 }
 
-function SettingsForm({ stored }: { stored: ClinicSettings }) {
+function SettingsForm({ stored, group }: { stored: ClinicSettings; group: ClinicGroup }) {
   const { notify } = useApp();
   const save = useSaveSettings();
   const base = useMemo(() => toDraft(stored), [stored]);
@@ -211,10 +201,8 @@ function SettingsForm({ stored }: { stored: ClinicSettings }) {
   const [busy, setBusy] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [newPlace, setNewPlace] = useState("");
-  const [group, setGroupState] = useState<SettingsGroup>(lastGroup);
-  const setGroup = (g: SettingsGroup) => { lastGroup = g; if (g !== group) toTop(); setGroupState(g); };
-  /** Every section stays in the form (one draft, one save); only the chosen tab's are shown. */
-  const hide = (g: SettingsGroup) => group !== g;
+  /** Every section stays in the form (one draft, one save); only this part's are shown. */
+  const hide = (g: ClinicGroup) => group !== g;
   const dirty = !same(draft, base);
   const set = (patch: Partial<SettingsDraft>) => setDraft((d) => ({ ...d, ...patch }));
 
@@ -232,7 +220,7 @@ function SettingsForm({ stored }: { stored: ClinicSettings }) {
     window.clearTimeout(leaving);
     return () => {
       leaving = window.setTimeout(() => {
-        if (kept !== null) say.current("השינויים בהגדרות הקליניקה עוד לא נשמרו. הם מחכים בהגדרות, בחלק \"הקליניקה\".");
+        if (kept !== null) say.current("השינויים בהגדרות הקליניקה עוד לא נשמרו. הם מחכים בהגדרות, בחלקים של הקליניקה.");
       }, 0);
     };
   }, []);
@@ -286,10 +274,6 @@ function SettingsForm({ stored }: { stored: ClinicSettings }) {
       {cameBack && dirty && (
         <p className="note-sand clinic-kept" role="status">השינויים שעשית כאן קודם עוד לא נשמרו, והם כאן כמו שהשארת אותם. אפשר לשמור אותם או לבטל.</p>
       )}
-
-      <div className="clinic-settings-groups">
-        <Segmented label="נושא בהגדרות הקליניקה" value={group} options={SETTINGS_GROUPS} onChange={setGroup} />
-      </div>
 
       <Section title="שעות וימי עבודה" hidden={hide("calendar")}>
         <p className="hint clinic-quiet">היומן מציג את השעות האלה, ומדגיש את ימי העבודה.</p>

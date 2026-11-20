@@ -13,7 +13,9 @@ import { Dialog, dialogOpen, ErrorLine, Toast, type ToastAction } from "./compon
 import { IdleWarning } from "./components/IdleWarning";
 import { forgetHold, holdNow, UnsavedNotice } from "./components/Unsaved";
 import { applyTextSize, readTextSize, stepTextSize } from "./textSize";
-import { ShortcutsSheet, useShortcutsSheet } from "./components/ShortcutsSheet";
+import { useHelpSheet } from "./components/ShortcutsSheet";
+import { currentHelp } from "./help/where";
+import type { HelpId } from "./help/types";
 import { isCombo, KEYS } from "./shortcuts";
 import { forgetFailures, rememberFailure } from "./errors";
 import { resetRuns } from "./screens/case/reportRun";
@@ -31,6 +33,7 @@ const SetupScreen = lazy(() => import("./screens/SetupScreen").then((m) => ({ de
 const ConsultScreen = lazy(() => import("./screens/ConsultScreen").then((m) => ({ default: m.ConsultScreen })));
 const SettingsScreen = lazy(() => import("./screens/SettingsScreen").then((m) => ({ default: m.SettingsScreen })));
 const StyleScreen = lazy(() => import("./screens/StyleScreen").then((m) => ({ default: m.StyleScreen })));
+const HelpPanel = lazy(() => import("./help/HelpPanel").then((m) => ({ default: m.HelpPanel })));
 const ClinicScreen = lazy(() => import("./screens/clinic/ClinicScreen").then((m) => ({ default: m.ClinicScreen })));
 function warmRarePages() {
   // Not under the unit tests: an import still loading when a test file ends is torn down
@@ -64,8 +67,8 @@ export interface AppApi {
   /** Shows the error; a "locked" error returns to the lock screen. */
   fail: (e: UiError) => string;
   lockNow: () => Promise<void>;
-  /** The keyboard shortcuts sheet (also F1). */
-  showShortcuts?: () => void;
+  /** The help of what is on the screen (also F1), or of a given topic (D-206). */
+  showHelp?: (id?: HelpId) => void;
 }
 
 export const AppContext = createContext<AppApi | null>(null);
@@ -272,7 +275,13 @@ export function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const sheet = useShortcutsSheet(unlocked);
+  // The help opens on what is on the screen at that moment (D-206).
+  const routeNow = useRef(route);
+  useEffect(() => {
+    routeNow.current = route;
+  }, [route]);
+  const here = useCallback(() => currentHelp(routeNow.current), []);
+  const sheet = useHelpSheet(unlocked, here);
 
   const keepWorking = useCallback(async () => {
     await ipc.touch().catch(() => undefined);
@@ -299,7 +308,7 @@ export function App() {
 
   return (
     <Shell status={status} route={route} setRoute={setRoute} refresh={refresh} setToast={setToast} fail={fail} lockNow={lockNow}
-      showShortcuts={sheet.show} toast={toast} sheet={sheet} idleIn={idleIn} keepWorking={keepWorking} />
+      showHelp={sheet.show} toast={toast} sheet={sheet} idleIn={idleIn} keepWorking={keepWorking} />
   );
 }
 
@@ -313,13 +322,13 @@ function Shell(props: {
   setToast: (t: ToastNotice | null) => void;
   fail: (e: UiError) => string;
   lockNow: () => Promise<void>;
-  showShortcuts: () => void;
+  showHelp: (id?: HelpId) => void;
   toast: ToastNotice | null;
-  sheet: { open: boolean; close: () => void };
+  sheet: { open: HelpId | null; close: () => void };
   idleIn: number | null;
   keepWorking: () => Promise<void>;
 }) {
-  const { status, route, setRoute, refresh, setToast, fail, lockNow, showShortcuts, toast, sheet, idleIn, keepWorking } = props;
+  const { status, route, setRoute, refresh, setToast, fail, lockNow, showHelp, toast, sheet, idleIn, keepWorking } = props;
   const notify = useCallback((text: string, action?: ToastAction) => setToast(toastOf(text, action)), [setToast]);
   // Where she asked to go while a screen held changes that only its button saves.
   const [leaving, setLeaving] = useState<Route | null>(null);
@@ -351,8 +360,8 @@ function Shell(props: {
     if (area) rememberArea(area);
   }, [route.name]);
   const api = useMemo<AppApi>(
-    () => ({ status, route, go, refresh, notify, fail, lockNow, showShortcuts }),
-    [status, route, go, refresh, notify, fail, lockNow, showShortcuts],
+    () => ({ status, route, go, refresh, notify, fail, lockNow, showHelp }),
+    [status, route, go, refresh, notify, fail, lockNow, showHelp],
   );
   const saveAndLeave = async () => {
     const to = leaving;
@@ -388,7 +397,7 @@ function Shell(props: {
           <p>מה ששינית בפרטי התיק עדיין לא נשמר.</p>
         </Dialog>
       )}
-      {sheet.open && <ShortcutsSheet onClose={sheet.close} />}
+      {sheet.open && <Suspense fallback={null}><HelpPanel key={sheet.open} start={sheet.open} onClose={sheet.close} /></Suspense>}
       {idleIn != null && idleIn <= IDLE_WARNING_SECONDS && <IdleWarning seconds={idleIn} onKeep={() => void keepWorking()} />}
     </AppContext.Provider>
     </QueryClientProvider>
