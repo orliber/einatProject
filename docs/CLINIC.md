@@ -325,8 +325,10 @@ reason, the card's id and every name are never read into a cell: the function is
 Since D-191 the clinic is one of the program's two parts: the top bar's switch has "ניהול הקליניקה"
 with a "בטא" badge, and the clinic's tabs are the row under the bar (`components/TopBar.tsx`,
 still a tab list with arrow keys): היום · יומן · מטופלים · המתנה · מעקבים · כספים · תמונת מצב.
-Since D-205 the clinic's settings are not a tab: they are the part "הקליניקה" of the program's
-settings (`{ name: "settings", pane: "clinic" }`, `ClinicSettingsTab` loaded lazily there).
+Since D-205 the clinic's settings are not a tab: they are the group "הקליניקה" of the program's
+settings, entered from the side, with four panes (`{ name: "settings", pane: "clinic-calendar" }`,
+`clinic-visits`, `clinic-pathway`, `clinic-messages`; one `ClinicSettingsTab` form, loaded lazily,
+stays mounted across the four so there is one draft and one save).
 Discreet mode is the program's one switch in the top bar (`src/discreet.ts`, D-192); the clinic
 reads it through `useDiscreet`/`useShownName` in `parts.tsx` as before. From a linked case, the
 case's "עוד פעולות" menu opens the card (D-195).

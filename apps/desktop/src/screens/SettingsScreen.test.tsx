@@ -7,7 +7,7 @@ import { a11yViolations } from "../test/a11y";
 import { status } from "../test/fixtures";
 import { appApi, Host, serve, type Override } from "../test/host";
 import { SettingsScreen } from "./SettingsScreen";
-import { SETTINGS_PANES, type SettingsPane } from "./settingsPanes";
+import { groupOf, SETTINGS_PANES, type SettingsPane } from "./settingsPanes";
 
 configure({ asyncUtilTimeout: 5000 });
 vi.setConfig({ testTimeout: 30_000 });
@@ -33,6 +33,10 @@ describe("settings", () => {
   it("every part opens from the side, is marked as the current one, and passes the accessibility check", async () => {
     const { user, nav, view } = await openSettings();
     for (const p of SETTINGS_PANES) {
+      // A part inside a group (the clinic's) is reached by entering the group first, as on a Mac.
+      const g = groupOf(p.id);
+      if (g && !within(nav).queryByRole("button", { name: p.label })) await user.click(within(nav).getByRole("button", { name: g.label }));
+      if (!g && within(nav).queryByRole("button", { name: /כל ההגדרות/ })) await user.click(within(nav).getByRole("button", { name: /כל ההגדרות/ }));
       await user.click(within(nav).getByRole("button", { name: p.label }));
       expect(paneTitle()).toBe(p.label);
       expect(within(nav).getByRole("button", { name: p.label })).toHaveAttribute("aria-current", "page");
@@ -52,11 +56,52 @@ describe("settings", () => {
     const first = await openSettings();
     expect(paneTitle()).toBe("כללי");
     await first.user.click(within(first.nav).getByRole("button", { name: "הקליניקה" }));
+    await first.user.click(within(first.nav).getByRole("button", { name: "פגישות ומחירים" }));
     first.view.unmount();
     // Opened again with no part named: where she was.
     const again = await openSettings();
-    expect(paneTitle()).toBe("הקליניקה");
-    expect(within(again.nav).getByRole("button", { name: "הקליניקה" })).toHaveAttribute("aria-current", "page");
+    expect(paneTitle()).toBe("פגישות ומחירים");
+    expect(within(again.nav).getByRole("button", { name: "פגישות ומחירים" })).toHaveAttribute("aria-current", "page");
+  });
+
+  it("a group is entered as on a Mac: its parts in the side, the way back, and where she is above the page", async () => {
+    const { user, nav } = await openSettings(undefined, "report");
+    await user.click(within(nav).getByRole("button", { name: "הקליניקה" }));
+    expect(paneTitle()).toBe("יומן ושעות");
+    expect(within(nav).queryByRole("button", { name: "גיבוי" })).toBeNull();
+    expect(screen.getByRole("navigation", { name: "איפה את בהגדרות" })).toHaveTextContent("הגדרות › הקליניקה › יומן ושעות");
+    await user.click(within(nav).getByRole("button", { name: "הודעות ותזכורות" }));
+    expect(paneTitle()).toBe("הודעות ותזכורות");
+    // Back: to the part she came from, with every part in the side again.
+    await user.click(within(nav).getByRole("button", { name: /כל ההגדרות/ }));
+    expect(paneTitle()).toBe("הדוח");
+    expect(within(nav).getByRole("button", { name: "גיבוי" })).toBeInTheDocument();
+    // Entering again opens the part of the group she was in last.
+    await user.click(within(nav).getByRole("button", { name: "הקליניקה" }));
+    expect(paneTitle()).toBe("הודעות ותזכורות");
+    // The line above the page leads back too.
+    await user.click(within(screen.getByRole("navigation", { name: "איפה את בהגדרות" })).getByRole("button", { name: "הגדרות" }));
+    expect(paneTitle()).toBe("הדוח");
+  });
+
+  it("the search finds a setting by its name, also inside a part, and opens it", async () => {
+    const { user, nav } = await openSettings();
+    const search = within(nav).getByRole("searchbox", { name: "חיפוש בהגדרות" });
+    await user.type(search, "חתימה");
+    const found = within(nav).getByRole("list", { name: "מה שנמצא" });
+    // One answer for each part: what matched, and where it is.
+    expect(within(found).getAllByRole("button").map((b) => b.textContent)).toEqual(["חתימההדוח"]);
+    await user.click(within(found).getByRole("button"));
+    expect(paneTitle()).toBe("הדוח");
+    expect(search).toHaveValue("");
+    // Inside the clinic too, with the group on the way; Enter opens the first.
+    await user.type(search, "מקומות{Enter}");
+    expect(paneTitle()).toBe("פגישות ומחירים");
+    // Nothing found says so, and Escape empties the box.
+    await user.type(within(nav).getByRole("searchbox"), "ממממ");
+    expect(within(nav).getByRole("status")).toHaveTextContent("לא נמצאה הגדרה כזו");
+    await user.keyboard("{Escape}");
+    expect(within(nav).getByRole("searchbox")).toHaveValue("");
   });
 
   it("the parts are reached from the keyboard", async () => {

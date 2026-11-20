@@ -79,40 +79,48 @@ export function ReadinessSettings() {
         </>
       )}
       {ready.isError && <ErrorLine error={fail(ready.error as never)} retry={() => void qc.invalidateQueries({ queryKey: ["readiness"] })} />}
-      <ul className="ready-list">
-        {items.map((i) => {
-          const item = ITEMS[i.key];
-          if (!item) return null;
-          const line = !i.checked_by_program && i.confirmed_at != null
-            ? `אישרת ב-${new Date(i.confirmed_at * 1000).toLocaleDateString("he-IL")}.`
-            : item.hint;
-          return (
-            <li key={i.key} className={i.done ? "ready-item ok" : "ready-item todo"}>
-              <span className="ready-mark" aria-hidden="true">{i.done ? "✓" : "!"}</span>
-              <div className="ready-text">
-                <span className="ready-label">
-                  {item.label}
-                  <span className="visually-hidden">{i.done ? " (מוכן)" : " (חסר)"}</span>
-                </span>
-                <span className="hint">{line}</span>
-              </div>
-              {!i.checked_by_program && !i.done && (
-                <button type="button" className="btn btn-small" aria-label={`אישרתי: ${item.label}`}
-                  onClick={() => void confirm(i.key, true)}>אישרתי</button>
-              )}
-              {!i.checked_by_program && i.done && (
-                <button type="button" className="link-btn" aria-label={`ביטול האישור: ${item.label}`}
-                  onClick={() => void confirm(i.key, false)}>ביטול האישור</button>
-              )}
-              {i.checked_by_program && !i.done && item.jump && (
-                <button type="button" className="btn btn-small"
-                  onClick={() => go({ name: "settings", pane: item.jump?.pane ?? "general" })}>{item.jump.label}</button>
-              )}
-            </li>
-          );
-        })}
-      </ul>
+      {/* What is still open comes first; what is ready waits folded below it (D-205), so the
+          list is short and calm, and grows shorter as things get done. */}
+      {items.some((i) => !i.done) && <ul className="ready-list">{items.filter((i) => !i.done).map(row)}</ul>}
+      {items.some((i) => i.done) && (
+        <details className="ready-done">
+          <summary>מה כבר מוכן ({items.filter((i) => i.done).length})</summary>
+          <ul className="ready-list">{items.filter((i) => i.done).map(row)}</ul>
+        </details>
+      )}
       <ErrorLine error={error} />
     </section>
   );
+
+  function row(i: (typeof items)[number]) {
+    const item = ITEMS[i.key];
+    if (!item) return null;
+    const line = !i.checked_by_program && i.confirmed_at != null
+      ? `אישרת ב-${new Date(i.confirmed_at * 1000).toLocaleDateString("he-IL")}.`
+      : item.hint;
+    return (
+      <li key={i.key} className={i.done ? "ready-item ok" : "ready-item todo"}>
+        <span className="ready-mark" aria-hidden="true">{i.done ? "✓" : "!"}</span>
+        <div className="ready-text">
+          <span className="ready-label">
+            {item.label}
+            <span className="visually-hidden">{i.done ? " (מוכן)" : " (חסר)"}</span>
+          </span>
+          <span className="hint">{line}</span>
+        </div>
+        {!i.checked_by_program && !i.done && (
+          <button type="button" className="btn btn-small" aria-label={`אישרתי: ${item.label}`}
+            onClick={() => void confirm(i.key, true)}>אישרתי</button>
+        )}
+        {!i.checked_by_program && i.done && (
+          <button type="button" className="link-btn" aria-label={`ביטול האישור: ${item.label}`}
+            onClick={() => void confirm(i.key, false)}>ביטול האישור</button>
+        )}
+        {i.checked_by_program && !i.done && item.jump && (
+          <button type="button" className="btn btn-small"
+            onClick={() => go({ name: "settings", pane: item.jump?.pane ?? "general" })}>{item.jump.label}</button>
+        )}
+      </li>
+    );
+  }
 }

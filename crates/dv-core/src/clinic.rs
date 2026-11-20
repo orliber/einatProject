@@ -848,7 +848,7 @@ impl Core {
         let charge = if package {
             if settings.package_fee <= 0 {
                 return refuse(
-                    "עוד אין מחיר לחבילת האבחון. אפשר לקבוע אותו בהגדרות, בחלק \"הקליניקה\".",
+                    "עוד אין מחיר לחבילת האבחון. אפשר לקבוע אותו בהגדרות, בחלק \"מסלול ומשפחה חדשה\".",
                 );
             }
             let first = rows
@@ -925,7 +925,9 @@ impl Core {
         let child = patient(v, patient_id)?;
         let settings = settings(v);
         if settings.starter_tasks.is_empty() {
-            return refuse("עוד אין ערכת פתיחה. אפשר להגדיר אותה בהגדרות, בחלק \"הקליניקה\".");
+            return refuse(
+                "עוד אין ערכת פתיחה. אפשר להגדיר אותה בהגדרות, בחלק \"מסלול ומשפחה חדשה\".",
+            );
         }
         let tasks: Vec<ClinicTask> = all(v)?;
         let new = rules::starter_tasks(&settings, patient_id, &tasks, &today.date);

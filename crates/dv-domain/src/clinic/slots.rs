@@ -239,7 +239,9 @@ pub fn propose_pathway(
 ) -> Result<Vec<Visit>, DomainError> {
     validate_pathway(settings)?;
     if settings.pathway.is_empty() {
-        return refuse("עוד אין מסלול אבחון. אפשר להגדיר אותו בהגדרות, בחלק \"הקליניקה\".");
+        return refuse(
+            "עוד אין מסלול אבחון. אפשר להגדיר אותו בהגדרות, בחלק \"מסלול ומשפחה חדשה\".",
+        );
     }
     if day_number(from).is_none() {
         return refuse("צריך לבחור תאריך תקין להתחלה.");

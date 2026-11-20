@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import { BugReportSettings } from "../components/BugReport";
 import { SystemCheckSettings } from "../components/SystemCheck";
 import { useApp } from "../App";
@@ -19,14 +19,18 @@ import { CriticalValuesSettings } from "../components/CriticalValuesSettings";
 import { SecuritySettings } from "../components/SecuritySettings";
 import { PrivacyStatus } from "../components/PrivacyStatus";
 import { Segmented, Switch } from "../components/Switch";
-import { ErrorLine, Skeleton } from "../components/ui";
+import { ErrorLine, SearchIcon, Skeleton } from "../components/ui";
 import { ipc, type LogoView, type ReportSettings, type TemplateView } from "../ipc/client";
 import { PROVIDERS, providerOf } from "../ai";
 
 import { TEXT_SIZES, applyTextSize, readTextSize } from "../textSize";
 import { THEMES, applyTheme, readTheme } from "../theme";
 import { SectionModesSettings } from "../components/SectionModes";
-import { lastSettingsPane, rememberSettingsPane, SETTINGS_PANES, toTop, type SettingsPane } from "./settingsPanes";
+import { SettingsIcon } from "../components/SettingsIcon";
+import {
+  clinicGroupOf, groupOf, isGroup, lastSettingsPane, rememberSettingsPane, searchSettings, SETTINGS_NAV, SETTINGS_PANES, toTop,
+  type GroupEntry, type PaneEntry, type SettingsPane,
+} from "./settingsPanes";
 import "./SettingsScreen.css";
 
 /** The clinic's settings (D-205): a part of these settings, loaded with the clinic's code only when opened. */
@@ -57,12 +61,61 @@ export function SettingsScreen({ pane: initial }: { pane?: SettingsPane | undefi
     rememberSettingsPane(first);
     return first;
   });
+  /** The program's own part she was in before entering a group (the way back goes there). */
+  const [outside, setOutside] = useState<SettingsPane>(() => (groupOf(initial ?? lastSettingsPane()) ? "general" : (initial ?? lastSettingsPane())));
+  /** Inside a group: the part of it she was in last, where entering it again opens. */
+  const lastInside = useRef(new Map<string, SettingsPane>());
+  /** What the search found and she chose: the heading to bring into view once the part shows. */
+  const [target, setTarget] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const found = searchSettings(query);
   const setPane = (next: SettingsPane) => {
     rememberSettingsPane(next);
+    const g = groupOf(next);
+    if (g) lastInside.current.set(g.id, next);
+    else setOutside(next);
     if (next !== pane) toTop();
+    setError(null);
     setPaneState(next);
   };
+  const enter = (g: GroupEntry) => {
+    const next = lastInside.current.get(g.id) ?? g.panes[0]?.id;
+    if (next) setPane(next);
+  };
   const current = SETTINGS_PANES.find((p) => p.id === pane);
+  const group = groupOf(pane);
+  const clinicGroup = clinicGroupOf(pane);
+
+  // A setting chosen in the search: its heading is brought into view and marked for a moment.
+  // The clinic's parts load on first use, so the heading is looked for a few times.
+  useEffect(() => {
+    if (target === null) return;
+    const want = target.replace(/\s+/g, " ").trim();
+    let tries = 0;
+    let timer: number | undefined;
+    const look = () => {
+      const all = document.querySelectorAll<HTMLElement>(".settings-pane h2, .settings-pane h3, .settings-pane legend, .settings-pane label, .settings-pane .set-row-label");
+      const hit = [...all].find((el) => (el.textContent ?? "").replace(/\s+/g, " ").includes(want));
+      if (hit) {
+        hit.scrollIntoView({ block: "center" });
+        hit.classList.add("settings-found-here");
+        timer = window.setTimeout(() => hit.classList.remove("settings-found-here"), 1800);
+        setTarget(null);
+      } else if (tries++ < 20) {
+        timer = window.setTimeout(look, 100);
+      } else {
+        setTarget(null);
+      }
+    };
+    look();
+    return () => window.clearTimeout(timer);
+  }, [target, pane]);
+
+  function choose(p: PaneEntry, inside: string | null) {
+    setQuery("");
+    setPane(p.id);
+    setTarget(inside);
+  }
   const [apiKey, setApiKey] = useState("");
   const [ack, setAck] = useState(false);
   const provider = providerOf(status.model);
@@ -102,20 +155,75 @@ export function SettingsScreen({ pane: initial }: { pane?: SettingsPane | undefi
       <main className="page-main settings">
         <nav className="settings-nav" aria-label="חלקי ההגדרות">
           <h1 className="settings-title">הגדרות</h1>
-          {SETTINGS_PANES.map((p) => (
-            <button key={p.id} type="button" className="settings-nav-btn" aria-current={p.id === pane ? "page" : undefined}
-              onClick={() => { setError(null); setPane(p.id); }}>{p.label}</button>
-          ))}
+          <div className="settings-search">
+            <SearchIcon size={16} />
+            <input type="search" className="settings-search-input" placeholder="חיפוש בהגדרות" aria-label="חיפוש בהגדרות"
+              value={query} onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape" && query !== "") { e.preventDefault(); setQuery(""); }
+                const first = found[0];
+                if (e.key === "Enter" && first) { e.preventDefault(); choose(first.pane, first.inside); }
+              }} />
+          </div>
+
+          {query.trim() !== "" ? (
+            found.length === 0 ? (
+              <p className="hint settings-none" role="status">לא נמצאה הגדרה כזו. אפשר לנסות מילה אחרת.</p>
+            ) : (
+              <ul className="settings-found" aria-label="מה שנמצא">
+                {found.map((f) => (
+                  <li key={`${f.pane.id}:${f.inside ?? ""}`}>
+                    <button type="button" className="settings-nav-btn settings-found-btn" onClick={() => choose(f.pane, f.inside)}>
+                      <SettingsIcon name={f.pane.icon} />
+                      <span className="settings-found-text">
+                        <span>{f.inside ?? f.pane.label}</span>
+                        <span className="settings-found-where">{[f.group, f.pane.label].filter(Boolean).join(" › ")}</span>
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )
+          ) : group ? (
+            <>
+              {/* Inside a group, as on a Mac: the way back, the group's name, and its parts. */}
+              <button type="button" className="settings-back" onClick={() => setPane(outside)}>
+                <span aria-hidden="true">→</span> כל ההגדרות
+              </button>
+              <h2 className="settings-nav-group"><SettingsIcon name={group.icon} />{group.label}</h2>
+              {group.panes.map((p) => (
+                <button key={p.id} type="button" className="settings-nav-btn" aria-current={p.id === pane ? "page" : undefined}
+                  onClick={() => setPane(p.id)}><SettingsIcon name={p.icon} />{p.label}</button>
+              ))}
+            </>
+          ) : (
+            SETTINGS_NAV.map((e) => isGroup(e) ? (
+              <button key={e.id} type="button" className="settings-nav-btn" onClick={() => enter(e)}>
+                <SettingsIcon name={e.icon} />{e.label}<span className="settings-nav-more" aria-hidden="true">‹</span>
+              </button>
+            ) : (
+              <button key={e.id} type="button" className="settings-nav-btn" aria-current={e.id === pane ? "page" : undefined}
+                onClick={() => setPane(e.id)}><SettingsIcon name={e.icon} />{e.label}</button>
+            ))
+          )}
         </nav>
 
         <div className="settings-pane">
+          {group && (
+            <nav className="settings-crumbs" aria-label="איפה את בהגדרות">
+              <button type="button" className="link-btn" onClick={() => setPane(outside)}>הגדרות</button>
+              <span aria-hidden="true"> › </span>
+              <button type="button" className="link-btn" onClick={() => enter(group)}>{group.label}</button>
+              <span aria-hidden="true"> › </span>
+              <span aria-current="page">{current?.label}</span>
+            </nav>
+          )}
           <h2 className="settings-pane-title">{current?.label}</h2>
+          {current && <p className="settings-pane-intro">{current.intro}</p>}
           <ErrorLine error={error} />
 
           {pane === "general" && (
             <>
-              <SafetyNet />
-              <ReadinessSettings />
               <section className="card setting" aria-labelledby="s-general">
                 <h2 id="s-general">תצוגה ופרטים</h2>
                 <Row label="גודל הטקסט" htmlFor="text-size" hint="גם Ctrl ו-+ או −">
@@ -137,6 +245,9 @@ export function SettingsScreen({ pane: initial }: { pane?: SettingsPane | undefi
                   </div>
                 </div>
               </section>
+              {/* The everyday settings first; the list before real cases after them (D-205).
+                  The safety net is on "סיסמה ואבטחה", where its buttons belong. */}
+              <ReadinessSettings />
             </>
           )}
 
@@ -351,9 +462,10 @@ export function SettingsScreen({ pane: initial }: { pane?: SettingsPane | undefi
             </>
           )}
 
-          {pane === "clinic" && (
+          {/* One form for the clinic's four parts: it stays open while she moves between them. */}
+          {clinicGroup && (
             <Suspense fallback={<Skeleton card lines={4} label="טוען את הגדרות הקליניקה" />}>
-              <ClinicSettingsTab />
+              <ClinicSettingsTab group={clinicGroup} />
             </Suspense>
           )}
 

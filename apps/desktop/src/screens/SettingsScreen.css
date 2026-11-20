@@ -296,9 +296,10 @@
   border-radius: var(--radius-md);
   background: var(--surface);
 }
+/* Calm, not alarming (D-205): what is still open is a plain row with a soft mark. */
 .ready-item.todo {
-  border-color: var(--warn-line);
-  background: var(--warn-paper);
+  border-color: var(--line);
+  background: var(--surface);
 }
 .ready-mark {
   flex: none;
@@ -313,8 +314,18 @@
   color: var(--ok);
 }
 .ready-item.todo .ready-mark {
-  background: var(--warn-ink);
-  color: var(--surface);
+  background: var(--warn-paper);
+  color: var(--warn-ink);
+  border: 1px solid var(--warn-line);
+}
+.ready-done > summary {
+  cursor: pointer;
+  padding: 6px 0;
+  color: var(--ink-muted);
+  font-weight: 600;
+}
+.ready-done[open] > summary {
+  margin-bottom: 8px;
 }
 .ready-text {
   flex: 1 1 auto;
@@ -425,4 +436,133 @@
   height: 20px;
   flex-shrink: 0;
   accent-color: var(--primary);
+}
+/* ---------- as on a Mac (D-205): icons, a search, entering a group, where she is ---------- */
+.settings-nav-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.settings-icon {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  display: inline-grid;
+  place-items: center;
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+.settings-nav-btn[aria-current="page"] .settings-icon {
+  background: var(--primary);
+  color: var(--surface);
+}
+.settings-nav-more {
+  margin-inline-start: auto;
+  color: var(--ink-muted);
+  font-size: var(--text-lg);
+  line-height: 1;
+}
+.settings-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  margin: 0 0 12px;
+  color: var(--ink-muted);
+}
+.settings-search .glyph {
+  position: absolute;
+  inset-inline-start: 10px;
+  pointer-events: none;
+}
+.settings-search-input {
+  width: 100%;
+  height: 36px;
+  padding-inline: 34px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--ink);
+  font: var(--text-base) var(--font-body);
+}
+.settings-search-input:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+.settings-found {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.settings-found-btn {
+  height: auto;
+  min-height: 44px;
+  padding-block: 6px;
+  width: 100%;
+}
+.settings-found-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.settings-found-where {
+  font-size: var(--text-sm);
+  color: var(--ink-muted);
+}
+.settings-none {
+  margin: 4px 12px;
+}
+.settings-back {
+  align-self: flex-start;
+  margin: 0 4px 8px;
+  padding: 4px 8px;
+  border: 0;
+  background: transparent;
+  color: var(--primary);
+  font: 600 var(--text-base) var(--font-body);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+.settings-back:focus-visible {
+  outline: 2px solid var(--primary);
+}
+@media (hover: hover) and (pointer: fine) {
+  .settings-back:hover {
+    background: var(--sand-strong);
+  }
+}
+.settings-nav-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 4px 12px 8px;
+  font-size: var(--text-lg);
+  font-weight: 600;
+}
+.settings-crumbs {
+  font-size: var(--text-sm);
+  color: var(--ink-muted);
+  margin-bottom: 4px;
+}
+.settings-crumbs .link-btn {
+  font-size: inherit;
+}
+.settings-pane-intro {
+  margin: 0 0 8px;
+  color: var(--ink-muted);
+  font-size: var(--text-base);
+}
+/* A setting the search brought into view is marked for a moment. */
+.settings-found-here {
+  border-radius: var(--radius-sm);
+  box-shadow: 0 0 0 4px var(--primary-soft);
+  background: var(--primary-soft);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .settings-found-here {
+    transition: background-color 400ms, box-shadow 400ms;
+  }
 }
