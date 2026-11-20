@@ -197,3 +197,13 @@
 .clinic-package {
   margin-top: 6px;
 }
+
+/* ---------- the four small tabs (D-205): one subject at a time ---------- */
+.clinic-settings-groups {
+  display: flex;
+  flex-wrap: wrap;
+}
+/* A section of another tab stays in the form (one draft, one save) but is not shown. */
+.clinic-settings > [hidden] {
+  display: none;
+}

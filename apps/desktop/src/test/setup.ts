@@ -3,12 +3,14 @@ import { afterEach } from "vitest";
 import { cleanup } from "@testing-library/react";
 import { clearMocks } from "@tauri-apps/api/mocks";
 import { forgetDiscreet } from "../discreet";
+import { forgetSettingsPane } from "../screens/settingsPanes";
 
 afterEach(() => {
   cleanup();
   clearMocks();
   // The two switches the program keeps between runs (D-191, D-192): each test starts afresh.
   forgetDiscreet();
+  forgetSettingsPane();
   try {
     localStorage.removeItem("dv.area");
   } catch {
