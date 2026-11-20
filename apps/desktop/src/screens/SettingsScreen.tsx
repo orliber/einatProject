@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useState, type ReactNode } from "react";
 import { useHelpTopic } from "../help/where";
 import { BugReportSettings } from "../components/BugReport";
 import { SystemCheckSettings } from "../components/SystemCheck";
@@ -20,15 +20,18 @@ import { CriticalValuesSettings } from "../components/CriticalValuesSettings";
 import { SecuritySettings } from "../components/SecuritySettings";
 import { PrivacyStatus } from "../components/PrivacyStatus";
 import { Segmented, Switch } from "../components/Switch";
-import { ErrorLine } from "../components/ui";
+import { ErrorLine, Skeleton } from "../components/ui";
 import { ipc, type LogoView, type ReportSettings, type TemplateView } from "../ipc/client";
 import { PROVIDERS, providerOf } from "../ai";
 
 import { TEXT_SIZES, applyTextSize, readTextSize } from "../textSize";
 import { THEMES, applyTheme, readTheme } from "../theme";
 import { SectionModesSettings } from "../components/SectionModes";
-import { SETTINGS_PANES, type SettingsPane } from "./settingsPanes";
+import { lastSettingsPane, rememberSettingsPane, SETTINGS_PANES, toTop, type SettingsPane } from "./settingsPanes";
 import "./SettingsScreen.css";
+
+/** The clinic's settings (D-205): a part of these settings, loaded with the clinic's code only when opened. */
+const ClinicSettingsTab = lazy(() => import("./clinic/ClinicSettingsTab").then((m) => ({ default: m.ClinicSettingsTab })));
 
 /** The screen-capture switch is hidden while that protection is off (D-039). */
 const SCREEN_PROTECTION_SETTING = false;
@@ -49,7 +52,17 @@ function Row({ label, htmlFor, hint, children }: { label: string; htmlFor?: stri
 /** Settings as in other professional programs: the parts on the side, one part at a time. */
 export function SettingsScreen({ pane: initial }: { pane?: SettingsPane | undefined }) {
   const { status, refresh, notify, fail } = useApp();
-  const [pane, setPane] = useState<SettingsPane>(initial ?? "general");
+  // A link names its part; the gear opens the part she was in last (D-205).
+  const [pane, setPaneState] = useState<SettingsPane>(() => {
+    const first = initial ?? lastSettingsPane();
+    rememberSettingsPane(first);
+    return first;
+  });
+  const setPane = (next: SettingsPane) => {
+    rememberSettingsPane(next);
+    if (next !== pane) toTop();
+    setPaneState(next);
+  };
   const current = SETTINGS_PANES.find((p) => p.id === pane);
   // F1 and "?" explain the pane she is in (D-206).
   useHelpTopic(`settings-${pane}`);
@@ -339,6 +352,12 @@ export function SettingsScreen({ pane: initial }: { pane?: SettingsPane | undefi
               <InstrumentSettings />
               <CriticalValuesSettings />
             </>
+          )}
+
+          {pane === "clinic" && (
+            <Suspense fallback={<Skeleton card lines={4} label="טוען את הגדרות הקליניקה" />}>
+              <ClinicSettingsTab />
+            </Suspense>
           )}
 
           {pane === "backup" && (

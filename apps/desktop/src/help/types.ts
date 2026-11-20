@@ -9,10 +9,10 @@ export const HELP_IDS = [
   "new-case", "import", "material", "review", "export", "report-run", "sent-history", "case-search", "style-import",
   // ניהול הקליניקה
   "clinic-today", "clinic-calendar", "clinic-patients", "clinic-patient", "clinic-waiting", "clinic-tasks",
-  "clinic-money", "clinic-insights", "clinic-settings",
+  "clinic-money", "clinic-insights",
   "visit", "patient", "visit-note", "pathway", "payment", "task",
   // הגדרות
-  "settings-general", "settings-ai", "settings-privacy", "settings-report", "settings-tests",
+  "settings-general", "settings-ai", "settings-privacy", "settings-report", "settings-tests", "settings-clinic",
   "settings-backup", "settings-security", "settings-about",
   "password",
 ] as const;

@@ -87,12 +87,13 @@ const afternoon = () => vi.setSystemTime(new Date(2026, 10, 15, 15, 12));
 const NAMES = ["תמר", "איתי", "מאיה", "נועם", "יובל", "עומר", "יעל"];
 
 describe("the clinic's page", () => {
-  it("marks the clinic as beta only on the bar's switch, shows the eight tabs, and passes the accessibility check", async () => {
+  it("marks the clinic as beta only on the bar's switch, shows the seven tabs, and passes the accessibility check", async () => {
     const { view } = await openClinic();
     // The page has no line of its own about the beta (D-204): the switch says it, below.
     expect(screen.queryByText(/בגרסת בטא/)).toBeNull();
     expect(screen.queryByRole("note")).toBeNull();
-    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["היום", "יומן", "מטופלים", "המתנה", "מעקבים", "כספים", "תמונת מצב", "הגדרות הקליניקה"]);
+    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["היום", "יומן", "מטופלים", "המתנה", "מעקבים", "כספים", "תמונת מצב"]);
+    // The clinic's settings are a part of the program's settings (D-205), not a tab here.
     expect(tab("היום")).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("tabpanel")).toHaveAccessibleName("היום");
     // The bar marks the clinic as the part she is in (D-191), with its beta badge; the tabs
@@ -109,7 +110,7 @@ describe("the clinic's page", () => {
     const { user, went } = await openClinic();
     for (const [label, id] of [
       ["יומן", "calendar"], ["מטופלים", "patients"], ["המתנה", "waiting"],
-      ["מעקבים", "tasks"], ["כספים", "money"], ["תמונת מצב", "insights"], ["הגדרות הקליניקה", "settings"],
+      ["מעקבים", "tasks"], ["כספים", "money"], ["תמונת מצב", "insights"],
     ] as const) {
       await user.click(tab(label));
       expect(tab(label)).toHaveAttribute("aria-selected", "true");
@@ -133,12 +134,12 @@ describe("the clinic's page", () => {
     await user.keyboard("{ArrowRight}");
     expect(tab("מטופלים")).toHaveAttribute("aria-selected", "true");
     await user.keyboard("{End}");
-    expect(tab("הגדרות הקליניקה")).toHaveFocus();
+    expect(tab("תמונת מצב")).toHaveFocus();
     // Past the last comes the first.
     await user.keyboard("{ArrowLeft}");
     expect(tab("היום")).toHaveAttribute("aria-selected", "true");
     await user.keyboard("{ArrowRight}");
-    expect(tab("הגדרות הקליניקה")).toHaveAttribute("aria-selected", "true");
+    expect(tab("תמונת מצב")).toHaveAttribute("aria-selected", "true");
     await user.keyboard("{Home}");
     expect(tab("היום")).toHaveFocus();
   });

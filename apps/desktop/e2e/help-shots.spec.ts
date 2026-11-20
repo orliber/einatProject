@@ -14,6 +14,8 @@ const MAX_WIDTH = 1100;
 
 /** Saves what is on the page (or one window of it) as `src/help/shots/<name>.webp`. */
 async function shot(page: Page, name: string, target?: Locator): Promise<void> {
+  // Nothing half-loaded in a picture: a lazy part or a list still on its way.
+  await expect(page.locator('[aria-busy="true"]')).toHaveCount(0);
   await page.mouse.move(0, 0);
   await page.evaluate(() =>
     Promise.all(
@@ -165,7 +167,7 @@ test.describe("כתיבת הדוחות", () => {
 test.describe("ניהול הקליניקה", () => {
   const tabs = [
     ["היום", "clinic-today"], ["יומן", "clinic-calendar"], ["מטופלים", "clinic-patients"], ["המתנה", "clinic-waiting"],
-    ["מעקבים", "clinic-tasks"], ["כספים", "clinic-money"], ["תמונת מצב", "clinic-insights"], ["הגדרות הקליניקה", "clinic-settings"],
+    ["מעקבים", "clinic-tasks"], ["כספים", "clinic-money"], ["תמונת מצב", "clinic-insights"],
   ] as const;
   test("the tabs", async ({ page }) => {
     await open(page);
@@ -207,7 +209,7 @@ test.describe("ניהול הקליניקה", () => {
 test.describe("הגדרות", () => {
   const panes = [
     ["כללי", "settings-general"], ["חיבור ל-AI", "settings-ai"], ["פרטיות", "settings-privacy"], ["הדוח", "settings-report"],
-    ["המבחנים", "settings-tests"], ["גיבוי", "settings-backup"], ["סיסמה ואבטחה", "settings-security"], ["עדכונים ועזרה", "settings-about"],
+    ["המבחנים", "settings-tests"], ["הקליניקה", "settings-clinic"], ["גיבוי", "settings-backup"], ["סיסמה ואבטחה", "settings-security"], ["עדכונים ועזרה", "settings-about"],
   ] as const;
   test("the panes and the password window", async ({ page }) => {
     await open(page);

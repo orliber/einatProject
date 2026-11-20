@@ -411,3 +411,18 @@
 .critical-row .input {
   width: 5.5em;
 }
+
+/* Easier to read and to hit (D-205): a little larger explanations, roomier parts, and the
+   program's own check boxes (as in the clinic) instead of the small grey ones of the system. */
+.settings-pane .hint {
+  font-size: calc(var(--text-sm) + 1px);
+}
+.settings-nav-btn {
+  height: 40px;
+}
+.settings-pane input[type="checkbox"] {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  accent-color: var(--primary);
+}

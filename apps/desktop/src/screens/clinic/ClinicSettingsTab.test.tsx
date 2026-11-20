@@ -1,7 +1,7 @@
 // The clinic's settings over the demo core: what is shown, saving only when something
 // changed, the core's refusal as the message, places, the message texts with their
 // placeholders and preview, templates, thresholds, changes that survive a look at another
-// tab, the way back to the defaults, and accessibility. Every detail is invented.
+// part of the settings, the way back to the defaults, and accessibility. Every detail is invented.
 import { configure, screen, waitFor, within } from "@testing-library/react";
 import type { ClinicSettings } from "../../ipc/generated/ClinicSettings";
 import { a11yViolations } from "../../test/a11y";
@@ -26,8 +26,12 @@ afterEach(() => {
   window.history.replaceState({}, "", "/");
 });
 
-const SETTINGS = { name: "clinic", tab: "settings" } as const;
+/** The clinic's settings are the part "הקליניקה" of the program's settings (D-205). */
+const SETTINGS = { name: "settings", pane: "clinic" } as const;
+const paneButton = (name: string) => within(screen.getByRole("navigation", { name: "חלקי ההגדרות" })).getByRole("button", { name });
 const form = () => screen.findByRole("form", { name: "הגדרות הקליניקה" });
+/** One of the four small tabs of the settings (D-205). */
+const topic = (name: string) => screen.getByRole("radio", { name });
 const part = (name: string) => screen.getByRole("region", { name });
 const saveButton = () => screen.getByRole("button", { name: "שמירה" });
 const bar = () => screen.getByRole("group", { name: "שמירת ההגדרות" });
@@ -84,14 +88,20 @@ describe("the pure pieces", () => {
 
 describe("the clinic's settings", () => {
   it("shows the settings as they are stored, with nothing to save yet", async () => {
-    const { view } = await openOn(SETTINGS);
+    const { view, user } = await openOn(SETTINGS);
     await form();
     const hours = part("שעות וימי עבודה");
     expect(within(hours).getByLabelText("היום מתחיל ב-")).toHaveValue("08:00");
     expect(within(hours).getByLabelText("ומסתיים ב-")).toHaveValue("20:00");
     const days = within(hours).getByRole("group", { name: "ימי עבודה" });
     expect(within(days).getAllByRole("checkbox").map((c) => (c as HTMLInputElement).checked)).toEqual([true, true, true, true, true, false, false]);
+    // Four small tabs, the first open; the other tabs' parts are not shown.
+    expect(screen.getAllByRole("radio").map((r) => r.textContent)).toEqual(["יומן ושעות", "פגישות ומחירים", "מסלול ומשפחה חדשה", "הודעות ותזכורות"]);
+    expect(topic("יומן ושעות")).toHaveAttribute("aria-checked", "true");
+    expect(screen.queryByRole("region", { name: "סוגי הפגישות" })).toBeNull();
+    expect(await a11yViolations(view.container)).toEqual([]);
 
+    await user.click(topic("פגישות ומחירים"));
     const kinds = within(part("סוגי הפגישות")).getByRole("table", { name: "המשך והמחיר הרגילים של כל סוג פגישה" });
     expect(within(kinds).getAllByRole("rowheader").map((h) => h.textContent)).toEqual(["פגישת היכרות", "מפגש אבחון", "תצפית", "שיחת משוב", "פגישת טיפול", "הדרכת הורים", "פגישה מקצועית", "פגישה אחרת", "זמן שמור"]);
     expect(within(kinds).getByLabelText("משך של מפגש אבחון, בדקות")).toHaveValue("90");
@@ -102,6 +112,8 @@ describe("the clinic's settings", () => {
 
     expect(within(within(part("מקומות")).getByRole("list", { name: "המקומות, לפי הסדר" })).getAllByRole("listitem").map((p) => p.textContent)).toEqual(
       ["הקליניקהמוצע ראשוןלמעלהלמטה", "בגן או בבית הספרלמעלהלמטה", "שיחת וידאולמעלהלמטה"]);
+    expect(screen.queryByRole("region", { name: "שעות וימי עבודה" })).toBeNull();
+    await user.click(topic("הודעות ותזכורות"));
     expect(within(part("הודעות להורים")).getByLabelText("נוסח התזכורת לפגישה")).toHaveValue("שלום {הורה}, תזכורת לפגישה ביום {יום}, {תאריך}, בשעה {שעה}. להתראות, {שמי}");
     expect(part("הודעות להורים")).toHaveTextContent("התוכנה לא שולחת הודעות בעצמה.");
     expect(part("הודעות להורים")).toHaveTextContent("לא כולל את שם הילד בכוונה");
@@ -124,12 +136,16 @@ describe("the clinic's settings", () => {
     const served = await openOn(SETTINGS);
     const { user, requests, notes } = served;
     await form();
+    await user.click(topic("פגישות ומחירים"));
     const fee = screen.getByLabelText("מחיר של פגישת טיפול, בשקלים");
     await user.clear(fee);
     await user.type(fee, "420.50");
+    // Changes on several tabs wait together for the one "שמירה".
+    await user.click(topic("יומן ושעות"));
     await user.click(screen.getByLabelText("שישי"));
     await user.clear(screen.getByLabelText("ומסתיים ב-"));
     await user.type(screen.getByLabelText("ומסתיים ב-"), "19:30");
+    await user.click(topic("הודעות ותזכורות"));
     await user.clear(screen.getByLabelText("שבועות ברשימת ההמתנה"));
     await user.type(screen.getByLabelText("שבועות ברשימת ההמתנה"), "4");
     expect(saveButton()).toBeEnabled();
@@ -143,7 +159,9 @@ describe("the clinic's settings", () => {
     expect(sent[0]?.defaults.find((d) => d.kind === "therapy")).toEqual({ kind: "therapy", minutes: 50, fee: 42_050 });
     expect(sent[0]?.defaults).toHaveLength(9);
     await waitFor(() => expect(saveButton()).toBeDisabled());
+    await user.click(topic("פגישות ומחירים"));
     expect(screen.getByLabelText("מחיר של פגישת טיפול, בשקלים")).toHaveValue("420.50");
+    await user.click(topic("הודעות ותזכורות"));
     // The vault holds it.
     expect((await ask(served, { op: "settings" }, "settings")).waiting_weeks).toBe(4);
     // Putting a value back by hand is not a change.
@@ -174,6 +192,7 @@ describe("the clinic's settings", () => {
   it("a length that is out of range is refused by the core, in its words", async () => {
     const { user } = await openOn(SETTINGS);
     await form();
+    await user.click(topic("פגישות ומחירים"));
     const minutes = screen.getByLabelText("משך של תצפית, בדקות");
     await user.clear(minutes);
     await user.type(minutes, "3");
@@ -184,6 +203,7 @@ describe("the clinic's settings", () => {
   it("a box that holds no number at all is said here, and nothing is sent", async () => {
     const { user, requests } = await openOn(SETTINGS);
     await form();
+    await user.click(topic("פגישות ומחירים"));
     const fee = screen.getByLabelText("מחיר של תצפית, בשקלים");
     await user.clear(fee);
     await user.type(fee, "חמש מאות");
@@ -206,6 +226,7 @@ describe("the clinic's settings", () => {
   it("places are added, removed and reordered with buttons", async () => {
     const { user, requests, view } = await openOn(SETTINGS);
     await form();
+    await user.click(topic("פגישות ומחירים"));
     const places = part("מקומות");
     const names = () => within(within(places).getByRole("list", { name: "המקומות, לפי הסדר" })).getAllByRole("listitem").map((li) => li.firstElementChild?.textContent);
     expect(within(places).getByRole("button", { name: "להעלות את הקליניקה" })).toBeDisabled();
@@ -241,6 +262,7 @@ describe("the clinic's settings", () => {
   it("a placeholder chip goes in where the cursor is, and the preview follows what she types", async () => {
     const { user, requests } = await openOn(SETTINGS);
     await form();
+    await user.click(topic("הודעות ותזכורות"));
     const messages = part("הודעות להורים");
     const reminder = within(messages).getByLabelText("נוסח התזכורת לפגישה") as HTMLTextAreaElement;
     const preview = () => document.getElementById("settings-reminder-preview") as HTMLElement;
@@ -283,6 +305,7 @@ describe("the clinic's settings", () => {
   it("note templates are added, edited and removed", async () => {
     const { user, requests } = await openOn(SETTINGS);
     await form();
+    await user.click(topic("הודעות ותזכורות"));
     const templates = part("תבניות לסיכום פגישה");
     expect(templates).toHaveTextContent("4 תבניות");
     const observation = within(templates).getByRole("group", { name: "תבנית 3: תצפית" });
@@ -306,6 +329,7 @@ describe("the clinic's settings", () => {
   it("a template with no name is refused by the core", async () => {
     const { user } = await openOn(SETTINGS);
     await form();
+    await user.click(topic("הודעות ותזכורות"));
     await user.click(within(part("תבניות לסיכום פגישה")).getByRole("button", { name: "תבנית חדשה" }));
     await user.click(saveButton());
     expect(await within(bar()).findByRole("alert")).toHaveTextContent("צריך לתת שם לכל תבנית של סיכום.");
@@ -315,16 +339,20 @@ describe("the clinic's settings", () => {
     const { user, notes, requests } = await openOn(SETTINGS);
     await form();
     await user.click(screen.getByLabelText("שישי"));
+    await user.click(topic("הודעות ותזכורות"));
     await user.clear(screen.getByLabelText("ימים עד שמצביעים על חוב"));
     await user.type(screen.getByLabelText("ימים עד שמצביעים על חוב"), "45");
-    await user.click(screen.getByRole("tab", { name: "מעקבים" }));
-    await waitFor(() => expect(notes).toEqual(["השינויים בהגדרות הקליניקה עוד לא נשמרו. הם מחכים בלשונית \"הגדרות\"."]));
+    await user.click(paneButton("כללי"));
+    await waitFor(() => expect(notes).toEqual(["השינויים בהגדרות הקליניקה עוד לא נשמרו. הם מחכים בהגדרות, בחלק \"הקליניקה\"."]));
     expect(sentSettings(requests)).toHaveLength(0);
 
-    await user.click(screen.getByRole("tab", { name: "הגדרות הקליניקה" }));
+    await user.click(paneButton("הקליניקה"));
     await form();
-    expect(screen.getByLabelText("שישי")).toBeChecked();
+    // She comes back to the small tab she was on, with every change on every tab.
+    expect(topic("הודעות ותזכורות")).toHaveAttribute("aria-checked", "true");
     expect(screen.getByLabelText("ימים עד שמצביעים על חוב")).toHaveValue("45");
+    await user.click(topic("יומן ושעות"));
+    expect(screen.getByLabelText("שישי")).toBeChecked();
     expect(screen.getByText("השינויים שעשית כאן קודם עוד לא נשמרו, והם כאן כמו שהשארת אותם. אפשר לשמור אותם או לבטל.")).toBeInTheDocument();
     expect(saveButton()).toBeEnabled();
 
@@ -333,8 +361,8 @@ describe("the clinic's settings", () => {
     expect(screen.getByLabelText("שישי")).not.toBeChecked();
     expect(screen.getByLabelText("ימים עד שמצביעים על חוב")).toHaveValue("30");
     expect(saveButton()).toBeDisabled();
-    await user.click(screen.getByRole("tab", { name: "מעקבים" }));
-    await user.click(screen.getByRole("tab", { name: "הגדרות הקליניקה" }));
+    await user.click(paneButton("כללי"));
+    await user.click(paneButton("הקליניקה"));
     await form();
     expect(screen.queryByText(/עוד לא נשמרו, והם כאן/)).toBeNull();
     expect(notes).toHaveLength(1);
@@ -343,7 +371,7 @@ describe("the clinic's settings", () => {
   it("leaving with everything saved says nothing", async () => {
     const { user, notes } = await openOn(SETTINGS);
     await form();
-    await user.click(screen.getByRole("tab", { name: "מעקבים" }));
+    await user.click(paneButton("כללי"));
     await new Promise((r) => setTimeout(r, 30));
     expect(notes).toEqual([]);
   });
@@ -370,6 +398,7 @@ describe("the clinic's settings", () => {
     expect(sentSettings(requests)).toEqual([defaultClinicSettings()]);
     expect(await ask(served, { op: "settings" }, "settings")).toEqual(defaultClinicSettings());
     expect(screen.getByLabelText("שבת")).not.toBeChecked();
+    await user.click(topic("פגישות ומחירים"));
     expect(screen.getByLabelText("מחיר של מפגש אבחון, בשקלים")).toHaveValue("0");
     expect(within(part("מקומות")).getAllByRole("listitem")).toHaveLength(1);
     await waitFor(() => expect(saveButton()).toBeDisabled());

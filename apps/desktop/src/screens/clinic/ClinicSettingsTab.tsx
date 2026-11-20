@@ -6,19 +6,23 @@
 // thresholds of "מה דורש אותי". Everything is saved at
 // once, with "שמירה": the core tidies and checks it, and its refusal is the message shown.
 // What she changed and did not save yet is kept while the program is open (in memory only),
-// so going to another tab and back loses nothing.
+// so going to another page and back loses nothing. They are the part "הקליניקה" of the
+// program's settings (D-205), no longer a tab of the clinic: the page's own look comes along.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useApp } from "../../App";
+import { Segmented } from "../../components/Switch";
 import { CloseIcon, ErrorLine, PlusIcon, Skeleton } from "../../components/ui";
 import type { ClinicSettings } from "../../ipc/generated/ClinicSettings";
 import type { NoteTemplate } from "../../ipc/generated/NoteTemplate";
 import type { TaskKind } from "../../ipc/generated/TaskKind";
 import type { VisitKind } from "../../ipc/generated/VisitKind";
+import { toTop } from "../settingsPanes";
 import { CalendarSyncSection } from "./CalendarSyncSection";
 import { useClinicSettings, useReloadClinic, useSaveSettings } from "./clinicData";
 import { defaultClinicSettings, fillPreview, PLACEHOLDERS, sampleValues } from "./clinicDefaults";
 import { formatTime, moneyInput, parseMoney, parseTime, TASK_KIND_LABEL, TASK_KINDS, VISIT_KIND_LABEL, VISIT_KINDS } from "./format";
 import { CheckField, ConfirmDialog, ReadError, Section, SelectField, TextAreaField, TextField, TimeField } from "./parts";
+import "./ClinicScreen.css";
 import "./ClinicSettingsTab.css";
 
 // ------------------------------------------------------------------ the form's own shape
@@ -159,9 +163,21 @@ export function moved<T>(list: T[], from: number, by: -1 | 1): T[] {
 let kept: SettingsDraft | null = null;
 let leaving: number | undefined;
 
-/** For the tests: each starts with nothing kept. */
+/** The four small tabs of the settings (D-205): one subject at a time, one "שמירה" for all. */
+export type SettingsGroup = "calendar" | "visits" | "pathway" | "messages";
+export const SETTINGS_GROUPS: { value: SettingsGroup; label: string }[] = [
+  { value: "calendar", label: "יומן ושעות" },
+  { value: "visits", label: "פגישות ומחירים" },
+  { value: "pathway", label: "מסלול ומשפחה חדשה" },
+  { value: "messages", label: "הודעות ותזכורות" },
+];
+/** The tab she was on, while the program is open (in memory only, like the unsaved changes). */
+let lastGroup: SettingsGroup = "calendar";
+
+/** For the tests: each starts with nothing kept, on the first tab. */
 export function forgetSettingsDraft() {
   kept = null;
+  lastGroup = "calendar";
   window.clearTimeout(leaving);
 }
 
@@ -195,6 +211,10 @@ function SettingsForm({ stored }: { stored: ClinicSettings }) {
   const [busy, setBusy] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [newPlace, setNewPlace] = useState("");
+  const [group, setGroupState] = useState<SettingsGroup>(lastGroup);
+  const setGroup = (g: SettingsGroup) => { lastGroup = g; if (g !== group) toTop(); setGroupState(g); };
+  /** Every section stays in the form (one draft, one save); only the chosen tab's are shown. */
+  const hide = (g: SettingsGroup) => group !== g;
   const dirty = !same(draft, base);
   const set = (patch: Partial<SettingsDraft>) => setDraft((d) => ({ ...d, ...patch }));
 
@@ -202,7 +222,7 @@ function SettingsForm({ stored }: { stored: ClinicSettings }) {
     kept = dirty ? draft : null;
   }, [draft, dirty]);
 
-  // Leaving the tab with unsaved changes: they are kept, and she is told where they wait.
+  // Leaving the part with unsaved changes: they are kept, and she is told where they wait.
   // (The timer lets a remount in development pass without a word.)
   const say = useRef(notify);
   useEffect(() => {
@@ -212,7 +232,7 @@ function SettingsForm({ stored }: { stored: ClinicSettings }) {
     window.clearTimeout(leaving);
     return () => {
       leaving = window.setTimeout(() => {
-        if (kept !== null) say.current("השינויים בהגדרות הקליניקה עוד לא נשמרו. הם מחכים בלשונית \"הגדרות\".");
+        if (kept !== null) say.current("השינויים בהגדרות הקליניקה עוד לא נשמרו. הם מחכים בהגדרות, בחלק \"הקליניקה\".");
       }, 0);
     };
   }, []);
@@ -267,7 +287,11 @@ function SettingsForm({ stored }: { stored: ClinicSettings }) {
         <p className="note-sand clinic-kept" role="status">השינויים שעשית כאן קודם עוד לא נשמרו, והם כאן כמו שהשארת אותם. אפשר לשמור אותם או לבטל.</p>
       )}
 
-      <Section title="שעות וימי עבודה">
+      <div className="clinic-settings-groups">
+        <Segmented label="נושא בהגדרות הקליניקה" value={group} options={SETTINGS_GROUPS} onChange={setGroup} />
+      </div>
+
+      <Section title="שעות וימי עבודה" hidden={hide("calendar")}>
         <p className="hint clinic-quiet">היומן מציג את השעות האלה, ומדגיש את ימי העבודה.</p>
         <div className="clinic-form-row">
           <TimeField id="settings-start" label="היום מתחיל ב-" value={draft.start} onChange={(start) => set({ start })} />
@@ -290,7 +314,7 @@ function SettingsForm({ stored }: { stored: ClinicSettings }) {
           hint="החגים מחושבים במחשב לפי הלוח העברי. בימי חג (ראש השנה, יום כיפור, סוכות, שמחת תורה, פסח, שבועות ויום העצמאות) התוכנה לא מציעה שעות פנויות." />
       </Section>
 
-      <Section title="מסלול האבחון" aside={<span className="muted small">{draft.pathway.length === 1 ? "שלב אחד" : `${draft.pathway.length} שלבים`}</span>}>
+      <Section title="מסלול האבחון" hidden={hide("pathway")} aside={<span className="muted small">{draft.pathway.length === 1 ? "שלב אחד" : `${draft.pathway.length} שלבים`}</span>}>
         <p className="hint clinic-quiet">
           השלבים שהתוכנה קובעת בלחיצה אחת מכרטיס המטופל: השלב הראשון בשעה הפנויה הראשונה מהיום שבוחרים, וכל שלב אחריו
           לפחות כמה ימים אחרי השלב שלפניו (לפחות יום אחד). לפני השמירה רואים את כל הפגישות, ואפשר לשנות כל אחת.
@@ -323,7 +347,7 @@ function SettingsForm({ stored }: { stored: ClinicSettings }) {
         </div>
       </Section>
 
-      <Section title="ערכת פתיחה למשפחה חדשה" aside={<span className="muted small">{draft.starter.length === 1 ? "מעקב אחד" : `${draft.starter.length} מעקבים`}</span>}>
+      <Section title="ערכת פתיחה למשפחה חדשה" hidden={hide("pathway")} aside={<span className="muted small">{draft.starter.length === 1 ? "מעקב אחד" : `${draft.starter.length} מעקבים`}</span>}>
         <p className="hint clinic-quiet">
           השאלונים והמסמכים שמבקשים מכל משפחה. בלחיצה אחת בכרטיס הם נפתחים כמעקבים, כל אחד עם תאריך יעד.
           שבוע לפני שיחת המשוב, מה שעוד פתוח מופיע ב"מה דורש אותי".
@@ -345,7 +369,7 @@ function SettingsForm({ stored }: { stored: ClinicSettings }) {
           : <p className="hint">אפשר להגדיר עד {MAX_STARTER} מעקבים.</p>}
       </Section>
 
-      <Section title="סוגי הפגישות">
+      <Section title="סוגי הפגישות" hidden={hide("visits")}>
         <p className="hint clinic-quiet">פגישה חדשה מקבלת את המשך ואת המחיר שכאן. בכל פגישה אפשר לשנות אותם, ולמשפחה אפשר לקבוע מחיר משלה בכרטיס.</p>
         <div className="clinic-settings-scroll">
           <table className="clinic-settings-table">
@@ -383,7 +407,7 @@ function SettingsForm({ stored }: { stored: ClinicSettings }) {
         </div>
       </Section>
 
-      <Section title="מקומות">
+      <Section title="מקומות" hidden={hide("visits")}>
         <p className="hint clinic-quiet">המקומות שאפשר לבחור לפגישה. הראשון ברשימה הוא זה שמוצע בפגישה חדשה.</p>
         {draft.places.length === 0
           ? <p className="muted clinic-quiet">עוד אין מקומות ברשימה.</p>
@@ -423,7 +447,7 @@ function SettingsForm({ stored }: { stored: ClinicSettings }) {
         ) : <p className="hint">אפשר לשמור עד {MAX_PLACES} מקומות.</p>}
       </Section>
 
-      <Section title="הודעות להורים">
+      <Section title="הודעות להורים" hidden={hide("messages")}>
         <p className="hint clinic-quiet">
           התוכנה לא שולחת הודעות בעצמה. היא ממלאת את הנוסח בפרטי הפגישה או היתרה, פותחת אצלך במחשב את הצ'אט עם ההורה בוואטסאפ, ב-SMS או במייל, ומשאירה את הנוסח בלוח המוגן. את מדביקה ושולחת בעצמך.
           הנוסח שהגיע עם התוכנה לא כולל את שם הילד בכוונה, כדי שהשם לא ייצא מהמחשב בלי שבחרת בזה. מי שרוצה יכולה להוסיף {"{ילד}"}.
@@ -432,9 +456,11 @@ function SettingsForm({ stored }: { stored: ClinicSettings }) {
         <MessageEditor id="settings-payment" label="נוסח הודעת התשלום" value={draft.payment} sample={sample} onChange={(payment) => set({ payment })} />
       </Section>
 
-      <CalendarSyncSection />
+      <div className="stack clinic-settings" hidden={hide("calendar")}>
+        <CalendarSyncSection />
+      </div>
 
-      <Section title="תבניות לסיכום פגישה" aside={<span className="muted small">{draft.templates.length === 1 ? "תבנית אחת" : `${draft.templates.length} תבניות`}</span>}>
+      <Section title="תבניות לסיכום פגישה" hidden={hide("messages")} aside={<span className="muted small">{draft.templates.length === 1 ? "תבנית אחת" : `${draft.templates.length} תבניות`}</span>}>
         <p className="hint clinic-quiet">שלד שאפשר להכניס לרשומה של סיכום פגישה ריק, כדי לא להתחיל מדף לבן.</p>
         {draft.templates.length === 0 && <p className="muted clinic-quiet">עוד אין תבניות.</p>}
         <ul className="clinic-list clinic-templates">
@@ -455,7 +481,7 @@ function SettingsForm({ stored }: { stored: ClinicSettings }) {
           : <p className="hint">אפשר לשמור עד {MAX_TEMPLATES} תבניות.</p>}
       </Section>
 
-      <Section title="מתי להסב את תשומת הלב">
+      <Section title="מתי להסב את תשומת הלב" hidden={hide("messages")}>
         <p className="hint clinic-quiet">שלושת המספרים האלה קובעים מתי משהו מופיע ב"מה דורש אותי".</p>
         <div className="clinic-thresholds">
           <TextField id="settings-report-days" label="ימים עד שהדוח אמור להיות מוכן" value={draft.reportDays} maxLength={5} dir="ltr" inputMode="numeric" className="clinic-threshold"

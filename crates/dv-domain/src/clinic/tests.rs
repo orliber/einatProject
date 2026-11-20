@@ -5019,7 +5019,7 @@ fn the_pathway_is_proposed_step_by_step_at_the_first_free_times() {
     };
     assert!(matches!(
         propose_pathway(&[], &none, &child, &today(), TODAY),
-        Err(DomainError::Invalid(text)) if text.contains("הגדרות הקליניקה")
+        Err(DomainError::Invalid(text)) if text.contains("בחלק \"הקליניקה\"")
     ));
     // At the end of the dates the clinic keeps, a later step has no room: refused, never
     // put on the same day as the step before it.
