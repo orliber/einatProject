@@ -396,6 +396,13 @@ preview answers with a path and the core's file name, and writes and downloads n
 - **חיפוש בסיכומים.** בכרטיס עם ששה סיכומים ומעלה יש תיבת חיפוש מעל הרשימה. וברשימת המטופלים, אותה תיבת חיפוש מוצאת גם מילה שנכתבה בסיכום פגישה של כל ילד, ומראה של מי, מתי, וכמה מילים מסביב. החיפוש נעשה בתוך הכספת, לא נשמר ולא נרשם.
 - **The contract.** `ClinicRequest::SearchNotes { text, personal }` → `ClinicReply::Found(NoteSearch { hits, more })`; the rule is `logic::search_notes` (every word in the record or, with `personal`, in the personal note; newest first; at most `NOTE_HITS_MAX`; the answer never carries words of a personal note). A read: no audit event, no index, nothing stored. The other three read `PatientCard`, `Overview` and `DiaryMonth`, and write through `save_payment` as the card does.
 
+## מהקליניקה לדוח, וסוף יום מהיר (D-217)
+- **רשומות לתיק.** בכרטיס שמקושר לתיק אבחון, מעל רשימת הסיכומים כתוב כמה רשומות עוד לא הועברו לחומרי התיק. "להעביר לתיק" מראה אותן, ומעתיק את אלה שנבחרו. אותה שורה מופיעה בעמוד החומרים של התיק ("להביא מהקליניקה"). רק הרשומה מועתקת; התרשומת האישית וההקלטות נשארות בכרטיס.
+- **כולן התקיימו.** ב"סגירת היום", כשנשארו שתי פגישות או יותר בלי סימון: חלון שמונה אותן, ואחרי אישור כולן מסומנות "התקיימה".
+- **חיפוש.** אות סופית ואות רגילה הן אותה אות בכל חיפוש: "גן" מוצא גם "גנים".
+- **רשימת ההמתנה.** שני הצעדים של קביעת פגישות בחזית; "לסמן כדחוף", "עריכת הפרטים" ו"להסיר מהרשימה" ב-⋯.
+- **The contract.** No new request. `NotesToCase` (card and the case's materials page) calls `note_to_case` once per chosen note; `DayClose` calls `save_visit` once per visit. `logic::search_letter` folds a final letter before comparing, one char to one char, so `snippet` cuts the original at the same place; `apps/desktop/src/searchForm.ts` is the same rule for the UI and the demo core.
+
 ## מה לא נכנס לבטא (ולמה)
 - תזכורות אוטומטיות ב-SMS או ב-WhatsApp: שירות בתשלום ויציאה לרשת. התשתית מוכנה להרחבה (`Delivery` ב-D-201), אבל ספק כזה דורש אישור עלות של עינת וחריג יציאה חדש.
 - אפליקציה לנייד, חשבוניות: ראו הטבלה למעלה. ביומן גוגל: רמת פירוט נוספת (סוג פגישה, ראשי תיבות) רק כהחלטה נפרדת.

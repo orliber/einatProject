@@ -11,6 +11,7 @@ import type { PatientCard } from "../../ipc/generated/PatientCard";
 import type { SessionNote } from "../../ipc/generated/SessionNote";
 import { useNoteToCase } from "./clinicData";
 import { formatDate, VISIT_KIND_LABEL } from "./format";
+import "./NotesToCase.css";
 
 /** The records that can still go to the case: written, and not copied yet. Oldest first, the
  *  order the report tells them in. */
@@ -21,23 +22,28 @@ export function notesForCase(card: PatientCard): SessionNote[] {
     .sort((a, b) => (a.date === b.date ? 0 : a.date < b.date ? -1 : 1));
 }
 
-/** The line under the notes' title, and the window it opens. Nothing when there is nothing to copy. */
-export function NotesToCase({ card }: { card: PatientCard }) {
+/** The line that says how many records wait, and the window it opens. Nothing when there is
+ *  nothing to copy. On the card it stands above the notes; `inCase` is the same line on the
+ *  case's materials page, where she is when she needs them, and `onCopied` reads the case again. */
+export function NotesToCase({ card, inCase = false, onCopied }: { card: PatientCard; inCase?: boolean; onCopied?: () => void }) {
   const [open, setOpen] = useState(false);
   const waiting = notesForCase(card);
   if (waiting.length === 0 || card.case === null) return null;
+  const many = waiting.length;
   return (
-    <div className="row note-sand pcard-to-case">
+    <div className="row note-sand to-case">
       <span className="grow">
-        {waiting.length === 1 ? "רשומה אחת עוד לא הועברה" : `${waiting.length} רשומות עוד לא הועברו`} לחומרי תיק האבחון {card.case.code}.
+        {inCase
+          ? (many === 1 ? "בכרטיס בקליניקה יש רשומה אחת של פגישה שעוד לא הועברה לחומרי התיק." : `בכרטיס בקליניקה יש ${many} רשומות של פגישות שעוד לא הועברו לחומרי התיק.`)
+          : `${many === 1 ? "רשומה אחת עוד לא הועברה" : `${many} רשומות עוד לא הועברו`} לחומרי תיק האבחון ${card.case.code}.`}
       </span>
-      <button type="button" className="btn btn-small" onClick={() => setOpen(true)}>להעביר לתיק</button>
-      {open && <ToCaseDialog card={card} notes={waiting} onClose={() => setOpen(false)} />}
+      <button type="button" className={inCase ? "btn btn-small to-case-bring" : "btn btn-small"} onClick={() => setOpen(true)}>{inCase ? "להביא מהקליניקה" : "להעביר לתיק"}</button>
+      {open && <ToCaseDialog card={card} notes={waiting} onClose={() => setOpen(false)} onCopied={onCopied} />}
     </div>
   );
 }
 
-function ToCaseDialog({ card, notes, onClose }: { card: PatientCard; notes: SessionNote[]; onClose: () => void }) {
+function ToCaseDialog({ card, notes, onClose, onCopied }: { card: PatientCard; notes: SessionNote[]; onClose: () => void; onCopied?: (() => void) | undefined }) {
   const { notify } = useApp();
   const toCase = useNoteToCase();
   const [chosen, setChosen] = useState(() => new Set(notes.map((n) => n.id)));
@@ -64,10 +70,12 @@ function ToCaseDialog({ card, notes, onClose }: { card: PatientCard; notes: Sess
         await toCase.mutateAsync(n.id);
         done += 1;
       }
+      onCopied?.();
       notify(done === 1 ? "רשומה אחת הועתקה לחומרי התיק" : `${done} רשומות הועתקו לחומרי התיק`);
       onClose();
     } catch (e) {
       const why = (e as { message?: string }).message ?? "הרשומה לא הועברה. אפשר לנסות שוב.";
+      if (done > 0) onCopied?.();
       setError(done > 0 ? `${done === 1 ? "רשומה אחת הועתקה" : `${done} רשומות הועתקו`}, ואז: ${why}` : why);
       setBusy(false);
     }
@@ -84,10 +92,10 @@ function ToCaseDialog({ card, notes, onClose }: { card: PatientCard; notes: Sess
       </>}>
       <div className="stack">
         <p>הרשומות שנבחרו יועתקו לחומרי התיק, וישמשו לכתיבת הדוח. רק הרשומה מועתקת: התרשומת האישית וההקלטות נשארות בכרטיס.</p>
-        <ul className="clinic-list pcard-to-case-list" aria-label="הרשומות שעוד לא הועברו">
+        <ul className="to-case-list" aria-label="הרשומות שעוד לא הועברו">
           {notes.map((n) => (
             <li key={n.id}>
-              <label className="row clinic-check">
+              <label className="row to-case-row">
                 <input type="checkbox" checked={chosen.has(n.id)} disabled={busy} onChange={() => toggle(n.id)} />
                 <span className="num" dir="ltr">{formatDate(n.date)}</span>
                 <span>{kindOf(n)}</span>

@@ -1,3 +1,4 @@
+import { cardOfCaseQuery } from "./case/ClinicRecords";
 import { ReadDocsDialog } from "../components/ReadDocs";
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { useApp } from "../App";
@@ -26,7 +27,6 @@ import { useKept } from "../kept";
 import "./CaseScreen.css";
 import { useAi } from "../ai";
 import { useShownName } from "../discreet";
-import { clinicApi } from "../ipc/clinic";
 import { notSentMessage } from "../sending";
 import { useQuery } from "@tanstack/react-query";
 import { forgetRun, isRunning, runLine, runWholeReport, showingCase, stopRun, useRun } from "./case/reportRun";
@@ -140,14 +140,6 @@ function sectionState(s: CaseDetail["sections"][number]): SectionState {
   return "empty";
 }
 
-/** The clinic patient whose card is linked to the case, or `null`. */
-async function cardOfCase(caseId: string): Promise<string | null> {
-  const now = new Date();
-  const pad = (n: number) => String(n).padStart(2, "0");
-  const rows = await clinicApi.patients({ date: `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`, minute: now.getHours() * 60 + now.getMinutes() });
-  return rows.find((r) => r.patient.case_id === caseId)?.patient.id ?? null;
-}
-
 export function CaseScreen({ caseId, view, section }: { caseId: string; view: string; section?: string }) {
   const { go, fail, lockNow, status, notify, showHelp } = useApp();
   const shown = useShownName();
@@ -155,7 +147,7 @@ export function CaseScreen({ caseId, view, section }: { caseId: string; view: st
   // and on the lock screen. The hourly look for a version still runs while a case is open.
   useDailyUpdateCheck();
   // The clinic card linked to this case, if any (D-195). Quiet: a failure only hides the link.
-  const clinicCard = useQuery({ queryKey: ["clinic", "card-of-case", caseId], queryFn: () => cardOfCase(caseId), staleTime: 60_000 });
+  const clinicCard = useQuery(cardOfCaseQuery(caseId));
   const ai = useAi();
   const [detail, setDetail] = useState<CaseDetail | null>(null);
   const detailRef = useRef<CaseDetail | null>(null);

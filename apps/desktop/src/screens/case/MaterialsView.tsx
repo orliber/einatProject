@@ -1,3 +1,4 @@
+import { ClinicRecords } from "./ClinicRecords";
 import { useEffect, useRef, useState, type DragEvent } from "react";
 import { flushSync } from "react-dom";
 import { useApp } from "../../App";
@@ -356,6 +357,8 @@ export function MaterialsView({ api, onWrite }: { api: CaseApi; onWrite?: () => 
             ))}
           </div>
         )}
+
+        <ClinicRecords caseId={caseId} onCopied={() => void reload()} />
 
         <div className={`dropzone wide${dropOn === "any" ? " over" : ""}`} {...dropProps("any")}>
           <UploadIcon />
