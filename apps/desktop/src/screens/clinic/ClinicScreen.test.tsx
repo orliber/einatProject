@@ -1114,4 +1114,34 @@ describe("supervision, what not to forget, and recordings (D-207, D-208)", () =>
       Reflect.deleteProperty(navigator, "mediaDevices");
     }
   });
+
+  it("while the computer asks for the microphone nothing starts twice, and a microphone granted after the window closed is let go", async () => {
+    let grant: (s: MediaStream) => void = () => undefined;
+    const getUserMedia = vi.fn(() => new Promise<MediaStream>((ok) => { grant = ok; }));
+    Object.defineProperty(navigator, "mediaDevices", { value: { getUserMedia }, configurable: true });
+    const made = vi.fn();
+    vi.stubGlobal("MediaRecorder", Object.assign(function MediaRecorder() { made(); }, { isTypeSupported: () => true }));
+    try {
+      const { user } = await openClinic();
+      await within(todays()).findByRole("button", { name: "תמר" });
+      await fromMenu(user, rowOf("תמר"), "לכתוב סיכום");
+      const dialog = await screen.findByRole("dialog", { name: "סיכום מפגש אבחון" });
+      await user.click(await within(dialog).findByRole("button", { name: "להקליט" }));
+      const waiting = within(dialog).getByRole("button", { name: "מחכה למיקרופון…" });
+      expect(waiting).toBeDisabled();
+      expect(getUserMedia).toHaveBeenCalledTimes(1);
+      // Closing now asks first; she leaves anyway.
+      await user.keyboard("{Escape}");
+      const ask = await within(dialog).findByRole("alertdialog");
+      await user.click(within(ask).getAllByRole("button").find((b) => b.textContent !== "להמשיך לערוך") as HTMLElement);
+      await waitFor(() => expect(screen.queryByRole("dialog", { name: "סיכום מפגש אבחון" })).toBeNull());
+      const stop = vi.fn();
+      grant({ getTracks: () => [{ stop }] } as unknown as MediaStream);
+      await waitFor(() => expect(stop).toHaveBeenCalled());
+      expect(made).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+      Reflect.deleteProperty(navigator, "mediaDevices");
+    }
+  });
 });

@@ -149,7 +149,7 @@ function NoteForm(props: Omit<NoteDialogProps, "visit"> & {
       footer={(close) => <>
         <span className="grow" />
         <button type="button" className="btn" onClick={close}>ביטול</button>
-        <button type="button" className="btn btn-primary" disabled={busy || !dirty} onClick={() => void submit()}>שמירה</button>
+        <button type="button" className="btn btn-primary" disabled={busy || !dirty || recording} onClick={() => void submit()}>שמירה</button>
       </>}>
       <div className="stack clinic-form">
         {visit === null && (
@@ -213,7 +213,7 @@ function NoteForm(props: Omit<NoteDialogProps, "visit"> & {
                 {" "}רק הרשומה מועתקת. התרשומת האישית נשארת כאן.
               </span>
               <span className="row">
-                <button type="button" className="btn btn-small" disabled={busy || record.trim() === ""} onClick={() => void sendToCase()}>
+                <button type="button" className="btn btn-small" disabled={busy || recording || record.trim() === ""} onClick={() => void sendToCase()}>
                   {sent ? "להעביר שוב לחומרי התיק" : "להעביר לחומרי התיק"}
                 </button>
                 {sent && <span className="chip chip-ok">הועברה לתיק {linked.code}</span>}

@@ -1894,7 +1894,7 @@ impl Core {
         } else {
             Some(find(v, &new.note_id)?)
         };
-        let mut note = match stored.clone() {
+        let note = match stored.clone() {
             Some(note) => note,
             None => {
                 let date = match new.visit_id.as_deref().filter(|id| !id.trim().is_empty()) {
@@ -1930,19 +1930,44 @@ impl Core {
                 .take(rules::SHORT_MAX)
                 .collect(),
         };
+        // What the vault holds in all: within what a backup can be restored from (D-208).
+        let kept: u64 = all::<SessionNote>(v)?
+            .iter()
+            .flat_map(|n| n.recordings.iter())
+            .map(|r| u64::from(r.bytes))
+            .sum();
+        if kept.saturating_add(u64::from(info.bytes)) > rules::RECORDINGS_TOTAL_MAX_BYTES {
+            return refuse(&format!(
+                "בכספת כבר שמורות הקלטות בהיקף של כ-{} מגה-בייט, וזה המקסימום, כדי שהגיבוי יישאר קטן מספיק לשחזור. אפשר למחוק הקלטות ישנות שכבר לא צריך.",
+                rules::RECORDINGS_TOTAL_MAX_BYTES / (1024 * 1024)
+            ));
+        }
+        // Checked before anything is written: the id is the only thing still missing.
+        let mut check = note.clone();
+        check.recordings.push(info.clone());
+        rules::validate_note(&check).map_err(refusal)?;
         let sound = to_json(&RecordingSound { mime, data })?;
         let day = rules::day_number(&saved_on).unwrap_or_default();
-        let vault = self.vault_mut()?;
-        info.id = vault.clinic_put(RECORDING, None, Some(&new.patient_id), day, &sound, None)?;
-        note.recordings.push(info.clone());
-        let check = rules::validate_note(&note).map_err(refusal);
         let action = if stored.is_some() { CHANGED } else { CREATED };
-        let written = check.and_then(|()| write(vault, &mut note, Some(action)));
-        if let Err(e) = written {
-            // The note did not take it: the sound goes too, so nothing is kept unlisted.
-            let _ = vault.clinic_delete(&info.id, false);
-            return Err(e);
-        }
+        let note_day = day_of(&note);
+        let patient_id = new.patient_id.clone();
+        let mut kept_note = note.clone();
+        let (_, note_id) = self.vault_mut()?.clinic_add_recording(
+            &patient_id,
+            day,
+            &sound,
+            |sound_id| {
+                info.id = sound_id.to_owned();
+                kept_note.recordings.push(info.clone());
+                let json = serde_json::to_string(&kept_note)
+                    .map_err(|_| VaultError::Refused("a note could not be written".to_owned()))?;
+                let id = (!kept_note.id.is_empty()).then(|| kept_note.id.clone());
+                Ok((id, Some(patient_id.clone()), note_day, json))
+            },
+            action,
+        )?;
+        let mut note = kept_note;
+        note.id = note_id;
         Ok(ClinicReply::Note(note))
     }
 

@@ -5,6 +5,7 @@
 // player lives only while the dialog is open.
 import { useEffect, useRef, useState } from "react";
 import { useApp } from "../../App";
+import { ipc } from "../../ipc/client";
 import { clinicApi } from "../../ipc/clinic";
 import type { RecordingInfo } from "../../ipc/generated/RecordingInfo";
 import type { SessionNote } from "../../ipc/generated/SessionNote";
@@ -86,7 +87,9 @@ function micProblem(e: unknown): string {
   return "ההקלטה לא התחילה. אפשר לנסות שוב, או להקליט בטלפון ולצרף את הקובץ.";
 }
 
-type Phase = { kind: "idle" } | { kind: "recording"; seconds: number } | { kind: "saving" };
+type Phase = { kind: "idle" } | { kind: "starting" } | { kind: "recording"; seconds: number } | { kind: "saving" };
+/** While she records, the vault is told she is there this often (she types and clicks nothing). */
+const TOUCH_EVERY_SECONDS = 30;
 
 export function Recordings({ note, patientId, visitId, date, onNote, onBusy }: {
   /** The note as kept; `null` before it was ever saved (the first recording creates it). */
@@ -112,6 +115,17 @@ export function Recordings({ note, patientId, visitId, date, onNote, onBusy }: {
   const timer = useRef<number | null>(null);
   const started = useRef(0);
   const file = useRef<HTMLInputElement>(null);
+  /** False once the dialog is gone: a microphone granted after that is let go at once. */
+  const alive = useRef(true);
+  /** A recording is being started or is under way: a second one never starts over it. */
+  const live = useRef(false);
+  // What a recording that ends goes with is read when it ends, not when it began: the note
+  // may have been saved (and so made) in between.
+  const target = useRef({ noteId: note?.id ?? "", date });
+  const noteId = note?.id ?? "";
+  useEffect(() => {
+    target.current = { noteId, date };
+  }, [noteId, date]);
   const list = note?.recordings ?? [];
   const full = list.length >= RECORDINGS_MAX;
   const busy = phase.kind !== "idle";
@@ -119,7 +133,11 @@ export function Recordings({ note, patientId, visitId, date, onNote, onBusy }: {
   useEffect(() => onBusy(busy), [busy, onBusy]);
 
   // Closed while recording: the microphone is let go and nothing is kept. The player's sound is let go too.
-  useEffect(() => () => {
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+    alive.current = false;
+    live.current = false;
     if (timer.current !== null) window.clearInterval(timer.current);
     if (recorder.current && recorder.current.state !== "inactive") {
       recorder.current.ondataavailable = null;
@@ -127,6 +145,7 @@ export function Recordings({ note, patientId, visitId, date, onNote, onBusy }: {
       recorder.current.stop();
     }
     stream.current?.getTracks().forEach((t) => t.stop());
+    };
   }, []);
   useEffect(() => () => {
     if (playing) URL.revokeObjectURL(playing.url);
@@ -144,25 +163,35 @@ export function Recordings({ note, patientId, visitId, date, onNote, onBusy }: {
     setPhase({ kind: "saving" });
     try {
       const data = await base64Of(blob);
-      const saved = await save.mutateAsync({ patientId, noteId: note?.id ?? "", visitId, date, mime, seconds, name, data });
+      const { noteId, date: on } = target.current;
+      const saved = await save.mutateAsync({ patientId, noteId, visitId, date: on, mime, seconds, name, data });
       onNote(saved);
       notify("ההקלטה נשמרה בכספת");
     } catch (e) {
       setError((e as { message?: string }).message ?? "ההקלטה לא נשמרה. אפשר לנסות שוב.");
     } finally {
-      setPhase({ kind: "idle" });
+      live.current = false;
+      if (alive.current) setPhase({ kind: "idle" });
     }
   }
 
   async function start() {
+    if (live.current) return;
     setError(null);
     const mime = recorderMime();
     if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
       setError("המחשב הזה לא מאפשר להקליט מתוך התוכנה. אפשר להקליט בטלפון ולצרף את הקובץ.");
       return;
     }
+    live.current = true;
+    setPhase({ kind: "starting" });
     try {
       const mic = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (!alive.current || !live.current) {
+        // Closed, or cancelled, while the computer asked: nothing is recorded.
+        mic.getTracks().forEach((t) => t.stop());
+        return;
+      }
       stream.current = mic;
       const rec = new MediaRecorder(mic, { ...(mime ? { mimeType: mime } : {}), audioBitsPerSecond: BITS_PER_SECOND });
       recorder.current = rec;
@@ -186,12 +215,18 @@ export function Recordings({ note, patientId, visitId, date, onNote, onBusy }: {
       timer.current = window.setInterval(() => {
         const seconds = Math.floor((Date.now() - started.current) / 1000);
         setPhase({ kind: "recording", seconds });
+        // Speaking is not typing: without this the vault would lock at its idle time, and the recording would be lost.
+        if (seconds > 0 && seconds % TOUCH_EVERY_SECONDS === 0) void ipc.touch().catch(() => undefined);
         if (seconds >= LONGEST_SECONDS && rec.state === "recording") rec.stop();
       }, 1000);
     } catch (e) {
       stream.current?.getTracks().forEach((t) => t.stop());
       stream.current = null;
-      setError(micProblem(e));
+      live.current = false;
+      if (alive.current) {
+        setPhase({ kind: "idle" });
+        setError(micProblem(e));
+      }
     }
   }
 
@@ -212,6 +247,7 @@ export function Recordings({ note, patientId, visitId, date, onNote, onBusy }: {
     if (timer.current !== null) window.clearInterval(timer.current);
     timer.current = null;
     chunks.current = [];
+    live.current = false;
     setPhase({ kind: "idle" });
   }
 
@@ -279,7 +315,7 @@ export function Recordings({ note, patientId, visitId, date, onNote, onBusy }: {
       ) : (
         <div className="row">
           <button type="button" className="btn btn-small" disabled={busy || full} onClick={() => void start()}>
-            {phase.kind === "saving" ? "שומרת…" : "להקליט"}
+            {phase.kind === "saving" ? "שומרת…" : phase.kind === "starting" ? "מחכה למיקרופון…" : "להקליט"}
           </button>
           <button type="button" className="btn btn-small" disabled={busy || full} onClick={() => file.current?.click()}>לצרף קובץ הקלטה</button>
           <input ref={file} type="file" accept="audio/*,.m4a,.mp3,.wav,.ogg,.webm" hidden

@@ -1095,3 +1095,50 @@ fn a_recording_has_no_history_is_not_a_patient_record_and_goes_with_the_patient(
         .unwrap();
     assert_eq!(left, 0);
 }
+
+#[test]
+fn a_recording_and_its_note_are_written_together_or_not_at_all() {
+    let (_d, mut v) = new_vault();
+    let p1 = v.save_clinic_patient(None, r#"{"name":"נועם"}"#).unwrap();
+    let count = |v: &Vault| -> i64 {
+        v.main
+            .query_row("SELECT COUNT(*) FROM clinic_records", [], |r| r.get(0))
+            .unwrap()
+    };
+    // The note cannot be made: the sound is not kept either.
+    let failed = v.clinic_add_recording(
+        &p1,
+        1,
+        r#"{"data":"AAAA"}"#,
+        |_| Err(VaultError::Refused("no".to_owned())),
+        "created",
+    );
+    assert!(failed.is_err());
+    assert_eq!(count(&v), 0);
+    // Another patient's note is refused, and nothing is kept.
+    let other = v.clinic_add_recording(
+        &p1,
+        1,
+        r#"{"data":"AAAA"}"#,
+        |_| Ok((None, Some("p2".to_owned()), 1, "{}".to_owned())),
+        "created",
+    );
+    assert!(matches!(other, Err(VaultError::Refused(_))));
+    assert_eq!(count(&v), 0);
+    // Both, and the note knows the sound's id.
+    let (sound, note) = v
+        .clinic_add_recording(
+            &p1,
+            1,
+            r#"{"data":"AAAA"}"#,
+            |id| Ok((None, Some(p1.clone()), 1, format!(r#"{{"sound":"{id}"}}"#))),
+            "created",
+        )
+        .unwrap();
+    assert_eq!(count(&v), 2);
+    assert!(v.clinic_get(&note).unwrap().unwrap().json.contains(&sound));
+    assert!(v.clinic_history(&sound).unwrap().is_empty());
+    assert_eq!(v.clinic_history(&note).unwrap().len(), 1);
+    // The scan for rows that do not open leaves the sound out.
+    assert_eq!(v.clinic_unreadable().unwrap(), 0);
+}

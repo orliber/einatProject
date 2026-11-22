@@ -1080,6 +1080,8 @@ export class FakeClinic {
       }
     }
     for (const record of gone) this.marked.delete(record);
+    // The recordings go with the patient (D-208).
+    for (const n of this.notes) if (n.patient_id === id) for (const rec of n.recordings) this.sounds.delete(rec.id);
     this.visits = this.visits.filter((v) => v.patient_id !== id);
     this.notes = this.notes.filter((n) => n.patient_id !== id);
     this.payments = this.payments.filter((x) => x.patient_id !== id);
@@ -1186,7 +1188,7 @@ export class FakeClinic {
     visitKnown(v);
     if (ownTime(v.kind)) {
       const what = VISIT_KIND_LABEL[v.kind];
-      need(v.patient_id === null, `${what} היא בלי מטופל. כדי לקבוע פגישה עם מטופל צריך לבחור סוג פגישה אחר.`);
+      need(v.patient_id === null, `ב${what} אין מטופל. כדי לקבוע פגישה עם מטופל צריך לבחור סוג פגישה אחר.`);
       need(v.fee === 0, `ל${what} אין מחיר.`);
     } else {
       need(v.patient_id !== null, "צריך לבחור מטופל לפגישה.");
@@ -1385,6 +1387,9 @@ export class FakeClinic {
     need(bytes <= 40 * 1024 * 1024, "ההקלטה גדולה מדי. אפשר לשמור הקלטה של עד 40 מגה-בייט.");
     const p = this.patient(r.patient_id);
     const visitId = blankToNull(r.visit_id);
+    if (visitId === null && r.note_id === "") realDate(r.date.trim(), "תאריך");
+    const kept = this.notes.reduce((sum, n) => sum + n.recordings.reduce((a, x) => a + x.bytes, 0), 0);
+    need(kept + bytes <= 600 * 1024 * 1024, "בכספת כבר שמורות הקלטות בהיקף של כ-600 מגה-בייט, וזה המקסימום, כדי שהגיבוי יישאר קטן מספיק לשחזור. אפשר למחוק הקלטות ישנות שכבר לא צריך.");
     let note: SessionNote | null = r.note_id === "" ? (visitId === null ? null : this.notes.find((n) => n.visit_id === visitId) ?? null) : this.note(r.note_id);
     if (visitId !== null) need(this.visit(visitId).patient_id === p.id, "הפגישה שנבחרה שייכת למטופל אחר.");
     need(note === null || note.patient_id === p.id, "ההקלטה שייכת לסיכום של מטופל אחר.");
@@ -1547,7 +1552,7 @@ export class FakeClinic {
     for (const d of s.defaults) {
       need(whole(d.minutes, 5, 720), "משך הפגישה צריך להיות בין 5 דקות ל-12 שעות.");
       need(whole(d.fee, 0, MAX_AGOROT), "מחיר הפגישה צריך להיות בין 0 ל-100,000 ₪.");
-      need(!ownTime(d.kind) || d.fee === 0, "לזמן שמור אין מחיר.");
+      need(!ownTime(d.kind) || d.fee === 0, `ל${VISIT_KIND_LABEL[d.kind]} אין מחיר.`);
     }
     need(s.places.length <= MAX_PLACES, `אפשר לשמור עד ${MAX_PLACES} מקומות.`);
     s.places.forEach((place) => short(place, "מקום"));

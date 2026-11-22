@@ -39,6 +39,9 @@ pub const REMEMBER_MAX: usize = 20;
 pub const RECORDINGS_MAX: usize = 10;
 /// The largest recording, in bytes (D-208): over an hour at the rate the app records.
 pub const RECORDING_MAX_BYTES: usize = 40 * 1024 * 1024;
+/// All the recordings in the vault together, in bytes (D-208): the backup of a vault holds
+/// them sealed (a third larger, in base64), and a backup over 1 GiB is not restored.
+pub const RECORDINGS_TOTAL_MAX_BYTES: u64 = 600 * 1024 * 1024;
 /// The longest a recording is said to be, in seconds (D-208): four hours.
 pub const RECORDING_MAX_SECONDS: u32 = 4 * 60 * 60;
 /// The kinds of sound a recording may be (D-208): what the app records and what a phone or a
@@ -612,7 +615,7 @@ pub fn validate_visit(visit: &Visit) -> Result<(), DomainError> {
         let what = kind_label(visit.kind);
         if has_patient {
             return refuse(format!(
-                "{what} היא בלי מטופל. כדי לקבוע פגישה עם מטופל צריך לבחור סוג פגישה אחר."
+                "ב{what} אין מטופל. כדי לקבוע פגישה עם מטופל צריך לבחור סוג פגישה אחר."
             ));
         }
         if visit.fee != 0 {
