@@ -1075,6 +1075,19 @@ fn her_own_section_shows_how_she_wrote_it_before_without_sending_anything() {
     {
         no_secrets(line, "the help beside her own section");
     }
+    // D-212: the report itself opens to read, as it is kept: neutralized, under its headings.
+    let id = core.style_overview().unwrap().sources[0].id.clone();
+    let whole = core.style_source_text(&id).unwrap();
+    assert!(!whole.parts.is_empty() && !whole.title.is_empty());
+    assert!(whole.parts.iter().any(|p| p.text.contains("נפרד")));
+    for p in &whole.parts {
+        no_secrets(&p.text, "a past report opened to read");
+        no_secrets(&p.heading, "a heading of a past report opened to read");
+    }
+    assert!(matches!(
+        core.style_source_text("no-such-report"),
+        Err(CoreError::NotFound(_))
+    ));
     // A section she never wrote has nothing to show, and nothing left the computer.
     assert!(core.own_section_help("dsm").unwrap().examples.is_empty());
     assert!(fake.sent.lock().unwrap().is_empty());

@@ -475,6 +475,11 @@ describe("the keyboard with the brief folded (D-204)", () => {
     // Not shown by the folded-brief rule: the gap line is the one that says it.
     expect(within(first).queryByRole("button", { name: "✦ לנסח את הסעיף" })).toBeNull();
     expect(page.querySelectorAll(sourcesShown)).toHaveLength(0);
+    // D-210: it is still written with the AI, from her points only; the box opens on request.
+    expect(within(first).queryByText("מה לכתוב בסעיף?")).toBeNull();
+    await user.click(within(first).getByRole("button", { name: "✦ לנסח מנקודות" }));
+    expect(await within(first).findByText("מה לכתוב בסעיף?")).toBeInTheDocument();
+    expect(within(first).getByRole("button", { name: "✦ לנסח מהנקודות" })).toBeInTheDocument();
   });
 
   it("Enter on “✦ לנסח את הסעיף” keeps the keyboard on the section while it is written, and the next Enter approves the draft", async () => {

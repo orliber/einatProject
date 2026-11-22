@@ -73,7 +73,8 @@ test("home → new case → materials → review before sending → report page"
   await expectAccessible(page);
 
   // Write one section through the same review, then approve the draft on the page.
-  await report.getByRole("button", { name: "✦ לנסח" }).first().click();
+  // Not "✦ לנסח מנקודות" of a section with no material (D-210).
+  await report.getByRole("button", { name: /^✦ לנסח( את הסעיף)?$/ }).first().click();
   const sectionReview = page.getByRole("dialog", { name: /^לפני שליחה ל-Claude/ });
   await expect(sectionReview).toBeVisible();
   await expect(sectionReview.getByLabel("מה Claude יקבל")).not.toContainText("יונתן");

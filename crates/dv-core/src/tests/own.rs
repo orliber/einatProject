@@ -160,3 +160,53 @@ fn her_section_is_not_checked_and_her_approved_text_feeds_the_summary() {
     assert!(sent.contains("נפרד מאמו בקלות"), "{sent}");
     assert!(!sent.contains("אלון"), "{sent}");
 }
+
+/// D-210: a section the AI writes that has no material linked to it is worded from her points,
+/// and only they go out. What she wrote there before stays.
+#[test]
+fn a_section_with_no_material_is_worded_from_her_points_and_keeps_what_she_wrote() {
+    let fake = FakeTransport::default();
+    let (_dir, mut core, case) = setup(Some(fake.clone()));
+    let shown = section(&mut core, &case, "cognitive");
+    assert_eq!(shown.mode, dv_domain::SectionMode::Ai);
+    assert_eq!(shown.source_count, 0, "nothing feeds it in this case");
+    core.add_own_paragraph(&case, "cognitive", "פסקה שכתבתי בעצמי.")
+        .unwrap();
+
+    let p = core
+        .prepare_from_points(&case, "cognitive", "חשיבה חזותית טובה\nקושי בזיכרון עבודה")
+        .unwrap();
+    assert!(p.blocked.is_empty(), "{:?}", p.blocked);
+    *fake.answer.lock().unwrap() = Some(api_json(&json!({
+        "reply": "הנה",
+        "paragraphs": [{
+            "text": "[ילד] מפגין חשיבה חזותית טובה, ועם זאת ניכר קושי בזיכרון העבודה.",
+            "source_refs": [],
+            "guide": 0,
+        }],
+        "questions": [], "missing": [], "contradictions": [],
+    })));
+    core.send_section(&p.approval_id.unwrap()).unwrap();
+    let sent = fake.sent.lock().unwrap().clone();
+    assert_eq!(sent.len(), 1);
+    assert!(sent[0].contains(dv_ai::POINTS_LINE));
+    assert!(sent[0].contains("חשיבה חזותית טובה"));
+    // Neither a material nor the paragraph she wrote goes with her points.
+    assert!(
+        !sent[0].contains("kind=") && !sent[0].contains("פסקה שכתבתי"),
+        "{}",
+        sent[0]
+    );
+    let after = section(&mut core, &case, "cognitive");
+    let texts: Vec<&str> = after.paragraphs.iter().map(|p| p.text.as_str()).collect();
+    assert_eq!(texts.len(), 2, "{texts:?}");
+    assert_eq!(texts[0], "פסקה שכתבתי בעצמי.");
+    assert_eq!(after.paragraphs[0].status, DraftStatus::Approved);
+    assert_eq!(after.paragraphs[1].status, DraftStatus::Proposed);
+
+    // A closing section is written from the approved sections, never from points.
+    assert!(matches!(
+        core.prepare_from_points(&case, "summary", "נקודה"),
+        Err(CoreError::Refused(_))
+    ));
+}

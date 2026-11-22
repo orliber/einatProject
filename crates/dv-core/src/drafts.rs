@@ -616,6 +616,11 @@ fn unfounded_numbers(
     {
         return Vec::new();
     }
+    // Worded from her points in a section with no material (D-210): the points are not
+    // kept, and the number check made when the answer came is kept with the paragraph.
+    if d.source_refs.is_empty() && !DERIVED_SECTIONS.contains(&section_key) {
+        return Vec::new();
+    }
     let rests_on: Vec<&str> = if DERIVED_SECTIONS.contains(&section_key) {
         body.to_vec()
     } else {

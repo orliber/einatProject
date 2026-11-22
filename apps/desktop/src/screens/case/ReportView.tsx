@@ -393,6 +393,9 @@ function A4Section({ api, section: s, focused, onPick, onNext }: {
   // her points are worded on the section's own screen.
   const mine = s.mode === "self";
   const canWrite = !mine && (s.source_count > 0 || !s.sortable);
+  /** No material is linked to it (D-210): the AI words it from her points only. */
+  const unfed = !mine && s.sortable && s.source_count === 0;
+  const [asking, setAsking] = useState(false);
   const busy = preparing || job !== undefined;
   const waiting = pending.length > 0;
   // D-204: with the brief folded, the section in focus may have nothing that takes the keyboard:
@@ -709,12 +712,30 @@ function A4Section({ api, section: s, focused, onPick, onNext }: {
     mine ? { label: "הנקודות שלך לסעיף", run: openGuide } : { label: guideOpen ? "לסגור את ההנחיה לסעיף" : "איך לכתוב את הסעיף", run: openGuide },
     ...(s.sortable && !mine ? [{ label: "מאיזה חומרים לכתוב", run: () => setOpen("sources") }] : []),
     { label: "+ פסקה משלי בסוף הסעיף", run: () => edit(null, "", "end"), disabled: editing !== null },
+    ...(s.paragraphs.length > 0 && pending.length === 0 ? [{ label: `✦ לבקש מ-${ai} להוסיף לסעיף`, run: () => { onPick(); setAsking(true); }, disabled: busy }] : []),
     { label: "מה יצא מהמחשב בשביל הסעיף", run: () => setSentOpen(true) },
     // The section's own page (its conversation, the check against the sources) stays one click away.
     ...(mine ? [] : [{ label: "עמוד הסעיף", run: toSectionPage }]),
     ...(pending.length > 0 ? [{ label: "הסרת הטיוטה", danger: true, run: () => void act(async () => { for (const p of pending) await ipc.rejectParagraph(caseId, p.id); }) }] : []),
   ];
   const empty = s.paragraphs.length === 0;
+  /** Her points, worded by the AI: in a section of her own, and in one with no material (D-210). */
+  const pointsBox = (title: string, hint: string) => (
+    <BriefBox id={`brief-${s.key}`} title={title} chips={STYLE_CHIPS} chipsTitle="סגנון"
+      hint={hint}
+      placeholder="למשל: הקשר עם הגננת טוב · קשה במעברים · התקדמות מאז הסתיו"
+      initial={points} sendLabel="✦ לנסח מהנקודות" busy={busy} autoFocus
+      needs={{ what: "typed", say: "כתבי קודם את הנקודות שלך. רק הן יוצאות." }}
+      onSend={(wish, typed) => {
+        if (!typed) return;
+        setPoints(typed);
+        setAsking(false);
+        // The points first, as she wrote them; a chosen style after them.
+        const style = wish.slice(0, Math.max(0, wish.length - typed.length)).trim();
+        void write(style ? `${typed}\n\n${style}` : typed, undefined, true);
+      }}
+      onCancel={() => { setAsking(false); heading.current?.focus(); }} />
+  );
   const state = mine ? "mine" : pending.length > 0 ? "draft" : empty ? "empty" : "approved";
 
   return (
@@ -745,7 +766,10 @@ function A4Section({ api, section: s, focused, onPick, onNext }: {
       {focused && s.sortable && !mine && (
         <div className="a4-sources">
           <span>{!sources.length ? "אין חומרים לסעיף." : pending.length ? "טיוטה · מתוך" : empty ? "מתוך" : "נכתב מתוך"}</span>
-          {sourceNames.slice(0, 6).map((name, i) => <span key={i} className="a4-source">{name}</span>)}
+          {/* D-212: a material's name opens it to read, beside the report. */}
+          {sources.slice(0, 6).map((i) => api.readDoc
+            ? <button key={i.id} type="button" className="a4-source a4-source-open" title="לפתוח את החומר לקריאה" onClick={() => api.readDoc?.(i.id)}>{i.title || kindLabel[i.kind]}</button>
+            : <span key={i.id} className="a4-source">{i.title || kindLabel[i.kind]}</span>)}
           {sources.length > 6 && <span className="a4-source">ועוד {sources.length - 6}</span>}
           <span className="a4-pop-anchor">
             <button type="button" className="a4-source-edit" aria-expanded={open === "sources"} onClick={() => setOpen(open === "sources" ? null : "sources")}>
@@ -853,19 +877,7 @@ function A4Section({ api, section: s, focused, onPick, onNext }: {
       {empty && !job && !editing && !preparing && (
         mine && focused ? (
           <div className="a4-brief">
-            <BriefBox id={`brief-${s.key}`} title="הנקודות שלך לסעיף" chips={STYLE_CHIPS} chipsTitle="סגנון"
-              hint="כתבי בנקודות מה חשוב. רק הנקודות יוצאות, ו-Claude מנסח מהן בסגנון שלך, בלי להוסיף עובדות."
-              placeholder="למשל: הקשר עם הגננת טוב · קשה במעברים · התקדמות מאז הסתיו"
-              initial={points} sendLabel="✦ לנסח מהנקודות" busy={busy} autoFocus
-              needs={{ what: "typed", say: "כתבי קודם את הנקודות שלך. רק הן יוצאות." }}
-              onSend={(wish, typed) => {
-                if (!typed) return;
-                setPoints(typed);
-                // The points first, as she wrote them; a chosen style after them.
-                const style = wish.slice(0, Math.max(0, wish.length - typed.length)).trim();
-                void write(style ? `${typed}\n\n${style}` : typed, undefined, true);
-              }}
-              onCancel={() => heading.current?.focus()} />
+            {pointsBox("הנקודות שלך לסעיף", `כתבי בנקודות מה חשוב. רק הנקודות יוצאות, ו-${ai} מנסח מהן בסגנון שלך, בלי להוסיף עובדות.`)}
             <div className="row a4-brief-row">
               <button type="button" className="link-btn" onClick={() => edit(null, "", "end")}>לכתוב בעצמי</button>
               <span className="grow" />
@@ -966,13 +978,36 @@ function A4Section({ api, section: s, focused, onPick, onNext }: {
             <span className="grow">עוד לא נכתב.{sourceNames.length ? ` יש חומר: ${sourceNames.slice(0, 2).join(", ")}${sourceNames.length > 2 ? ` ועוד ${sourceNames.length - 2}` : ""}` : ""}</span>
             <button type="button" className="link-btn" disabled={busy} onClick={onPick}>✦ לנסח</button>
           </div>
+        ) : focused && asking ? (
+          // D-210: a section with no material linked to it is still written with the AI, from
+          // what she types here. Only her points go, as in a section of her own.
+          <div className="a4-brief">
+            {pointsBox("מה לכתוב בסעיף?", `אין חומרים מקושרים לסעיף. כתבי בנקודות מה לכתוב: רק הנקודות יוצאות, ו-${ai} מנסח מהן בסגנון שלך, בלי להוסיף עובדות.`)}
+          </div>
         ) : (
           <div className="a4-gap-line">
             <span className="grow">אין חומר לסעיף.</span>
+            <button type="button" className="link-btn" disabled={busy} onClick={() => { onPick(); setAsking(true); }}>✦ לנסח מנקודות</button>
             <button type="button" className="link-btn" onClick={() => setOpen("sources")}>לקשר חומרים</button>
             {focused && <button type="button" className="link-btn" onClick={() => edit(null, "", "end")}>לכתוב בעצמי</button>}
           </div>
         )
+      )}
+      {/* D-210: more from the AI in a section that already has text. What is there stays: the
+          answer comes as a draft beside it. */}
+      {!empty && focused && asking && !job && !preparing && pending.length === 0 && (
+        <div className="a4-brief">
+          {unfed || mine ? (
+            pointsBox("מה להוסיף לסעיף?", `כתבי בנקודות מה להוסיף: רק הנקודות יוצאות, ו-${ai} מנסח מהן. מה שכבר כתוב בסעיף נשאר.`)
+          ) : (
+            <BriefBox id={`more-${s.key}`} title="מה לבקש לסעיף?" chips={CHANGE_CHIPS} chipsTitle="בקשות מהירות"
+              hint="התשובה תופיע כטיוטה ליד מה שכבר כתוב. מה שאישרת נשאר."
+              placeholder="למשל: להוסיף פסקה על הקשר עם הצוות בגן"
+              recent={briefs.data?.recent} sendLabel="✦ לנסח" busy={busy} needs={CHANGE_NEEDS} autoFocus
+              onSend={(w) => { if (w.trim()) { setAsking(false); void write(w); } }}
+              onCancel={() => { setAsking(false); heading.current?.focus(); }} />
+          )}
+        </div>
       )}
       <ErrorLine error={error} />
       {sentOpen && <SentHistoryDialog caseId={caseId} place={s.key} onClose={() => setSentOpen(false)} />}

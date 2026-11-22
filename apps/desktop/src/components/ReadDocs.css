@@ -1,0 +1,25 @@
+.read-doc {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.read-doc-part h3 {
+  margin: 0 0 4px;
+  font-size: var(--text-md);
+}
+.read-doc-text {
+  font-size: var(--text-md);
+  line-height: 1.8;
+  white-space: pre-wrap;
+}
+.read-doc-back {
+  align-self: flex-start;
+  margin-bottom: 8px;
+}
+.read-docs-list {
+  margin: 0;
+  padding-inline-start: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}

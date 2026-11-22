@@ -1,3 +1,4 @@
+import { ReadDocsDialog } from "../components/ReadDocs";
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { useApp } from "../App";
 import { sortInParts } from "./case/sortParts";
@@ -69,6 +70,9 @@ export interface CaseApi {
   /** A draft for a section, from anywhere (the report page, the section): prepare, the
    *  review, and the writing with its progress. Resolves when it is in, or she went back. */
   draft: (sectionKey: string, instruction?: string, replaces?: string, points?: boolean) => Promise<boolean>;
+  /** D-212: open a document to read beside the report: the material with this id, or, with
+   *  none, the list of the case's materials and her own reports. */
+  readDoc?: (inputId?: string) => void;
 }
 
 let jobSeq = 0;
@@ -167,6 +171,9 @@ export function CaseScreen({ caseId, view, section }: { caseId: string; view: st
   const [fullDraft, setFullDraft] = useState(false);
   /** "מה יצא מהמחשב": open for one section (its key), or the whole case (""). */
   const [sentFor, setSentFor] = useState<string | null>(null);
+  /** D-212: a document open to read beside the report (a material's id, or the list). */
+  const [readingDoc, setReadingDoc] = useState<{ id?: string | undefined } | null>(null);
+  const readDoc = useCallback((inputId?: string) => setReadingDoc({ id: inputId }), []);
   /** The section in focus on the report page (round 48); `move` brings it into view. It starts
    *  on `section` when one was asked for (the cases card's "הסעיף הבא", D-204 §2). */
   const [focus, setFocus] = useState<{ key: string; at: number; move: boolean; para?: string } | null>(
@@ -425,7 +432,7 @@ export function CaseScreen({ caseId, view, section }: { caseId: string; view: st
   // Round 41: "write the whole report" runs in the background, in one line.
   const verifyOn = useQuery({ queryKey: ["verify-stage"], queryFn: ipc.verifyStageOn, enabled: !status.review_always }).data === true;
   const run = useRun(caseId);
-  const api: CaseApi | null = detail ? { caseId, detail, reload, review: startReview, sort: () => startSort().then(() => undefined), jobs, track, draft } : null;
+  const api: CaseApi | null = detail ? { caseId, detail, reload, review: startReview, sort: () => startSort().then(() => undefined), jobs, track, draft, readDoc } : null;
   // The run sees this screen, wherever it was started from (she may have left and come back).
   useEffect(() => {
     if (!api) return;
@@ -531,6 +538,7 @@ export function CaseScreen({ caseId, view, section }: { caseId: string; view: st
     { label: "פרטים ושמות להסתרה", run: () => go({ name: "case", id: caseId, view: "details" }) },
     // D-195: from the case to the child's card in the clinic, when the two are linked.
     ...(cardId ? [{ label: "כרטיס המטופל בקליניקה", run: () => go({ name: "clinic", tab: "patients", patientId: cardId }) }] : []),
+    { label: "מסמכים לקריאה: חומרי התיק והדוחות שלי", run: () => setReadingDoc({}) },
     { label: current ? `מה יצא מהמחשב בסעיף "${current.title}"` : "מה יצא מהמחשב בתיק הזה", run: () => setSentFor(current?.key ?? "") },
     { label: `כתיבת כל הדוח עם ${ai}`, run: writeAll },
     ...(showHelp && narrowBar ? [{ label: "עזרה למסך הזה (F1)", run: () => showHelp() }] : []),
@@ -683,6 +691,7 @@ export function CaseScreen({ caseId, view, section }: { caseId: string; view: st
 
       {exporting && <ExportDialog api={api} onClose={() => setExporting(false)} />}
       {fullDraft && <ReportRunDialog api={api} onClose={() => setFullDraft(false)} />}
+      {readingDoc && detail && <ReadDocsDialog inputs={detail.inputs} first={readingDoc.id} onClose={() => setReadingDoc(null)} />}
       {sentFor !== null && <SentHistoryDialog caseId={caseId} {...(sentFor ? { place: sentFor } : {})} onClose={() => setSentFor(null)} />}
       {/* Last, so it opens above the dialog that asked for it. */}
       {review && (

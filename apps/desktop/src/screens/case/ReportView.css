@@ -986,3 +986,13 @@
     display: none;
   }
 }
+.a4-source-open {
+  border: 0;
+  font: inherit;
+  cursor: pointer;
+}
+.a4-source-open:hover,
+.a4-source-open:focus-visible {
+  color: var(--primary);
+  text-decoration: underline;
+}

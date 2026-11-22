@@ -1299,10 +1299,18 @@ impl Core {
                     .to_owned(),
             ));
         }
+        // D-210: also a section with no material linked to it. Only her points go then too,
+        // so nothing of the case leaves that a section of her own would keep.
         if points && !own {
-            return Err(CoreError::Refused(
-                "ניסוח מהנקודות שלך הוא לסעיפים שאת כותבת בעצמך.".to_owned(),
-            ));
+            let unfed = letter.is_none()
+                && !DERIVED_SECTIONS.contains(&section_key)
+                && read_sources(self.vault_ref()?, &structure, case_id, section_key)?.is_empty();
+            if !unfed {
+                return Err(CoreError::Refused(
+                    "ניסוח מהנקודות שלך הוא לסעיפים שאת כותבת בעצמך, ולסעיף שאין לו חומרים מקושרים. לסעיף הזה יש חומרים, ולכן הוא מנוסח מהם."
+                        .to_owned(),
+                ));
+            }
         }
         // A paragraph worded again is a small job; a whole section is not (D-137).
         let model = if ask.replaces.is_some() {

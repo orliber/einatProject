@@ -240,6 +240,94 @@ pub(crate) fn section_text(
     Ok(FilterOutcome::join(&picked, &separators))
 }
 
+/// The record of a previous report, written into "אבחונים וטיפולים קודמים" as a draft she
+/// approves or edits (D-209). Nothing she wrote or approved is touched: a material that
+/// already has a paragraph there keeps it, and one she took out of the section gets none.
+/// The paragraph stands where the report lists that document (`record_order`).
+fn write_record_paragraph(
+    v: &mut Vault,
+    case_id: &str,
+    input: &CaseInput,
+    routing: &Routing,
+    record: &dv_domain::PriorRecord,
+) -> Result<(), CoreError> {
+    let structure = structure_for(v, case_id)?;
+    let writes = structure
+        .section(PRIOR_SECTION)
+        .is_some_and(|s| s.mode == dv_domain::SectionMode::Ai);
+    if !writes || routing.removed.iter().any(|s| s == PRIOR_SECTION) {
+        return Ok(());
+    }
+    let on_page: Vec<dv_domain::DraftParagraph> = v
+        .drafts(case_id, PRIOR_SECTION)?
+        .into_iter()
+        .filter(|d| {
+            matches!(
+                d.status,
+                dv_domain::DraftStatus::Proposed | dv_domain::DraftStatus::Approved
+            )
+        })
+        .collect();
+    if on_page.iter().any(|d| d.source_refs.contains(&input.id)) {
+        return Ok(());
+    }
+    let text = record.paragraph(dv_domain::document_date(&input.content));
+    if text.is_empty() {
+        return Ok(());
+    }
+    // Where it stands: right after the paragraph of the nearest document listed before it.
+    let listed: Vec<CaseInput> = v
+        .inputs(case_id)?
+        .into_iter()
+        .filter(|i| has_record(i.kind))
+        .collect();
+    let keys = listed
+        .iter()
+        .map(|i| prior_key(v, case_id, i))
+        .collect::<Result<Vec<_>, _>>()?;
+    let order: Vec<&str> = dv_domain::record_order(&keys)
+        .into_iter()
+        .filter_map(|k| listed.get(k).map(|i| i.id.as_str()))
+        .collect();
+    let before: Vec<&str> = order
+        .iter()
+        .copied()
+        .take_while(|id| *id != input.id)
+        .collect();
+    let after = before
+        .iter()
+        .rev()
+        .find_map(|id| {
+            on_page
+                .iter()
+                .rev()
+                .find(|d| d.source_refs.iter().any(|r| r == id))
+        })
+        .map(|d| d.id.clone());
+    let draft = v.add_draft(
+        case_id,
+        PRIOR_SECTION,
+        &text,
+        dv_domain::Author::Ai,
+        std::slice::from_ref(&input.id),
+    )?;
+    // With no document before it on the page, it comes first only when a later one is
+    // already there; otherwise it stays at the end, after what she wrote herself.
+    let later_on_page = order
+        .iter()
+        .skip_while(|id| **id != input.id)
+        .skip(1)
+        .any(|id| {
+            on_page
+                .iter()
+                .any(|d| d.source_refs.iter().any(|r| r == id))
+        });
+    if after.is_some() || later_on_page {
+        v.place_draft(case_id, &draft.id, after.as_deref())?;
+    }
+    Ok(())
+}
+
 impl Core {
     /// Where each material of a case goes, for the materials screen.
     pub(crate) fn material_routing(
@@ -301,7 +389,10 @@ impl Core {
                         kind: show(&r.kind),
                         by: show(&r.by),
                         setting: r.setting,
+                        referral: show(&r.referral),
                         findings: show(&r.findings),
+                        strengths: show(&r.strengths),
+                        summary: show(&r.summary),
                         recommendations: show(&r.recommendations),
                         date: dv_domain::document_date(&inp.content)
                             .map(dv_domain::date_text)
@@ -473,7 +564,10 @@ impl Core {
             let mut notes = Vec::new();
             let written = [
                 Some(&reading.summary),
+                record.as_ref().map(|r| &r.referral),
                 record.as_ref().map(|r| &r.findings),
+                record.as_ref().map(|r| &r.strengths),
+                record.as_ref().map(|r| &r.summary),
                 record.as_ref().map(|r| &r.recommendations),
             ];
             let mut note = |n: String| {
@@ -493,6 +587,7 @@ impl Core {
             // D-157: a summary or record that came back too long was dropped, not cut. It is
             // not kept as read, so the material is offered for sorting again, and the reason
             // is shown instead of an empty summary.
+            let ready = record.clone().filter(|_| !reading.too_long);
             routing.summary = if reading.too_long {
                 None
             } else {
@@ -522,8 +617,16 @@ impl Core {
                 serde_json::to_string(&routing).map_err(|e| CoreError::Internal(e.to_string()))?;
             match v.set_input_routing(&case_id, input_id, &json) {
                 Ok(()) if placed_any => result.sorted += 1,
-                Ok(()) | Err(VaultError::NotFound) => result.unchanged += 1,
+                Ok(()) | Err(VaultError::NotFound) => {
+                    result.unchanged += 1;
+                    continue;
+                }
                 Err(e) => return Err(e.into()),
+            }
+            // D-209: the record is the report's paragraph about this document, ready and
+            // open to her editing when she comes to write.
+            if let Some(record) = ready {
+                write_record_paragraph(v, &case_id, input, &routing, &record)?;
             }
         }
         Ok(result)

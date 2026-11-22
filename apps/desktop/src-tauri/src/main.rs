@@ -596,6 +596,7 @@ fn main() {
             similar_paragraph,
             section_library,
             own_section_help,
+            style_source_text,
             restore_paragraph_version,
             add_own_paragraph,
             prepare_consult,

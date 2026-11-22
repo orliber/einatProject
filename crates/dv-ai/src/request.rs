@@ -812,7 +812,7 @@ mod tests {
     #[test]
     fn a_section_with_no_craft_or_worded_from_her_points_gets_none() {
         let mut input = section();
-        input.section_key = "tools".into();
+        input.section_key = "signature".into();
         assert!(!text_of_request(&input).contains(CRAFT_HEADING));
         input.section_key = "letter_parents".into();
         assert!(!text_of_request(&input).contains(CRAFT_HEADING));
@@ -841,7 +841,7 @@ mod tests {
             assert!(lines.iter().all(|l| l.starts_with("- ")), "{key}");
             assert!(!craft.contains('[') && !craft.contains('<'), "{key}");
         }
-        for key in ["tools", "signature", "letter_parents", "", "Summary"] {
+        for key in ["signature", "letter_parents", "", "Summary"] {
             assert_eq!(section_craft(key), None, "{key}");
         }
     }

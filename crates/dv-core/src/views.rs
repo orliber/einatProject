@@ -299,7 +299,13 @@ pub struct PriorRecordView {
     pub kind: String,
     pub by: String,
     pub setting: dv_domain::Setting,
+    /// Why the child was referred to that assessment (D-209).
+    pub referral: String,
     pub findings: String,
+    /// Strengths and weaknesses, as that report states them (D-209).
+    pub strengths: String,
+    /// That report's own summary (D-209).
+    pub summary: String,
     pub recommendations: String,
     /// Month and year as written in the document ("3/2024"), read here; empty when none.
     pub date: String,

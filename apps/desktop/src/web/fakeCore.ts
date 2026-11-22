@@ -896,8 +896,15 @@ export class FakeCore {
       const reading: R.Reading = {
         passageCount: m.count,
         text: sentences(parts.join(" "), 2),
-        ...(report ? { record: { kind: kindLabel[i.kind], by: "", setting: "unknown" as const, findings: sentences(parts[1] ?? parts[0] ?? "", 1), recommendations: advice ? sentences(advice, 1) : "" } } : {}),
+        ...(report ? { record: { kind: kindLabel[i.kind], by: "", setting: "unknown" as const, referral: "", findings: sentences(parts[1] ?? parts[0] ?? "", 1), strengths: "", summary: "", recommendations: advice ? sentences(advice, 1) : "" } } : {}),
       };
+      // D-209: the record is already the section's draft about this document, for her to edit.
+      const label = `${kindLabel[i.kind]} · ${i.title}`;
+      if (reading.record && !c.drafts.some((d) => d.section === "prior_assessments" && d.status !== "superseded" && d.status !== "rejected" && d.sources.some((x) => x.endsWith(label)))) {
+        const rec = reading.record;
+        const lines: [string, string][] = [["סוג האבחון", rec.kind], ["מי אבחן", rec.by], ["סיבת ההפניה", rec.referral], ["ממצאי הבדיקה", rec.findings], ["חוזקות וחולשות", rec.strengths], ["סיכום", rec.summary], ["המלצות", rec.recommendations]];
+        c.drafts.push({ id: newId("d"), section: "prior_assessments", text: lines.filter(([, t]) => t.trim()).map(([l, t]) => `${l}: ${t.trim()}`).join("\n"), status: "proposed", byAi: true, sources: [label] });
+      }
       const r = { ...this.routingOf(c, m.id), reading };
       const placed = R.sortLocally(parts, keys);
       if (!placed.length) {
@@ -1181,7 +1188,9 @@ export class FakeCore {
         return { examples: [], openings: [], closings: [], phrases: [] };
       case "prepare_from_points": {
         const c = this.find(a.caseId);
-        if (this.modes.get(String(a.sectionKey)) !== "self") fail("refused", "ניסוח מהנקודות שלך הוא לסעיפים שאת כותבת בעצמך.");
+        // D-210: her own section, or one the AI writes that no material feeds.
+        const unfed = SORTABLE.some((s) => s.key === a.sectionKey) && !this.routing(c).some((r) => r.feeds.includes(String(a.sectionKey)));
+        if (this.modes.get(String(a.sectionKey)) !== "self" && !unfed) fail("refused", "ניסוח מהנקודות שלך הוא לסעיפים שאת כותבת בעצמך, ולסעיף שאין לו חומרים מקושרים. לסעיף הזה יש חומרים, ולכן הוא מנוסח מהם.");
         if (!String(a.points).trim()) fail("refused", "כותבים קודם את הנקודות, ואז מנסחים מהן.");
         return this.prepareSection(c, String(a.sectionKey), String(a.points), null, true);
       }

@@ -96,6 +96,7 @@ import type { InterpretationView } from "./generated/InterpretationView";
 import type { StyleProfile } from "./generated/StyleProfile";
 import type { StyleProfileView } from "./generated/StyleProfileView";
 import type { StyleSourceView } from "./generated/StyleSourceView";
+import type { StyleSourceText } from "./generated/StyleSourceText";
 import type { StyleSuggestion } from "./generated/StyleSuggestion";
 
 /** The largest logo the core takes (`dv_export::MAX_LOGO_BYTES`). */
@@ -506,6 +507,8 @@ export const ipc = {
     call("save_style_source", { token, included, title }),
   discardStyleUpload: () => run("discard_style_upload"),
   deleteStyleSource: (id: string) => run("delete_style_source", { id }),
+  /** One of her past reports as kept (neutralized), to read (D-212). Local only. */
+  styleSourceText: (id: string) => call("style_source_text", { id }),
   prepareStyleAnalysis: (sourceId: string) => call("prepare_style_analysis", { sourceId }),
   sendStyleAnalysis: (approvalId: string) => call("send_style_analysis", { approvalId }),
   prepareStyleProfile: () => call("prepare_style_profile"),
@@ -560,6 +563,7 @@ export type {
   StyleProfile,
   StyleProfileView,
   StyleSourceView,
+  StyleSourceText,
   StyleSuggestion,
   UpdateView,
   UsageSummary,

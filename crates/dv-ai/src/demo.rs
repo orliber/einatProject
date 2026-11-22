@@ -215,6 +215,9 @@ fn sort_locally(request: &str, keys: &[&str]) -> Value {
                 "kind": kind,
                 "by": "",
                 "setting": "unknown",
+                "referral": "",
+                "strengths": "",
+                "summary": "",
                 "findings": first_sentences(all.get(1).or(all.first()).copied().unwrap_or(""), 1),
                 "recommendations": recommendations,
             });

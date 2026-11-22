@@ -269,6 +269,15 @@ pub(crate) async fn paragraph_versions(
     with_core(&state, move |c| c.paragraph_versions(&case_id, &draft_id)).await
 }
 
+/// One of her past reports, as kept (neutralized), to read (D-212). Local only.
+#[tauri::command]
+pub(crate) async fn style_source_text(
+    state: tauri::State<'_, AppState>,
+    id: String,
+) -> Res<dv_core::StyleSourceText> {
+    with_core(&state, move |c| c.style_source_text(&id)).await
+}
+
 /// The paragraph of her past reports closest to a draft paragraph (ST2). Local only.
 #[tauri::command]
 pub(crate) async fn own_section_help(

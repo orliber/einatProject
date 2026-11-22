@@ -54,8 +54,53 @@ pub struct PriorRecord {
     /// Who did it, by role.
     pub by: String,
     pub setting: Setting,
+    /// Why the child was referred to that assessment (D-209). Empty in a record read before.
+    #[serde(default)]
+    pub referral: String,
     pub findings: String,
+    /// The child's strengths and weaknesses, as that report states them (D-209).
+    #[serde(default)]
+    pub strengths: String,
+    /// That report's own summary (D-209).
+    #[serde(default)]
+    pub summary: String,
     pub recommendations: String,
+}
+
+impl PriorRecord {
+    /// The record as it is written into "אבחונים וטיפולים קודמים" (D-209): her fixed fields, a
+    /// line each, in her order. A field the report says nothing about has no line. The date is
+    /// read from the document on the computer, never by the AI.
+    #[must_use]
+    pub fn paragraph(&self, date: Option<DocDate>) -> String {
+        let date = date.map(month_year).unwrap_or_default();
+        let lines: [(&str, &str); 8] = [
+            ("סוג האבחון", &self.kind),
+            ("מי אבחן", &self.by),
+            ("תאריך", &date),
+            ("סיבת ההפניה", &self.referral),
+            ("ממצאי הבדיקה", &self.findings),
+            ("חוזקות וחולשות", &self.strengths),
+            ("סיכום", &self.summary),
+            ("המלצות", &self.recommendations),
+        ];
+        lines
+            .iter()
+            .filter(|(_, text)| !text.trim().is_empty())
+            .map(|(label, text)| format!("{label}: {}", text.trim()))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+}
+
+/// "מרץ 2024" for a date, as a report writes it.
+#[must_use]
+pub fn month_year(date: DocDate) -> String {
+    let name = MONTHS
+        .get(usize::from(date.1).saturating_sub(1))
+        .copied()
+        .unwrap_or_default();
+    format!("{name} {}", date.0).trim().to_owned()
 }
 
 /// The reading of one material, stored with its routing. `passage_count` ties it to the text
@@ -270,6 +315,36 @@ mod tests {
         assert_eq!(document_date("נולד ב-1.1.2020"), None);
         assert_eq!(document_date("בלי תאריך"), None);
         assert_eq!(document_date("קוד 7-1234"), None);
+    }
+
+    #[test]
+    fn a_record_is_written_in_her_fields_and_an_empty_field_has_no_line() {
+        let record = PriorRecord {
+            kind: "אבחון התפתחותי".into(),
+            by: "[רופא_1]".into(),
+            setting: Setting::Community,
+            referral: "עיכוב בדיבור".into(),
+            findings: "פער בין הבנה להבעה.".into(),
+            strengths: String::new(),
+            summary: "  תמונה של עיכוב שפתי. ".into(),
+            recommendations: "טיפול אצל קלינאית תקשורת.".into(),
+        };
+        assert_eq!(
+            record.paragraph(Some((2024, 3))),
+            "סוג האבחון: אבחון התפתחותי\nמי אבחן: [רופא_1]\nתאריך: מרץ 2024\n\
+             סיבת ההפניה: עיכוב בדיבור\nממצאי הבדיקה: פער בין הבנה להבעה.\n\
+             סיכום: תמונה של עיכוב שפתי.\nהמלצות: טיפול אצל קלינאית תקשורת."
+        );
+        assert!(!record.paragraph(None).contains("תאריך"));
+        // A record kept before the new fields reads as it was.
+        let old: PriorRecord = serde_json::from_str(
+            r#"{"kind":"א","by":"ב","setting":"unknown","findings":"ג","recommendations":"ד"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            old.paragraph(None),
+            "סוג האבחון: א\nמי אבחן: ב\nממצאי הבדיקה: ג\nהמלצות: ד"
+        );
     }
 
     #[test]
