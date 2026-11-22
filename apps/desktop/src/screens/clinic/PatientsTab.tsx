@@ -2,6 +2,7 @@
 // table with a row for each family. A row opens the card through the route, so "back" and a
 // link from another tab land in the same place. Families that wait have their own tab; here
 // they show only under "כולם", or when a search finds them.
+import { searchForm } from "../../searchForm";
 import { useMemo, useState } from "react";
 import { ageWords } from "../../components/AgeField";
 import { Segmented } from "../../components/Switch";
@@ -46,14 +47,14 @@ const digits = (s: string) => s.replace(/\D/g, "");
 function haystack(row: PatientRow): { text: string; phones: string } {
   const p = row.patient;
   return {
-    text: [p.name, ...p.contacts.map((c) => c.name), ...p.contacts.map((c) => c.phone)].join("\n").toLowerCase(),
+    text: [p.name, ...p.contacts.map((c) => c.name), ...p.contacts.map((c) => c.phone)].map(searchForm).join("\n"),
     phones: p.contacts.map((c) => digits(c.phone)).filter(Boolean).join("\n"),
   };
 }
 
 function matches(hay: { text: string; phones: string }, query: string): boolean {
   if (query === "") return true;
-  if (hay.text.includes(query.toLowerCase())) return true;
+  if (hay.text.includes(searchForm(query))) return true;
   const number = digits(query);
   // Only a query that is a number is read as a phone ("יעל 3" is not).
   return number.length >= 3 && /^[\d\s()+-]+$/.test(query) && hay.phones.includes(number);

@@ -3,6 +3,7 @@
 // notes, the money and the follow-ups; and, quietly at the bottom, erasing the card.
 // Everything shown is plain text. Every name goes through `PatientName` / `useShownName`, so
 // discreet mode holds; in discreet mode phone numbers and personal notes are not shown at all.
+import { searchForm } from "../../searchForm";
 import { Fragment, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useApp } from "../../App";
@@ -570,9 +571,9 @@ const SEARCH_FROM = 6;
 /** A session note answers a search by its record, its date as it is shown ("08.11.2026"), the
  *  kind of its visit, and its personal note, which is not read in discreet mode. */
 export function noteMatches(note: SessionNote, visit: Visit | null, query: string, discreet: boolean): boolean {
-  const q = query.trim().toLowerCase();
+  const q = searchForm(query.trim());
   if (q === "") return true;
-  const hay = [note.record, formatDate(note.date), visit ? VISIT_KIND_LABEL[visit.kind] : "שיחה", discreet ? "" : note.personal].join("\n").toLowerCase();
+  const hay = [note.record, formatDate(note.date), visit ? VISIT_KIND_LABEL[visit.kind] : "שיחה", discreet ? "" : note.personal].map(searchForm).join("\n");
   return q.split(/\s+/).every((word) => hay.includes(word));
 }
 

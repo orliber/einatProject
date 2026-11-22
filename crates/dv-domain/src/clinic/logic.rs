@@ -2869,6 +2869,24 @@ const SNIPPET_BEFORE: usize = 40;
 const SNIPPET_AFTER: usize = 100;
 
 /// The words of a search: lower case, split at spaces. `Err` when it is too short or too long.
+/// One letter as the search compares it: lower case, and a Hebrew final letter as its regular
+/// form, so that "גן" also finds "גנים" and "מקום" finds "מקומות". One letter stays one letter.
+fn search_letter(c: char) -> char {
+    match c {
+        'ך' => 'כ',
+        'ם' => 'מ',
+        'ן' => 'נ',
+        'ף' => 'פ',
+        'ץ' => 'צ',
+        _ => c.to_lowercase().next().unwrap_or(c),
+    }
+}
+
+/// A text as the search compares it (see [`search_letter`]).
+fn search_form(text: &str) -> String {
+    text.chars().map(search_letter).collect()
+}
+
 pub fn search_words(text: &str) -> Result<Vec<String>, DomainError> {
     let text = text.trim();
     let letters = text.chars().filter(|c| !c.is_whitespace()).count();
@@ -2878,7 +2896,7 @@ pub fn search_words(text: &str) -> Result<Vec<String>, DomainError> {
     if text.chars().count() > NOTE_SEARCH_MAX {
         return refuse("הטקסט לחיפוש ארוך מדי. אפשר לחפש מילה או שתיים.");
     }
-    Ok(text.split_whitespace().map(str::to_lowercase).collect())
+    Ok(text.split_whitespace().map(search_form).collect())
 }
 
 /// A few words of `record` around the first place `word` (lower case) is found, on one line,
@@ -2890,7 +2908,7 @@ fn snippet(record: &str, word: &str) -> String {
         .join(" ")
         .chars()
         .collect();
-    let lower: Vec<char> = flat.iter().flat_map(|c| c.to_lowercase().next()).collect();
+    let lower: Vec<char> = flat.iter().copied().map(search_letter).collect();
     let needle: Vec<char> = word.chars().collect();
     // `lower` has one character for each of `flat`, so a place in one is the place in the other.
     let at = if needle.is_empty() || lower.len() != flat.len() {
@@ -2930,9 +2948,9 @@ pub fn search_notes(
         .iter()
         .filter(|n| names.contains_key(&n.patient_id))
         .filter(|n| {
-            let record = n.record.to_lowercase();
+            let record = search_form(&n.record);
             let own = if personal {
-                n.personal.to_lowercase()
+                search_form(&n.personal)
             } else {
                 String::new()
             };
@@ -2947,7 +2965,7 @@ pub fn search_notes(
         .into_iter()
         .take(NOTE_HITS_MAX)
         .map(|n| {
-            let record = n.record.to_lowercase();
+            let record = search_form(&n.record);
             let in_record = words.iter().find(|w| record.contains(w.as_str()));
             NoteHit {
                 note_id: n.id.clone(),

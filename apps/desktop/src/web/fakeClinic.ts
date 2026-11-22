@@ -11,6 +11,7 @@
 // core does by its own clock (the day a record was written, the retention period of an erase,
 // the latest birth date, the time of a history line) goes by `options.clock`, read as the
 // core reads it (UTC). A test gives a clock and nothing depends on the moment it runs.
+import { searchForm, searchLetter } from "../searchForm";
 import type { Age } from "../ipc/generated/Age";
 import type { Alert } from "../ipc/generated/Alert";
 import type { Balance } from "../ipc/generated/Balance";
@@ -144,7 +145,7 @@ function refuse(message: string, code = "refused"): never {
 /** As the core's `snippet`: a few words of the record around the first place the word is. */
 function snippetOf(record: string, word: string): string {
   const flat = Array.from(record.split(/\s+/).filter(Boolean).join(" "));
-  const lower = flat.map((c) => c.toLowerCase());
+  const lower = flat.map(searchLetter);
   const needle = Array.from(word);
   let at = 0;
   for (let i = 0; i + needle.length <= lower.length; i += 1) {
@@ -509,19 +510,19 @@ export class FakeClinic {
     const trimmed = text.trim();
     need(chars(trimmed.replace(/\s/g, "")) >= 2, "כדי לחפש בסיכומים צריך לכתוב לפחות שתי אותיות.");
     need(chars(trimmed) <= 200, "הטקסט לחיפוש ארוך מדי. אפשר לחפש מילה או שתיים.");
-    const words = trimmed.split(/\s+/).map((w) => w.toLowerCase());
+    const words = trimmed.split(/\s+/).map(searchForm);
     const names = new Map(this.patients.map((p) => [p.id, p.name]));
     const kinds = new Map(this.visits.map((v) => [v.id, v.kind]));
     const found = this.notes
       .filter((n) => names.has(n.patient_id))
       .filter((n) => {
-        const record = n.record.toLowerCase();
-        const own = personal ? n.personal.toLowerCase() : "";
+        const record = searchForm(n.record);
+        const own = personal ? searchForm(n.personal) : "";
         return words.every((w) => record.includes(w) || own.includes(w));
       })
       .sort((a, b) => (a.date === b.date ? (a.id < b.id ? 1 : -1) : a.date < b.date ? 1 : -1));
     const hits = found.slice(0, 50).map((n): NoteHit => {
-      const record = n.record.toLowerCase();
+      const record = searchForm(n.record);
       const inRecord = words.find((w) => record.includes(w));
       return {
         note_id: n.id, patient_id: n.patient_id, patient_name: names.get(n.patient_id) ?? "", date: n.date,

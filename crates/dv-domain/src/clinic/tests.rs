@@ -5333,6 +5333,32 @@ fn a_search_finds_the_notes_that_hold_every_word_newest_first() {
 }
 
 #[test]
+fn a_hebrew_final_letter_and_a_capital_do_not_hide_a_note() {
+    let notes = [
+        SessionNote {
+            record: "ביקור בשני גנים. ההורים שאלו על ADOS.".to_owned(),
+            ..note("n1", None, "2026-08-09")
+        },
+        SessionNote {
+            record: "המעבר לגן חדש עבר בשלום".to_owned(),
+            ..note("n2", None, "2026-09-09")
+        },
+    ];
+    // "גן" ends in a final letter; "גנים" holds the same word with a regular one.
+    let both = found(&notes, "גן", false);
+    assert_eq!(both.hits.len(), 2);
+    // The words come back as they were written, cut at the right place.
+    assert_eq!(
+        both.hits[1].snippet,
+        "ביקור בשני גנים. ההורים שאלו על ADOS."
+    );
+    assert_eq!(found(&notes, "גנים", false).hits.len(), 1);
+    assert_eq!(found(&notes, "ados", false).hits.len(), 1);
+    // And the other way: a word typed with a regular letter finds its final form.
+    assert_eq!(found(&notes, "שלומ", false).hits.len(), 1);
+}
+
+#[test]
 fn the_personal_note_is_searched_only_when_asked_and_its_words_never_come_back() {
     let notes = [SessionNote {
         record: "מפגש שני.".to_owned(),

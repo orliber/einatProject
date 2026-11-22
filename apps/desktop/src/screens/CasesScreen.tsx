@@ -1,6 +1,7 @@
 // The case list, laid out like a file explorer (round 47, D-085): a folder tree on the right,
 // the path and the search above, and one table of subfolders and cases. Folders nest to any
 // depth (the core already keeps `parent_id`); this screen only shows them that way.
+import { searchForm } from "../searchForm";
 import { useEffect, useMemo, useState, type DragEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useApp } from "../App";
@@ -262,12 +263,13 @@ export function CasesScreen() {
   const lastIn = (id: string): number | null => stats.get(id)?.last ?? null;
   const parentOf = current ? (byId.get(current)?.parent_id ?? null) : null;
 
-  const q = query.trim().toLowerCase();
+  // As every search here: a final letter is its regular form, so "רון" also finds "רונית".
+  const q = searchForm(query.trim());
   // Filtered and sorted once per change of the list, the folder, the search or the sort: a drag
   // over the rows or a notice re-renders the screen without redoing this.
   const { shownFolders, shownCases, statusOf } = useMemo(() => {
-    const matches = (c: CaseSummary) => (c.child_name ?? "").toLowerCase().includes(q) || c.meta.code.toLowerCase().includes(q);
-    const shownFolders = q ? allFolders.filter((f) => f.name.toLowerCase().includes(q)) : allFolders.filter((f) => f.parent_id === current);
+    const matches = (c: CaseSummary) => searchForm(c.child_name ?? "").includes(q) || searchForm(c.meta.code).includes(q);
+    const shownFolders = q ? allFolders.filter((f) => searchForm(f.name).includes(q)) : allFolders.filter((f) => f.parent_id === current);
     // A new array (filter), so sorting it below never touches the query's own data.
     const shownCases = casesShown(allCases, current, q ? matches : null);
     shownFolders.sort((a, b) => HEBREW.compare(a.name, b.name));

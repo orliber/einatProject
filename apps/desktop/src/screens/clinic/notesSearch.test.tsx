@@ -34,6 +34,13 @@ describe("what a note answers a search by", () => {
     expect(noteMatches(note({}), null, "מעברים רופאה", false)).toBe(false);
   });
 
+  it("a word that ends in a final letter finds its longer forms too", () => {
+    const n = { record: "ביקור בשני גנים", personal: "", date: "2026-11-08" } as SessionNote;
+    expect(noteMatches(n, null, "גן", false)).toBe(true);
+    expect(noteMatches(n, null, "גנים", false)).toBe(true);
+    expect(noteMatches(n, null, "בית", false)).toBe(false);
+  });
+
   it("its date as it is shown, and the kind of its visit", () => {
     expect(noteMatches(note({}), null, "09.08", false)).toBe(true);
     expect(noteMatches(note({}), visit, "תצפית", false)).toBe(true);
