@@ -9,8 +9,8 @@ import { Dialog, ErrorLine } from "../../components/ui";
 import type { PayMethod } from "../../ipc/generated/PayMethod";
 import type { Visit } from "../../ipc/generated/Visit";
 import { usePatientCard, useSavePayment } from "./clinicData";
-import { formatMoney, parseMoney, PAY_METHOD_LABEL, PAY_METHODS } from "./format";
-import { Field, MoneyField, moneyText, SelectField, TextAreaField, TextField } from "./parts";
+import { formatDate, formatMoney, parseMoney, PAY_METHOD_LABEL, PAY_METHODS, VISIT_KIND_LABEL } from "./format";
+import { Field, MoneyField, moneyText, SelectField, TextAreaField, TextField, useShownName } from "./parts";
 
 const messageOf = (e: unknown, fallback: string) => (e as { message?: string }).message ?? fallback;
 
@@ -22,7 +22,11 @@ export function visitCharge(v: Visit): number {
 
 /** "תקבול חדש": money that was received. The amount starts from what is still owed, or from
  *  `amount` (the fee of the visit it was opened from); then the box says what the family owes. */
-export function PaymentDialog({ patientId, today, due, amount, onClose }: { patientId: string; today: string; due: number; amount?: number | undefined; onClose: () => void }) {
+export function PaymentDialog({ patientId, today, due, amount, about, onClose }: {
+  patientId: string; today: string; due: number; amount?: number | undefined;
+  /** Away from the card: whose payment this is, said first in the dialog. */
+  about?: string | undefined; onClose: () => void;
+}) {
   const { notify } = useApp();
   const save = useSavePayment();
   const [first] = useState({ amount: moneyText(amount !== undefined && amount > 0 ? amount : due > 0 ? due : null), method: "transfer" as PayMethod, receipt: "", payer: "", date: today, note: "" });
@@ -54,6 +58,7 @@ export function PaymentDialog({ patientId, today, due, amount, onClose }: { pati
         <button type="button" className="btn btn-primary" disabled={save.isPending} onClick={() => void submit()}>רישום התקבול</button>
       </>}>
       <div className="stack clinic-form">
+        {about !== undefined && <p className="clinic-quiet">{about}</p>}
         <div className="clinic-form-row">
           <MoneyField id="payment-amount" label="סכום" value={form.amount} onChange={(text) => set({ amount: text })}
             {...(amount !== undefined && due > 0 && due !== amount ? { hint: `היתרה של המשפחה: ${formatMoney(due)}.` } : {})} />
@@ -79,6 +84,10 @@ export function PaymentDialog({ patientId, today, due, amount, onClose }: { pati
  *  card; if it cannot be read the dialog opens all the same, with the fee. */
 export function VisitPaymentDialog({ patientId, visit, today, onClose }: { patientId: string; visit: Visit; today: string; onClose: () => void }) {
   const card = usePatientCard(patientId, today);
+  const shown = useShownName();
   if (!card.data && !card.error) return null;
-  return <PaymentDialog patientId={patientId} today={today} due={card.data?.balance.due ?? 0} amount={visitCharge(visit)} onClose={onClose} />;
+  // The name as the screen may show it now (initials in discreet mode).
+  const who = card.data ? shown(card.data.patient.name) : "";
+  const about = `${who === "" ? "תקבול" : `תקבול מהמשפחה של ${who}`}, על ${VISIT_KIND_LABEL[visit.kind]} מיום ${formatDate(visit.date)}.`;
+  return <PaymentDialog patientId={patientId} today={today} due={card.data?.balance.due ?? 0} amount={visitCharge(visit)} about={about} onClose={onClose} />;
 }

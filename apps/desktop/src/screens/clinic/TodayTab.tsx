@@ -16,6 +16,7 @@ import type { Visit } from "../../ipc/generated/Visit";
 import type { VisitView } from "../../ipc/generated/VisitView";
 import { clinicKeys, useOptimistic, useOverview, useReloadClinic, useToday } from "./clinicData";
 import { formatDate, formatDateLong, formatMoney, formatTime, greeting, nowIndex, ownVisit, TASK_KIND_LABEL, todayCountWords, untilWords } from "./format";
+import { DayClose } from "./DayClose";
 import { NoteDialog } from "./NoteDialog";
 import { AlertGroups, EmptyState, PatientName, ReadError, Section, useClinicNav, VisitRow } from "./parts";
 import { PatientDialog } from "./PatientDialog";
@@ -164,6 +165,7 @@ export function TodayTab() {
                   ? <p className="muted clinic-quiet">אין פגישות היום.</p>
                   : rows(o.visits, at, soon)}
               </Section>
+              <DayClose overview={o} now={now} />
               {o.next_day !== null && (
                 <Section title={`הפגישות הבאות: ${formatDateLong(o.next_day)}`}>
                   {rows(o.next_visits)}

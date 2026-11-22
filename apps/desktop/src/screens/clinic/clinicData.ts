@@ -82,7 +82,8 @@ export const usePatients = (date: string) => useRead(clinicKeys.patients(date), 
 export const usePatientCard = (id: string | null, date: string) =>
   useRead(clinicKeys.card(id ?? "", date), () => clinicApi.patientCard(id ?? "", today()), { enabled: id !== null });
 export const useTasks = (date: string) => useRead(clinicKeys.tasks(date), () => clinicApi.tasks(today()));
-export const useDiary = (month: string) => useRead(clinicKeys.diary(month), () => clinicApi.diary(month));
+/** `enabled` off: nothing is asked (the day's closing reads the month only once the day is over). */
+export const useDiary = (month: string, enabled = true) => useRead(clinicKeys.diary(month), () => clinicApi.diary(month), { enabled });
 export const useIncome = (year: number) => useRead(clinicKeys.income(year), () => clinicApi.income(year));
 
 /** What the cards that were erased counted for in a year (D-179): the anonymous lines of its

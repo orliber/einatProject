@@ -731,3 +731,33 @@ html:has(.clinic-panel) {
   margin: 0;
   padding-inline-start: var(--space-5);
 }
+
+/* "סגירת היום": the day's last lines on the front page, once its visits are over. */
+.clinic-dayclose {
+  gap: var(--space-2);
+}
+.clinic-dayclose-line {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+}
+.clinic-dayclose-mark {
+  flex: none;
+  inline-size: 1.25em;
+  text-align: center;
+  color: var(--ink-muted);
+  font-weight: 600;
+}
+.clinic-dayclose-done .clinic-dayclose-mark {
+  color: var(--ok);
+}
+.clinic-dayclose-open {
+  color: var(--warn-ink);
+  font-weight: 600;
+}
+.clinic-dayclose-open .clinic-dayclose-mark {
+  color: var(--warn);
+}
+.clinic-dayclose-end {
+  margin-block-start: var(--space-3);
+}

@@ -56,6 +56,8 @@ describe("“לרשום תקבול” from a visit's row", () => {
     const dialog = await screen.findByRole("dialog", { name: "תקבול חדש" });
     const amount = within(dialog).getByLabelText("סכום");
     expect(amount).toHaveValue(String(held.visit.fee / 100));
+    // Away from the card, the dialog says whose payment it is.
+    expect(dialog).toHaveTextContent(/תקבול מהמשפחה של \S+, על .+ מיום 15\.11\.2026\./);
     expect(await a11yViolations(dialog)).toEqual([]);
 
     await user.click(within(dialog).getByRole("button", { name: "רישום התקבול" }));
