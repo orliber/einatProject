@@ -30,7 +30,8 @@ export function VisitActions({ view, patientId, now, onHold, onNote, onOpen, onN
   patientId: string;
   now: Today;
   onHold: (v: Visit) => void;
-  onNote: (v: Visit) => void;
+  /** With `record`, from "להקליט לעצמך": the note opens and a recording starts (D-208). */
+  onNote: (v: Visit, record?: boolean) => void;
   onOpen: () => void;
   /** The card only: "לא הגיעו" in "⋯". */
   onNoShow?: (v: Visit) => void;
@@ -85,6 +86,8 @@ export function VisitActions({ view, patientId, now, onHold, onNote, onOpen, onN
     ...(due && step !== "hold" ? [{ label: "התקיימה", run: () => onHold(v) }] : []),
     ...(due && onNoShow ? [{ label: "לא הגיעו", run: () => onNoShow(v) }] : []),
     ...(v.status !== "cancelled" && step !== "note" ? [{ label: view.has_note ? "לפתוח את הסיכום" : "לכתוב סיכום", run: () => onNote(v) }] : []),
+    // Right after a session, a few words aloud for herself (D-208): once it has begun.
+    ...(v.status !== "cancelled" && v.status !== "no_show" && (v.date < now.date || (v.date === now.date && v.start <= now.minute)) ? [{ label: "להקליט לעצמך", run: () => onNote(v, true) }] : []),
     // Always last, so the menu is never empty.
     { label: "לפתוח את הפגישה", run: onOpen },
   ];

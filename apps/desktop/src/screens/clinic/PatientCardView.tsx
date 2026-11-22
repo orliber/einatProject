@@ -54,7 +54,7 @@ const PAST_PAGE = 8;
 /** What is open over the card: one dialog at a time. */
 type Open =
   | { kind: "visit"; view?: VisitView }
-  | { kind: "note"; visit?: Visit; noteId?: string }
+  | { kind: "note"; visit?: Visit; noteId?: string; record?: boolean | undefined }
   | { kind: "edit" }
   | { kind: "close" }
   | { kind: "erase" }
@@ -230,7 +230,7 @@ function CardBody({ card, today, now, back, onBack }: { card: PatientCard; today
       <VisitActions view={view} patientId={p.id} now={now} reminders={false} onCard follow={marked === v.id}
         onHold={(x) => markVisit(x, "held")}
         onNoShow={(x) => markVisit(x, "no_show")}
-        onNote={(x) => setOpen({ kind: "note", visit: x })}
+        onNote={(x, record) => setOpen({ kind: "note", visit: x, record })}
         onOpen={() => setOpen({ kind: "visit", view })} />
     );
   };
@@ -365,7 +365,7 @@ function CardBody({ card, today, now, back, onBack }: { card: PatientCard; today
         open.view ? <VisitDialog view={open.view} onClose={() => setOpen(null)} /> : <VisitDialog start={{ patientId: p.id }} onClose={() => setOpen(null)} />
       )}
       {open?.kind === "note" && (
-        open.visit ? <NoteDialog patientId={p.id} visit={open.visit} onClose={() => setOpen(null)} />
+        open.visit ? <NoteDialog patientId={p.id} visit={open.visit} record={open.record} onClose={() => setOpen(null)} />
           : open.noteId !== undefined ? <NoteDialog patientId={p.id} noteId={open.noteId} onClose={() => setOpen(null)} />
           : <NoteDialog patientId={p.id} onClose={() => setOpen(null)} />
       )}
@@ -615,6 +615,8 @@ function NoteItem({ note, visit, caseCode, onEdit }: { note: SessionNote; visit:
         <span className="num pcard-note-date" dir="ltr">{when}</span>
         <span className="chip chip-sand">{visit ? VISIT_KIND_LABEL[visit.kind] : "שיחה, לא צמודה לפגישה"}</span>
         {note.case_input_id !== null && <span className="chip chip-ok">{caseCode ? `הועבר לתיק ${caseCode}` : "הועבר לתיק"}</span>}
+        {/* Hers alone, as the personal note: only how many, and they are heard in the note (D-208). */}
+        {note.recordings.length > 0 && <span className="chip">{note.recordings.length === 1 ? "הקלטה אחת" : `${note.recordings.length} הקלטות`}</span>}
         <span className="grow" />
         <button type="button" className="btn btn-small" aria-label={`עריכה של הסיכום מיום ${when}`} onClick={onEdit}>עריכה</button>
       </div>

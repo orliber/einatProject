@@ -19,7 +19,7 @@ import type { UiError } from "../ipc/generated/UiError";
 import type { Visit } from "../ipc/generated/Visit";
 import type { VisitKind } from "../ipc/generated/VisitKind";
 import type { WeekdayCount } from "../ipc/generated/WeekdayCount";
-import { dayNumber, fromDayNumber, isIsoDate, monthRange, ownTime, PAY_METHODS, VISIT_KINDS, weekday } from "../screens/clinic/format";
+import { dayNumber, fromDayNumber, isIsoDate, monthRange, ownVisit, PAY_METHODS, VISIT_KINDS, weekday } from "../screens/clinic/format";
 import { previewHolidays } from "./previewHolidays";
 
 /** All the clinic's records, as the preview's clinic holds them. */
@@ -132,7 +132,7 @@ class Months {
 }
 
 /** A visit of a patient: never a block, never one without a patient. */
-const isPatientVisit = (v: Visit) => !ownTime(v.kind) && v.patient_id !== null && v.patient_id.trim() !== "";
+const isPatientVisit = (v: Visit) => !ownVisit(v) && v.patient_id !== null && v.patient_id.trim() !== "";
 
 /** What a visit costs the family: its fee when held, or when missed and charged anyway. */
 function visitCharge(v: Visit): number {

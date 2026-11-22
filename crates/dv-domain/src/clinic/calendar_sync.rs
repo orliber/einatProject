@@ -90,7 +90,7 @@ pub fn wanted_events(
             let start = u32::from(v.start);
             let title = match detail {
                 CalendarDetail::TimesOnly | CalendarDetail::Unknown => {
-                    if v.kind.own_time() {
+                    if v.own_time() {
                         TITLE_BLOCK
                     } else {
                         TITLE_VISIT

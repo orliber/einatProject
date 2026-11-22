@@ -55,7 +55,7 @@ const EVERY: { value: string; label: string }[] = [
 /** How long a kind of visit usually is, and what it costs this family. */
 function defaultsFor(settings: ClinicSettings, kind: VisitKind, patient: PatientRow | undefined): { minutes: number; fee: number } {
   const d = settings.defaults.find((x) => x.kind === kind);
-  return { minutes: d?.minutes ?? 60, fee: ownTime(kind) ? 0 : (patient?.patient.session_fee ?? d?.fee ?? 0) };
+  return { minutes: d?.minutes ?? 60, fee: ownTime(kind, patient?.patient.id) ? 0 : (patient?.patient.session_fee ?? d?.fee ?? 0) };
 }
 
 interface Form {
@@ -150,18 +150,26 @@ export function VisitDialog(props: VisitDialogProps) {
 
   /** The usual length and fee follow the kind and the family, for a new visit only. */
   function withDefaults(kind: VisitKind, patientId: string | null): Partial<Form> {
-    if (existing) return {};
     const d = defaultsFor(settings, kind, patientOf(patientId));
-    return { ...(typed.minutes ? {} : { minutes: String(d.minutes) }), ...(typed.fee && !ownTime(kind) ? {} : { fee: moneyText(d.fee) }) };
+    // Own time has no fee: the field is hidden and the visit is saved with 0, and what she typed
+    // waits there in case she picks the child again.
+    const own = ownTime(kind, patientId);
+    // A supervision kept without a child, given one later, becomes a visit on the child's card:
+    // it takes the usual fee, unless she typed one.
+    if (existing) return existing.patient_id === null && !own && !typed.fee ? { fee: moneyText(d.fee) } : {};
+    return { ...(typed.minutes ? {} : { minutes: String(d.minutes) }), ...(own || typed.fee ? {} : { fee: moneyText(d.fee) }) };
   }
 
-  const block = ownTime(form.kind);
+  // Reserved time never has a child; supervision may be about one (a kindergarten teacher, the
+  // staff), and is then a visit like any other, with a fee; without one it is her own time (D-207).
+  const noChild = form.kind === "block";
+  const block = ownTime(form.kind, form.patientId);
   const missed = form.status === "cancelled" || form.status === "no_show";
   const inSeries = existing !== undefined && existing.series_id !== null;
   // A visit of a patient stays on that patient's card (D-177): the core moves it to no other
   // card, and does not turn it into time of her own.
   const onCard = existing !== undefined && existing.patient_id !== null;
-  const kinds = onCard ? VISIT_KINDS.filter((k) => !ownTime(k)) : VISIT_KINDS;
+  const kinds = onCard ? VISIT_KINDS.filter((k) => k !== "block") : VISIT_KINDS;
   const dirty = JSON.stringify(form) !== JSON.stringify(first);
   const every = Number(form.every);
   const count = Number(form.count);
@@ -169,7 +177,7 @@ export function VisitDialog(props: VisitDialogProps) {
 
   /** The visit as it will be saved, or the sentence that says what is missing. */
   function build(): Visit | string {
-    if (!block && form.patientId === null) return "צריך לבחור מטופל לפגישה. לזמן שהוא שלך בלבד בוחרים בסוג \"זמן שמור\".";
+    if (!block && form.patientId === null && form.kind !== "supervision") return "צריך לבחור מטופל לפגישה. לזמן שהוא שלך בלבד בוחרים בסוג \"זמן שמור\".";
     if (form.date === "") return "צריך לכתוב את תאריך הפגישה: יום.חודש.שנה.";
     const start = parseTime(form.start);
     if (start === null) return "צריך לכתוב את שעת ההתחלה, למשל 9:30.";
@@ -181,7 +189,7 @@ export function VisitDialog(props: VisitDialogProps) {
     if (form.repeat && !(Number.isInteger(count) && count >= 2 && count <= 52)) return "סדרה של פגישות חוזרות היא בין 2 ל-52 פגישות.";
     return {
       id: existing?.id ?? "",
-      patient_id: block ? null : form.patientId,
+      patient_id: noChild ? null : form.patientId,
       kind: form.kind,
       title: form.title,
       date: form.date,
@@ -268,14 +276,15 @@ export function VisitDialog(props: VisitDialogProps) {
 
         <SelectField id="visit-kind" label="סוג הפגישה" value={form.kind}
           options={optionsWith(kinds, VISIT_KIND_LABEL, form.kind)}
-          hint={form.kind === "supervision" ? "הדרכה מקצועית שאת נותנת או מקבלת, בלי מטופל ובלי מחיר. להדרכת הורים בוחרים \"הדרכת הורים\"."
+          hint={form.kind === "supervision" ? "הדרכה של צוות, גננת או מטפלת אחרת. על ילד מסוים: בוחרים אותו, והפגישה נכנסת לכרטיס שלו עם מחיר. הדרכה מקצועית כללית: בלי ילד ובלי מחיר. להדרכת הורים בוחרים \"הדרכת הורים\"."
             : block ? "זמן שמור הוא שלך בלבד: כתיבת דוחות, השתלמות, יום חופש. בלי מטופל ובלי מחיר."
             : form.kind === "unknown" ? "הסוג שנשמר לפגישה הזו לא מוכר לגרסה הזו של התוכנה. כדי לשמור שינוי צריך לבחור סוג מהרשימה, או לעדכן את התוכנה."
             : undefined}
-          onChange={(kind) => set({ kind, ...(ownTime(kind) ? { patientId: null } : {}), ...withDefaults(kind, ownTime(kind) ? null : form.patientId) })} />
+          onChange={(kind) => set({ kind, ...(kind === "block" ? { patientId: null } : {}), ...withDefaults(kind, kind === "block" ? null : form.patientId) })} />
 
-        {!block && (
+        {!noChild && (
           <PatientPicker id="visit-patient" value={form.patientId} autoFocus={!existing && form.patientId === null} locked={onCard}
+            label={form.kind === "supervision" ? "על איזה ילד (לא חובה)" : "מטופל"}
             onChange={(patientId) => set({ patientId, ...withDefaults(form.kind, patientId) })} />
         )}
 

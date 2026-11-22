@@ -872,7 +872,7 @@ impl Core {
             if !visit.id.is_empty() || visit.patient_id.as_deref() != Some(patient_id) {
                 return refuse("במסלול יש פגישה שלא שייכת לכרטיס הזה. אפשר לפתוח את המסלול מחדש.");
             }
-            if visit.kind.own_time() {
+            if visit.kind.never_patient() {
                 return refuse("במסלול האבחון אין זמנים שמורים, רק פגישות.");
             }
             if visit.date < today.date {

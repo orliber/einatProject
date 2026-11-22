@@ -611,15 +611,16 @@ fn length_ok(start: u16, minutes: u16) -> Result<(), DomainError> {
 pub fn validate_visit(visit: &Visit) -> Result<(), DomainError> {
     visit_known(visit)?;
     let has_patient = visit.patient_id.as_deref().is_some_and(|id| !blank(id));
-    if visit.kind.own_time() {
-        let what = kind_label(visit.kind);
-        if has_patient {
-            return refuse(format!(
-                "ב{what} אין מטופל. כדי לקבוע פגישה עם מטופל צריך לבחור סוג פגישה אחר."
-            ));
-        }
+    if visit.kind.never_patient() && has_patient {
+        return refuse("בזמן שמור אין מטופל. כדי לקבוע פגישה עם מטופל צריך לבחור סוג פגישה אחר.");
+    }
+    if visit.own_time() {
         if visit.fee != 0 {
-            return refuse(format!("ל{what} אין מחיר."));
+            return refuse(if visit.kind == VisitKind::Supervision {
+                "להדרכה בלי מטופל אין מחיר. כדי לחייב, בוחרים את הילד שעליו ההדרכה."
+            } else {
+                "לזמן שמור אין מחיר."
+            });
         }
     } else if !has_patient {
         return refuse("צריך לבחור מטופל לפגישה.");
@@ -777,7 +778,7 @@ pub fn validate_settings(settings: &ClinicSettings) -> Result<(), DomainError> {
             return refuse("משך הפגישה צריך להיות בין 5 דקות ל-12 שעות.");
         }
         fee_ok(default.fee)?;
-        if default.kind.own_time() && default.fee != 0 {
+        if default.kind.never_patient() && default.fee != 0 {
             return refuse(format!("ל{} אין מחיר.", kind_label(default.kind)));
         }
     }
@@ -1095,7 +1096,7 @@ pub fn default_fee(
     settings: &ClinicSettings,
     kind: VisitKind,
 ) -> Agorot {
-    if kind.own_time() {
+    if kind.own_time_with(patient.is_some()) {
         return 0;
     }
     patient
@@ -1615,7 +1616,7 @@ impl<'a> Of<'a> {
                 display_time(visit.start)
             );
             match visit.status {
-                VisitStatus::Planned if !visit.kind.own_time() => {
+                VisitStatus::Planned if !visit.own_time() => {
                     let ended =
                         day < now || (day == now && visit_end(visit) <= u32::from(today.minute));
                     if ended {
@@ -2709,7 +2710,7 @@ pub fn visit_history_lines(visit: &Visit, patient_name: Option<&str>) -> Vec<Str
     push_field(&mut lines, "מקום", &visit.place);
     push_field(&mut lines, "מצב", status_label(visit.status));
     push_field(&mut lines, "מה קרה", &visit.status_note);
-    if !visit.kind.own_time() {
+    if !visit.own_time() {
         if visit.fee == 0 {
             lines.push("מחיר: ללא חיוב".to_owned());
         } else {
@@ -2866,7 +2867,7 @@ pub fn open_task_count(tasks: &[ClinicTask]) -> u32 {
 /// A visit with a patient that was not cancelled: what "a visit" means on the front page
 /// (time she blocked for herself is not one).
 fn counts_as_visit(visit: &Visit) -> bool {
-    !visit.kind.own_time() && visit.status != VisitStatus::Cancelled
+    !visit.own_time() && visit.status != VisitStatus::Cancelled
 }
 
 /// Visits in the week of `date` (Sunday to Saturday) that are not cancelled.

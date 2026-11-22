@@ -12,7 +12,7 @@ import type { VisitStatus } from "../../ipc/generated/VisitStatus";
 import type { VisitView } from "../../ipc/generated/VisitView";
 import { useHistory, usePatients, useReloadClinic, useToday } from "./clinicData";
 import {
-  ALERT_KIND_LABEL, formatDate, formatSpan, initials, ownTime, moneyInput, moneyNumber, parseMoney, parseTime, PATIENT_STATUS_LABEL,
+  ALERT_KIND_LABEL, formatDate, formatSpan, initials, ownVisit, moneyInput, moneyNumber, parseMoney, parseTime, PATIENT_STATUS_LABEL,
   VISIT_KIND_LABEL, VISIT_STATUS_LABEL,
 } from "./format";
 import { rememberLine } from "./RememberList";
@@ -456,7 +456,7 @@ export function VisitRow({ view, actions, onOpen, showDate = false, quietPlanned
   const shown = useShownName();
   const discreet = useDiscreet();
   const span = formatSpan(v.start, v.minutes);
-  const who = ownTime(v.kind) ? (v.title || VISIT_KIND_LABEL[v.kind]) : shown(view.patient_name);
+  const who = ownVisit(v) ? (v.title || VISIT_KIND_LABEL[v.kind]) : shown(view.patient_name);
   const time = <span className="num clinic-visit-time" dir="ltr">{span}</span>;
   // A space between the date and the hours: they stand one above the other, and the text she
   // sees ("15.11.2026 09:00–09:50") is the start of the button's name, not "15.11.202609:00".
@@ -464,7 +464,7 @@ export function VisitRow({ view, actions, onOpen, showDate = false, quietPlanned
   const openName = `${showDate ? `${formatDate(v.date)} ` : ""}${span}, פתיחת הפגישה של ${who}`;
   // What happened, in her words, may say more than a list should while a family looks on: in
   // discreet mode it stays in the visit's dialog.
-  const more = [!ownTime(v.kind) ? v.title : "", v.place, discreet ? "" : v.status_note, v.note, soon ?? ""].filter(Boolean).join(" · ");
+  const more = [!ownVisit(v) ? v.title : "", v.place, discreet ? "" : v.status_note, v.note, soon ?? ""].filter(Boolean).join(" · ");
   // What not to forget, while the visit is ahead (D-207); in discreet mode only how many.
   const remember = v.status === "planned" ? rememberLine(v.remember, discreet) : "";
   return (
@@ -474,11 +474,11 @@ export function VisitRow({ view, actions, onOpen, showDate = false, quietPlanned
         : <span className="clinic-visit-when">{date}{time}</span>}
       <div className="grow stack clinic-visit-body">
         <span className="row clinic-visit-head">
-          {ownTime(v.kind)
+          {ownVisit(v)
             ? <span className="clinic-name clinic-name-strong">{who}</span>
             : <PatientName name={view.patient_name} id={v.patient_id} strong />}
           <KindBadge kind={v.kind} />
-          {!ownTime(v.kind) && (quietPlanned && v.status === "planned"
+          {!ownVisit(v) && (quietPlanned && v.status === "planned"
             ? <span className="visually-hidden">{VISIT_STATUS_LABEL.planned}</span>
             : <StatusBadge status={v.status} />)}
           {view.has_note && <span className="chip chip-ok">יש סיכום</span>}
@@ -587,8 +587,10 @@ const PICKER_ROWS = 8;
  * Enter"), and comes back to the empty field after "החלפה"; `locked`: the name only, for a record
  * that stays on its card.
  */
-export function PatientPicker({ id, value, onChange, autoFocus = false, locked = false }: {
+export function PatientPicker({ id, value, onChange, autoFocus = false, locked = false, label = "מטופל" }: {
   id: string; value: string | null; onChange: (patientId: string | null) => void; autoFocus?: boolean; locked?: boolean;
+  /** The field's name, "מטופל" unless the record may also stand without one. */
+  label?: string;
 }) {
   const now = useToday();
   const rows = usePatients(now.date);
@@ -625,7 +627,7 @@ export function PatientPicker({ id, value, onChange, autoFocus = false, locked =
   if (value !== null) {
     return (
       <div className="field">
-        <span className="label" id={`${id}-label`}>מטופל</span>
+        <span className="label" id={`${id}-label`}>{label}</span>
         <span ref={picked} className="row clinic-picked" role="group" aria-labelledby={`${id}-label`} aria-describedby={`${id}-name`}
           tabIndex={-1} onKeyDown={(e) => {
             if (e.key !== "Enter" || e.target !== e.currentTarget) return;
@@ -678,7 +680,7 @@ export function PatientPicker({ id, value, onChange, autoFocus = false, locked =
   };
   return (
     <div className="field clinic-picker">
-      <label htmlFor={id}>מטופל</label>
+      <label htmlFor={id}>{label}</label>
       <input id={id} ref={field} className="input" value={text} placeholder="חיפוש לפי שם" autoFocus={autoFocus} autoComplete="off"
         role="combobox" aria-autocomplete="list" aria-expanded={shown}
         aria-controls={shown ? `${id}-list` : undefined} aria-activedescendant={shown && marked >= 0 ? optionId(marked) : undefined}

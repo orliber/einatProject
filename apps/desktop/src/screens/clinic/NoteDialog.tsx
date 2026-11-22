@@ -13,6 +13,7 @@ import { useClinicSettings, useNoteToCase, usePatientCard, useReloadClinic, useS
 import { formatDate, formatTime, VISIT_KIND_LABEL } from "./format";
 import { Field, ReadError, RecordHistory, useDiscreet, useShownName } from "./parts";
 import { Recordings } from "./Recordings";
+import { NextVisitRemember, nextPlanned } from "./RememberList";
 
 export interface NoteDialogProps {
   patientId: string;
@@ -22,6 +23,8 @@ export interface NoteDialogProps {
   noteId?: string;
   onClose: () => void;
   onSaved?: (note: SessionNote) => void;
+  /** Opened from "להקליט לעצמך": the personal part is open and a recording starts at once. */
+  record?: boolean | undefined;
 }
 
 /** The most text each of the two parts holds (the core's limit). */
@@ -47,11 +50,11 @@ export function NoteDialog(props: NoteDialogProps) {
   const visit = props.visit ?? card.data.visits.find((v) => v.visit.id === note?.visit_id)?.visit ?? null;
   // The form keeps what she types: a fresh answer about the card (after a save, or as a minute
   // passes) never starts it over. It reads the stored note once, when it opens.
-  return <NoteForm {...props} card={card.data} note={note} visit={visit} templates={settings.data.note_templates} today={now.date} />;
+  return <NoteForm {...props} card={card.data} note={note} visit={visit} templates={settings.data.note_templates} today={now.date} minute={now.minute} />;
 }
 
 function NoteForm(props: Omit<NoteDialogProps, "visit"> & {
-  card: PatientCard; note: SessionNote | null; visit: Visit | null; templates: { name: string; text: string }[]; today: string;
+  card: PatientCard; note: SessionNote | null; visit: Visit | null; templates: { name: string; text: string }[]; today: string; minute: number;
 }) {
   const { card, visit, onClose } = props;
   const { notify } = useApp();
@@ -68,7 +71,7 @@ function NoteForm(props: Omit<NoteDialogProps, "visit"> & {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   /** In discreet mode the personal note waits for her to ask for it, as on the card. */
-  const [personalShown, setPersonalShown] = useState(false);
+  const [personalShown, setPersonalShown] = useState(props.record === true);
   const personalOpen = !discreet || personalShown;
   /** A recording under way or being saved: closing now would lose it. */
   const [recording, setRecording] = useState(false);
@@ -178,6 +181,9 @@ function NoteForm(props: Omit<NoteDialogProps, "visit"> & {
             aria-describedby="note-record-hint" autoFocus onChange={(e) => setRecord(e.target.value)} />
         </div>
 
+        <NextVisitRemember next={nextPlanned(card.visits.map((v) => v.visit),
+          visit ? { date: visit.date, start: visit.start, id: visit.id } : { date: props.today, start: props.minute, id: null })} />
+
         <div className="clinic-note-part clinic-note-personal">
           <header className="clinic-note-head">
             <h3><label htmlFor="note-personal">תרשומת אישית</label></h3>
@@ -188,7 +194,7 @@ function NoteForm(props: Omit<NoteDialogProps, "visit"> & {
               <textarea id="note-personal" className="textarea clinic-note-text" rows={5} value={personal} maxLength={NOTE_MAX}
                 aria-describedby="note-personal-hint" onChange={(e) => setPersonal(e.target.value)} />
               <Recordings note={stored} patientId={card.patient.id} visitId={visit?.id ?? null} date={visit?.date ?? date}
-                onBusy={onRecordingBusy}
+                onBusy={onRecordingBusy} autoStart={props.record === true}
                 onNote={(saved) => {
                   // Only what the recordings changed: the texts she is typing stay hers.
                   setStored(saved);
