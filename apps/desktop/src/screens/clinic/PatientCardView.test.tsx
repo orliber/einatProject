@@ -365,7 +365,7 @@ describe("visits on the card", () => {
     // Under way, not over yet: the step is there, not yet the main one.
     expect(within(actions).getByRole("button", { name: "התקיימה" })).not.toHaveClass("btn-primary");
     await user.click(within(actions).getByRole("button", { name: "עוד פעולות לפגישה מיום 15.11.2026, 09:00" }));
-    expect((await screen.findAllByRole("menuitem")).map((m) => m.textContent)).toEqual(["לא הגיעו", "לכתוב סיכום", "לפתוח את הפגישה"]);
+    expect((await screen.findAllByRole("menuitem")).map((m) => m.textContent)).toEqual(["לא הגיעו", "לכתוב סיכום", "להקליט לעצמך", "לפתוח את הפגישה"]);
     await user.keyboard("{Escape}");
     // Held, it offers its note as the one step; no reminder anywhere on the card.
     await user.click(within(actions).getByRole("button", { name: "התקיימה" }));

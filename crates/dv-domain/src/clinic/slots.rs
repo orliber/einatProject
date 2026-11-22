@@ -209,7 +209,7 @@ pub fn validate_pathway(settings: &ClinicSettings) -> Result<(), DomainError> {
         ));
     }
     for step in &settings.pathway {
-        if step.kind.own_time() || step.kind == VisitKind::Unknown {
+        if step.kind.never_patient() || step.kind == VisitKind::Unknown {
             return refuse("כל שלב במסלול האבחון צריך להיות פגישה עם המשפחה או עם הילד.");
         }
         if step.gap_days > MAX_GAP_DAYS {

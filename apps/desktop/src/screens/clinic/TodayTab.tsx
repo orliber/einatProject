@@ -15,7 +15,7 @@ import type { TaskView } from "../../ipc/generated/TaskView";
 import type { Visit } from "../../ipc/generated/Visit";
 import type { VisitView } from "../../ipc/generated/VisitView";
 import { clinicKeys, useOptimistic, useOverview, useReloadClinic, useToday } from "./clinicData";
-import { formatDate, formatDateLong, formatMoney, formatTime, greeting, nowIndex, ownTime, TASK_KIND_LABEL, todayCountWords, untilWords } from "./format";
+import { formatDate, formatDateLong, formatMoney, formatTime, greeting, nowIndex, ownVisit, TASK_KIND_LABEL, todayCountWords, untilWords } from "./format";
 import { NoteDialog } from "./NoteDialog";
 import { AlertGroups, EmptyState, PatientName, ReadError, Section, useClinicNav, VisitRow } from "./parts";
 import { PatientDialog } from "./PatientDialog";
@@ -27,7 +27,7 @@ import { VisitDialog } from "./VisitDialog";
 type Open =
   | { kind: "visit"; view?: VisitView }
   | { kind: "patient" }
-  | { kind: "note"; patientId: string; visit: Visit }
+  | { kind: "note"; patientId: string; visit: Visit; record?: boolean | undefined }
   | { kind: "payment"; patientId: string; visit: Visit }
   | null;
 
@@ -82,7 +82,7 @@ export function TodayTab() {
   // no line is drawn. Time she kept for herself and a cancelled visit are not "next".
   const at = nowIndex(o.visits.map((v) => v.visit.start), now.minute);
   const after = at > 0 ? o.visits.length - at : 0;
-  const next = o.visits.find((v) => v.visit.start > now.minute && !ownTime(v.visit.kind) && v.visit.status !== "cancelled");
+  const next = o.visits.find((v) => v.visit.start > now.minute && !ownVisit(v.visit) && v.visit.status !== "cancelled");
   const soon = next ? { id: next.visit.id, text: untilWords(next.visit.start - now.minute) } : null;
 
   /** A list of visits, each with its one step and its "⋯". The key is the visit's, and the line
@@ -93,7 +93,7 @@ export function TodayTab() {
       {views.map((view, i) => {
         const v = view.visit;
         // Time she kept for herself has no step and no "⋯" (and no empty actions box).
-        const pid = !ownTime(v.kind) ? v.patient_id : null;
+        const pid = !ownVisit(v) ? v.patient_id : null;
         return (
           <Fragment key={v.id}>
             {i === line && <NowLine minute={now.minute} />}
@@ -101,7 +101,7 @@ export function TodayTab() {
               onOpen={() => setOpen({ kind: "visit", view })}
               actions={pid !== null
                 ? <VisitActions view={view} patientId={pid} now={now} onHold={(x) => void hold(x)}
-                    onNote={(x) => setOpen({ kind: "note", patientId: pid, visit: x })} onOpen={() => setOpen({ kind: "visit", view })}
+                    onNote={(x, record) => setOpen({ kind: "note", patientId: pid, visit: x, record })} onOpen={() => setOpen({ kind: "visit", view })}
                     onPay={(x) => setOpen({ kind: "payment", patientId: pid, visit: x })} />
                 : undefined} />
           </Fragment>
@@ -193,7 +193,7 @@ export function TodayTab() {
         open.view ? <VisitDialog view={open.view} onClose={() => setOpen(null)} /> : <VisitDialog onClose={() => setOpen(null)} />
       )}
       {open?.kind === "patient" && <PatientDialog onClose={() => setOpen(null)} />}
-      {open?.kind === "note" && <NoteDialog patientId={open.patientId} visit={open.visit} onClose={() => setOpen(null)} />}
+      {open?.kind === "note" && <NoteDialog patientId={open.patientId} visit={open.visit} record={open.record} onClose={() => setOpen(null)} />}
       {open?.kind === "payment" && <VisitPaymentDialog patientId={open.patientId} visit={open.visit} today={now.date} onClose={() => setOpen(null)} />}
     </div>
   );

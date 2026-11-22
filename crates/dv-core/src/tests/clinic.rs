@@ -4609,7 +4609,7 @@ fn a_message_opens_the_chat_with_the_number_only() {
 // ------------------------------------------------------------------ D-207, D-208
 
 #[test]
-fn a_supervision_is_her_own_time_with_no_patient_and_no_fee() {
+fn a_supervision_is_her_own_time_without_a_child_and_a_visit_with_one() {
     let (_dir, mut core) = open_clinic();
     let noam = new_patient(&mut core, "נועם לביא");
     let own = Visit {
@@ -4621,17 +4621,25 @@ fn a_supervision_is_her_own_time_with_no_patient_and_no_fee() {
     };
     let kept = save_visit(&mut core, own.clone());
     assert_eq!(kept.kind, VisitKind::Supervision);
-    refused(
+    // About a child (his kindergarten teacher): a visit on his card, with a fee and a note.
+    let about = save_visit(
         &mut core,
-        ClinicRequest::SaveVisit {
-            visit: Visit {
-                patient_id: Some(noam.id.clone()),
-                ..own.clone()
-            },
-            repeat: None,
-            scope: Scope::One,
+        Visit {
+            patient_id: Some(noam.id.clone()),
+            fee: 30_000,
+            date: "2026-11-10".to_owned(),
+            ..own.clone()
         },
     );
+    mark(&mut core, &about, VisitStatus::Held);
+    let note = save_note(
+        &mut core,
+        a_note(&noam, Some(&about), "הודרכה הגננת על דרכי ויסות."),
+    );
+    assert_eq!(note.visit_id.as_deref(), Some(about.id.as_str()));
+    let c = card(&mut core, &noam.id);
+    assert!(c.visits.iter().any(|v| v.visit.id == about.id));
+    assert_eq!(c.balance.charged, 30_000);
     refused(
         &mut core,
         ClinicRequest::SaveVisit {

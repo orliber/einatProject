@@ -280,7 +280,7 @@ fn median(mut values: Vec<u32>) -> Option<u32> {
 
 /// A visit of a patient: never a block, never one without a patient.
 fn is_patient_visit(visit: &Visit) -> bool {
-    !visit.kind.own_time()
+    !visit.own_time()
         && visit
             .patient_id
             .as_deref()

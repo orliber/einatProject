@@ -51,7 +51,7 @@ fn patient(id: &str, name: &str) -> Patient {
 fn visit(id: &str, kind: VisitKind, date: &str, start: u16, status: VisitStatus) -> Visit {
     Visit {
         id: id.to_owned(),
-        patient_id: (!kind.own_time()).then(|| "p1".to_owned()),
+        patient_id: (!kind.never_patient()).then(|| "p1".to_owned()),
         kind,
         title: String::new(),
         date: date.to_owned(),
@@ -606,19 +606,17 @@ fn a_patient_card_within_its_limits() {
 
 #[test]
 fn a_block_has_no_patient_and_no_fee_and_the_rest_need_a_patient() {
-    // A supervision is her own time too (D-207).
-    for own in [VisitKind::Block, VisitKind::Supervision] {
-        let block = visit("v1", own, TODAY, 600, VisitStatus::Planned);
-        assert!(validate_visit(&block).is_ok());
-        let mut with_patient = block.clone();
-        with_patient.patient_id = Some("p1".to_owned());
-        refusal(validate_visit(&with_patient));
-        let mut with_fee = block;
-        with_fee.fee = 100;
-        refusal(validate_visit(&with_fee));
-    }
+    let block = visit("v1", VisitKind::Block, TODAY, 600, VisitStatus::Planned);
+    assert!(validate_visit(&block).is_ok());
+    let mut with_patient = block.clone();
+    with_patient.patient_id = Some("p1".to_owned());
+    refusal(validate_visit(&with_patient));
+    let mut with_fee = block;
+    with_fee.fee = 100;
+    refusal(validate_visit(&with_fee));
 
-    for kind in VISIT_KINDS.into_iter().filter(|k| !k.own_time()) {
+    // A supervision may have a child or not (D-207); every other kind needs one.
+    for kind in VISIT_KINDS.into_iter().filter(|k| !k.may_be_own()) {
         let ok = visit("v1", kind, TODAY, 600, VisitStatus::Planned);
         assert!(validate_visit(&ok).is_ok());
         let mut nobody = ok.clone();
@@ -5130,18 +5128,57 @@ fn settings_of_the_pathway_and_the_kit_are_checked() {
 // ------------------------------------------------------------------ D-207, D-208
 
 #[test]
-fn supervision_is_her_own_time_and_is_named_supervision() {
-    assert!(VisitKind::Supervision.own_time());
-    assert!(VisitKind::Block.own_time());
-    assert!(!VisitKind::Guidance.own_time());
+fn supervision_is_her_own_time_without_a_child_and_a_visit_with_one() {
+    // About a child (the kindergarten teacher, the staff): a visit like any other.
+    let about = visit(
+        "v1",
+        VisitKind::Supervision,
+        TODAY,
+        600,
+        VisitStatus::Planned,
+    );
+    assert!(!about.own_time());
+    assert!(validate_visit(&Visit {
+        fee: 30_000,
+        ..about.clone()
+    })
+    .is_ok());
+    assert!((week_visit_count(std::slice::from_ref(&about), TODAY) == 1));
+    // Professional supervision, no child: her own time, with no fee.
+    let own = Visit {
+        patient_id: None,
+        ..about
+    };
+    assert!(own.own_time());
+    assert!(validate_visit(&own).is_ok());
+    let text = refusal(validate_visit(&Visit {
+        fee: 100,
+        ..own.clone()
+    }));
+    assert!(text.contains("בוחרים את הילד"));
+    assert_eq!(week_visit_count(std::slice::from_ref(&own), TODAY), 0);
+    assert!(VisitKind::Block.own_time_with(true));
+    assert!(!VisitKind::Guidance.own_time_with(false));
     assert_eq!(kind_label(VisitKind::Supervision), "הדרכה");
     assert_eq!(kind_label(VisitKind::Guidance), "הדרכת הורים");
     assert!(VISIT_KINDS.contains(&VisitKind::Supervision));
     let json = serde_json::to_string(&VisitKind::Supervision).unwrap_or_default();
     assert_eq!(json, "\"supervision\"");
+    let mut settings = ClinicSettings::default();
+    for d in &mut settings.defaults {
+        if d.kind == VisitKind::Supervision {
+            d.fee = 35_000;
+        }
+    }
+    assert!(validate_settings(&settings).is_ok());
+    assert_eq!(default_fee(None, &settings, VisitKind::Supervision), 0);
+    let child = Patient {
+        id: "p1".to_owned(),
+        ..Patient::default()
+    };
     assert_eq!(
-        default_fee(None, &ClinicSettings::default(), VisitKind::Supervision),
-        0
+        default_fee(Some(&child), &settings, VisitKind::Supervision),
+        35_000
     );
 }
 

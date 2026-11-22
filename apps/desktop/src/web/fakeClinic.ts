@@ -58,7 +58,7 @@ import type { VisitKind } from "../ipc/generated/VisitKind";
 import type { VisitStatus } from "../ipc/generated/VisitStatus";
 import type { VisitView } from "../ipc/generated/VisitView";
 import {
-  addDays, CONTACT_ROLES, dayName, ownTime, daysBetween, formatDate, formatMonth, formatTime, isIsoDate, MAX_AGOROT, moneyNumber, monthOf, monthRange,
+  addDays, CONTACT_ROLES, dayName, ownTime, ownVisit, daysBetween, formatDate, formatMonth, formatTime, isIsoDate, MAX_AGOROT, moneyNumber, monthOf, monthRange,
   PATIENT_STATUSES, PAY_METHOD_LABEL, PAY_METHODS, TASK_KINDS, today as localToday, VISIT_KIND_LABEL, VISIT_KINDS, VISIT_STATUS_LABEL,
   VISIT_STATUSES, weekday, weekRange,
 } from "../screens/clinic/format";
@@ -546,7 +546,7 @@ export class FakeClinic {
     for (const input of visits) {
       const v = this.normalVisit(input);
       need(v.id === "" && v.patient_id === patientId, "במסלול יש פגישה שלא שייכת לכרטיס הזה. אפשר לפתוח את המסלול מחדש.");
-      need(!ownTime(v.kind), "במסלול האבחון אין זמנים שמורים, רק פגישות.");
+      need(v.kind !== "block", "במסלול האבחון אין זמנים שמורים, רק פגישות.");
       need(v.date >= today.date, "אחת הפגישות במסלול נקבעה לתאריך שעבר. אפשר לבחור תאריך אחר.");
       v.status = "planned";
       v.series_id = null;
@@ -706,7 +706,7 @@ export class FakeClinic {
       ...field("מקום", v.place),
       ...field("מצב", VISIT_STATUS_LABEL[v.status]),
       ...field("מה קרה", v.status_note),
-      ...(ownTime(v.kind) ? [] : [v.fee === 0 ? "מחיר: ללא חיוב" : `מחיר: ${plainMoney(v.fee)} ₪`]),
+      ...(ownVisit(v) ? [] : [v.fee === 0 ? "מחיר: ללא חיוב" : `מחיר: ${plainMoney(v.fee)} ₪`]),
       ...(v.charge_missed ? ["חיוב גם אם לא התקיימה: כן"] : []),
       ...(v.series_id !== null ? ["פגישה חוזרת: כן"] : []),
       ...field("הערה", v.note),
@@ -1186,10 +1186,9 @@ export class FakeClinic {
    *  exists is asked right after it, as the service does. */
   private checkVisit(v: Visit) {
     visitKnown(v);
-    if (ownTime(v.kind)) {
-      const what = VISIT_KIND_LABEL[v.kind];
-      need(v.patient_id === null, `ב${what} אין מטופל. כדי לקבוע פגישה עם מטופל צריך לבחור סוג פגישה אחר.`);
-      need(v.fee === 0, `ל${what} אין מחיר.`);
+    need(v.kind !== "block" || v.patient_id === null, "בזמן שמור אין מטופל. כדי לקבוע פגישה עם מטופל צריך לבחור סוג פגישה אחר.");
+    if (ownVisit(v)) {
+      need(v.fee === 0, v.kind === "supervision" ? "להדרכה בלי מטופל אין מחיר. כדי לחייב, בוחרים את הילד שעליו ההדרכה." : "לזמן שמור אין מחיר.");
     } else {
       need(v.patient_id !== null, "צריך לבחור מטופל לפגישה.");
     }
@@ -1552,7 +1551,7 @@ export class FakeClinic {
     for (const d of s.defaults) {
       need(whole(d.minutes, 5, 720), "משך הפגישה צריך להיות בין 5 דקות ל-12 שעות.");
       need(whole(d.fee, 0, MAX_AGOROT), "מחיר הפגישה צריך להיות בין 0 ל-100,000 ₪.");
-      need(!ownTime(d.kind) || d.fee === 0, `ל${VISIT_KIND_LABEL[d.kind]} אין מחיר.`);
+      need(d.kind !== "block" || d.fee === 0, "לזמן שמור אין מחיר.");
     }
     need(s.places.length <= MAX_PLACES, `אפשר לשמור עד ${MAX_PLACES} מקומות.`);
     s.places.forEach((place) => short(place, "מקום"));
@@ -1575,7 +1574,7 @@ export class FakeClinic {
     need(s.package_fee === 0 || s.package_name !== "", "צריך לתת שם לחבילת האבחון, כדי שיופיע בחיוב.");
     need(s.pathway.length <= 12, "אפשר להגדיר עד 12 שלבים במסלול האבחון.");
     for (const step of s.pathway) {
-      need(!ownTime(step.kind) && step.kind !== "unknown", "כל שלב במסלול האבחון צריך להיות פגישה עם המשפחה או עם הילד.");
+      need(step.kind !== "block" && step.kind !== "unknown", "כל שלב במסלול האבחון צריך להיות פגישה עם המשפחה או עם הילד.");
       need(whole(step.gap_days, 0, 180), "הרווח בין שני שלבים במסלול יכול להיות עד 180 יום.");
     }
     need(s.starter_tasks.length <= 20, "אפשר להגדיר עד 20 מעקבים בערכת הפתיחה.");
@@ -1658,7 +1657,7 @@ export class FakeClinic {
 
       for (const v of mine) {
         const when = `${formatDate(v.date)} בשעה ${formatTime(v.start)}`;
-        if (v.status === "planned" && !ownTime(v.kind)) {
+        if (v.status === "planned" && !ownVisit(v)) {
           if (v.date < today.date || (v.date === today.date && v.start + v.minutes <= today.minute)) {
             add("unmarked", p, `הפגישה מיום ${when} עדיין מסומנת כמתוכננת. אפשר לסמן אם התקיימה.`, v.date, { visit: v.id });
           }
@@ -1738,7 +1737,7 @@ export class FakeClinic {
     const on = (date: string) => this.visits.filter((v) => v.date === date).sort(byDateTime);
     const todays = on(today.date);
     // A visit with a patient that was not cancelled; time she kept for herself is not one.
-    const counts = (v: Visit) => !ownTime(v.kind) && v.status !== "cancelled";
+    const counts = (v: Visit) => !ownVisit(v) && v.status !== "cancelled";
     // Today has nothing left once every visit of it has ended.
     const left = todays.some((v) => counts(v) && v.start + v.minutes > today.minute);
     const nextDay = left ? null : (this.visits.filter((v) => counts(v) && v.date > today.date).map((v) => v.date).sort()[0] ?? null);
@@ -1926,7 +1925,7 @@ export class FakeClinic {
     const visit = (p: Patient | null, kind: VisitKind, at: number, start: number, status: VisitStatus, over: Partial<Visit> = {}): Visit => {
       const v: Visit = {
         id: this.newId("visit"), patient_id: p?.id ?? null, kind, title: "", date: day(at), start, minutes: minutes(kind), place: "הקליניקה", status,
-        status_note: "", fee: ownTime(kind) ? 0 : (p?.session_fee ?? fees[kind] ?? 0), charge_missed: false, series_id: null, note: "", remember: [], ...over,
+        status_note: "", fee: ownTime(kind, p?.id) ? 0 : (p?.session_fee ?? fees[kind] ?? 0), charge_missed: false, series_id: null, note: "", remember: [], ...over,
       };
       this.visits.push(v);
       this.keepVisit(v, "created");

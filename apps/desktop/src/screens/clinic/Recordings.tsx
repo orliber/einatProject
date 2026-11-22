@@ -91,7 +91,7 @@ type Phase = { kind: "idle" } | { kind: "starting" } | { kind: "recording"; seco
 /** While she records, the vault is told she is there this often (she types and clicks nothing). */
 const TOUCH_EVERY_SECONDS = 30;
 
-export function Recordings({ note, patientId, visitId, date, onNote, onBusy }: {
+export function Recordings({ note, patientId, visitId, date, onNote, onBusy, autoStart = false }: {
   /** The note as kept; `null` before it was ever saved (the first recording creates it). */
   note: SessionNote | null;
   patientId: string;
@@ -100,6 +100,8 @@ export function Recordings({ note, patientId, visitId, date, onNote, onBusy }: {
   onNote: (note: SessionNote) => void;
   /** True while a recording is under way or being saved: closing would lose it. */
   onBusy: (busy: boolean) => void;
+  /** Opened from "להקליט לעצמך": the recording starts at once, as she asked. */
+  autoStart?: boolean;
 }) {
   const { notify } = useApp();
   const save = useSaveRecording();
@@ -150,6 +152,19 @@ export function Recordings({ note, patientId, visitId, date, onNote, onBusy }: {
   useEffect(() => () => {
     if (playing) URL.revokeObjectURL(playing.url);
   }, [playing]);
+  // Once, when the dialog opens for a recording; `start` itself keeps a second one from starting.
+  const autoStarted = useRef(false);
+  useEffect(() => {
+    if (!autoStart || autoStarted.current || full) return;
+    // After the first paint: a mount that is undone at once (React's checks in development)
+    // clears the timer and the next mount starts it, so the microphone is asked for once.
+    const t = window.setTimeout(() => {
+      autoStarted.current = true;
+      void start();
+    }, 0);
+    return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once, on opening
+  }, []);
 
   async function keep(blob: Blob, mime: string, seconds: number, name: string) {
     if (blob.size === 0) {

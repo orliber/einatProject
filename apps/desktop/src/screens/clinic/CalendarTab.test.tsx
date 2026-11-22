@@ -529,7 +529,7 @@ describe("the day", () => {
     expect(held).toHaveClass("btn-primary");
     expect(within(row("תמר")).queryByRole("button", { name: "תזכורת" })).toBeNull();
     // A reminder no longer makes sense once it has begun: none in "⋯" either (D-204 §4).
-    expect(await menuOf(user, row("תמר"))).toEqual(["לכתוב סיכום", "לפתוח את הפגישה"]);
+    expect(await menuOf(user, row("תמר"))).toEqual(["לכתוב סיכום", "להקליט לעצמך", "לפתוח את הפגישה"]);
     await user.click(held);
     await waitFor(() => expect(saves()[0]).toMatchObject({ visit: { status: "held" } }));
     await waitFor(() => expect(within(row("תמר")).getByRole("button", { name: "לכתוב סיכום" })).toHaveFocus());

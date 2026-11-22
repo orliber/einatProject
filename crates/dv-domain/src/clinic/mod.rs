@@ -142,8 +142,10 @@ pub enum VisitKind {
     Other,
     /// Time she blocks for herself: writing reports, a day off. Never has a patient or a fee.
     Block,
-    /// Professional supervision, given or received (D-207). Like [`VisitKind::Block`], it is
-    /// her own time: never a patient, never a fee. Parent guidance is [`VisitKind::Guidance`].
+    /// Supervision (D-207): guiding a kindergarten teacher or a school staff about a child
+    /// (with that child's card: a visit like any other, with a fee and a note), or professional
+    /// supervision she gives or receives (with no card: her own time, no fee). Parent guidance
+    /// is [`VisitKind::Guidance`].
     Supervision,
     /// A value this version does not know (a row written by a later one, D-178). Shown as
     /// it is, and never saved: a record that carries it is refused until she picks a value.
@@ -152,11 +154,37 @@ pub enum VisitKind {
 }
 
 impl VisitKind {
-    /// Her own time (D-207): a block or a supervision. It never has a patient or a fee, is
-    /// not a visit in the counts, and the calendar copy calls it "לא פנויה".
+    /// A kind that is always her own time and never has a patient: a block.
     #[must_use]
-    pub fn own_time(self) -> bool {
+    pub fn never_patient(self) -> bool {
+        self == Self::Block
+    }
+
+    /// A kind that may be her own time, with no patient (D-207): a block, or a supervision
+    /// with no child's card.
+    #[must_use]
+    pub fn may_be_own(self) -> bool {
         matches!(self, Self::Block | Self::Supervision)
+    }
+
+    /// Her own time, for this kind with or without a patient (D-207).
+    #[must_use]
+    pub fn own_time_with(self, has_patient: bool) -> bool {
+        self == Self::Block || (self == Self::Supervision && !has_patient)
+    }
+}
+
+impl Visit {
+    /// Her own time (D-207): a block, or a supervision with no child's card. It has no
+    /// patient and no fee, is not a visit in the counts, and the calendar copy calls it
+    /// "לא פנויה".
+    #[must_use]
+    pub fn own_time(&self) -> bool {
+        let has_patient = self
+            .patient_id
+            .as_deref()
+            .is_some_and(|id| !id.trim().is_empty());
+        self.kind.own_time_with(has_patient)
     }
 }
 
@@ -181,7 +209,7 @@ pub enum VisitStatus {
 #[ts(export)]
 pub struct Visit {
     pub id: String,
-    /// `None` only for her own time ([`VisitKind::own_time`]).
+    /// `None` only for her own time ([`Visit::own_time`]).
     pub patient_id: Option<String>,
     pub kind: VisitKind,
     /// Her own words for it; the calendar shows them instead of the kind's name when set.
