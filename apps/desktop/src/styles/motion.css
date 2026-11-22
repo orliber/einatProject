@@ -266,3 +266,51 @@ li {
     scroll-behavior: auto !important;
   }
 }
+
+/* Windows "contrast themes" (forced colours): backgrounds and shadows are dropped by the
+   system, so whatever said "you are here" or "this is chosen" by a fill or a halo says it with
+   a line instead (WCAG 1.4.1, 1.4.11, 2.4.7). */
+@media (forced-colors: active) {
+  :focus-visible {
+    outline: 2px solid Highlight;
+    outline-offset: 2px;
+  }
+  .chat-input:focus-within,
+  .a4-edit-text:focus,
+  .menu-item[data-highlighted],
+  [role="option"][aria-selected="true"] {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
+  .topbar-area-on,
+  .subbar-on,
+  [aria-current="page"],
+  [aria-current="true"],
+  [role="tab"][aria-selected="true"],
+  [role="radio"][aria-checked="true"],
+  [aria-pressed="true"] {
+    outline: 2px solid Highlight;
+    outline-offset: -3px;
+  }
+  .card,
+  .dialog,
+  .chip,
+  .toast,
+  .cal-visit,
+  .skip-link:focus {
+    border: 1px solid CanvasText;
+  }
+  /* A bar of progress is a fill: it keeps its own colours so it can be read. */
+  progress,
+  .clinic-bar-track,
+  .clinic-bar-track *,
+  .chart-bar,
+  .insights-col-bar,
+  .insights-day-bar,
+  .insights-hbar,
+  .insights-rank-bar,
+  .switch,
+  .switch * {
+    forced-color-adjust: none;
+  }
+}

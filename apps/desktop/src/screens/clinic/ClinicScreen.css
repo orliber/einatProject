@@ -97,6 +97,7 @@ html:has(.clinic-panel) {
   background: var(--surface);
   text-align: center;
 }
+.clinic-empty h2,
 .clinic-empty h3 {
   font-size: var(--text-xl);
 }

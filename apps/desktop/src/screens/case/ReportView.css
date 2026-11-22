@@ -683,6 +683,9 @@
 }
 .a4-mark {
   background: var(--mark);
+  /* The text keeps the colour of where it stands: a browser's own black for a mark is
+     unreadable on the dark theme's mark, outside the white page (WCAG 1.4.3). */
+  color: inherit;
   border-radius: 3px;
   padding: 0 2px;
 }

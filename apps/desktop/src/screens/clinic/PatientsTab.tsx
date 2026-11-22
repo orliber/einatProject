@@ -147,7 +147,7 @@ export function PatientsTab() {
       </header>
 
       {all.length === 0 ? (
-        <EmptyState title="עוד אין מטופלים בקליניקה"
+        <EmptyState top title="עוד אין מטופלים בקליניקה"
           actions={<button type="button" className="btn btn-primary" onClick={() => setAdding(true)}>להוסיף מטופל</button>}>
           <p>כל משפחה מקבלת כרטיס: הפרטים, הפגישות, הסיכומים והתשלומים במקום אחד.</p>
         </EmptyState>
@@ -159,7 +159,7 @@ export function PatientsTab() {
           </p>
 
           {list.length === 0 ? (
-            <EmptyState title={query !== "" ? "לא נמצא מטופל כזה" : filter === "closed" ? "אין כרטיסים שהסתיימו" : "אין כרגע מטופלים בתהליך"}
+            <EmptyState top title={query !== "" ? "לא נמצא מטופל כזה" : filter === "closed" ? "אין כרטיסים שהסתיימו" : "אין כרגע מטופלים בתהליך"}
               actions={query !== "" && elsewhere > 0
                 ? <button type="button" className="btn" onClick={() => { setFilter("all"); paged.setPage(0); }}>להציג את כולם</button>
                 : query !== "" ? <button type="button" className="btn" onClick={() => { setText(""); paged.setPage(0); }}>לנקות את החיפוש</button>

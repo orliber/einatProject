@@ -90,10 +90,14 @@ export function KindBadge({ kind }: { kind: VisitKind }) {
 // ------------------------------------------------------------------ layout pieces
 
 /** A quiet block for "nothing here yet", with what she can do about it. */
-export function EmptyState({ title, children, actions }: { title: string; children?: ReactNode; actions?: ReactNode }) {
+export function EmptyState({ title, children, actions, top }: {
+  title: string; children?: ReactNode; actions?: ReactNode;
+  /** Not under a section's heading: its title is the next level after the page's. */
+  top?: boolean;
+}) {
   return (
     <div className="clinic-empty">
-      <h3>{title}</h3>
+      {top ? <h2>{title}</h2> : <h3>{title}</h3>}
       {children && <div className="clinic-empty-text muted">{children}</div>}
       {actions && <div className="row clinic-empty-actions">{actions}</div>}
     </div>

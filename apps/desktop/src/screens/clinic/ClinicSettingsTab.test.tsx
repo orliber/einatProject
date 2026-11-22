@@ -234,12 +234,12 @@ describe("the clinic's settings", () => {
     await user.click(topic("פגישות ומחירים"));
     const places = part("מקומות");
     const names = () => within(within(places).getByRole("list", { name: "המקומות, לפי הסדר" })).getAllByRole("listitem").map((li) => li.firstElementChild?.textContent);
-    expect(within(places).getByRole("button", { name: "להעלות את הקליניקה" })).toBeDisabled();
-    expect(within(places).getByRole("button", { name: "להוריד את שיחת וידאו" })).toBeDisabled();
-    await user.click(within(places).getByRole("button", { name: "להעלות את שיחת וידאו" }));
-    await user.click(within(places).getByRole("button", { name: "להעלות את שיחת וידאו" }));
+    expect(within(places).getByRole("button", { name: "למעלה: הקליניקה" })).toBeDisabled();
+    expect(within(places).getByRole("button", { name: "למטה: שיחת וידאו" })).toBeDisabled();
+    await user.click(within(places).getByRole("button", { name: "למעלה: שיחת וידאו" }));
+    await user.click(within(places).getByRole("button", { name: "למעלה: שיחת וידאו" }));
     expect(names()).toEqual(["שיחת וידאו", "הקליניקה", "בגן או בבית הספר"]);
-    await user.click(within(places).getByRole("button", { name: "להוריד את הקליניקה" }));
+    await user.click(within(places).getByRole("button", { name: "למטה: הקליניקה" }));
     expect(names()).toEqual(["שיחת וידאו", "בגן או בבית הספר", "הקליניקה"]);
     await user.click(within(places).getByRole("button", { name: "הסרת בגן או בבית הספר" }));
 
