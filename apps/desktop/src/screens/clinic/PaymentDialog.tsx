@@ -6,6 +6,7 @@ import { useState } from "react";
 import { useApp } from "../../App";
 import { DateField } from "../../components/DateField";
 import { Dialog, ErrorLine } from "../../components/ui";
+import type { Payment } from "../../ipc/generated/Payment";
 import type { PayMethod } from "../../ipc/generated/PayMethod";
 import type { Visit } from "../../ipc/generated/Visit";
 import { usePatientCard, useSavePayment } from "./clinicData";
@@ -20,16 +21,27 @@ export function visitCharge(v: Visit): number {
   return (v.status === "cancelled" || v.status === "no_show") && v.charge_missed ? v.fee : 0;
 }
 
+/** How this family paid last time (the newest payment that was not voided), or a bank transfer
+ *  when nothing was paid yet: a family that pays in Bit pays in Bit next time too, and she is
+ *  free to change it. */
+export function lastMethod(payments: readonly Payment[]): PayMethod {
+  const live = payments.filter((p) => !p.voided);
+  const newest = live.reduce<Payment | undefined>((best, p) => (best === undefined || p.date >= best.date ? p : best), undefined);
+  return newest === undefined || newest.method === "unknown" ? "transfer" : newest.method;
+}
+
 /** "תקבול חדש": money that was received. The amount starts from what is still owed, or from
  *  `amount` (the fee of the visit it was opened from); then the box says what the family owes. */
-export function PaymentDialog({ patientId, today, due, amount, about, onClose }: {
+export function PaymentDialog({ patientId, today, due, amount, about, method, onClose }: {
   patientId: string; today: string; due: number; amount?: number | undefined;
+  /** The method the box opens on: the family's last one. */
+  method?: PayMethod | undefined;
   /** Away from the card: whose payment this is, said first in the dialog. */
   about?: string | undefined; onClose: () => void;
 }) {
   const { notify } = useApp();
   const save = useSavePayment();
-  const [first] = useState({ amount: moneyText(amount !== undefined && amount > 0 ? amount : due > 0 ? due : null), method: "transfer" as PayMethod, receipt: "", payer: "", date: today, note: "" });
+  const [first] = useState({ amount: moneyText(amount !== undefined && amount > 0 ? amount : due > 0 ? due : null), method: method ?? ("transfer" as PayMethod), receipt: "", payer: "", date: today, note: "" });
   const [form, setForm] = useState(first);
   const [error, setError] = useState<string | null>(null);
   const set = (patch: Partial<typeof first>) => setForm((f) => ({ ...f, ...patch }));
@@ -89,5 +101,5 @@ export function VisitPaymentDialog({ patientId, visit, today, onClose }: { patie
   // The name as the screen may show it now (initials in discreet mode).
   const who = card.data ? shown(card.data.patient.name) : "";
   const about = `${who === "" ? "תקבול" : `תקבול מהמשפחה של ${who}`}, על ${VISIT_KIND_LABEL[visit.kind]} מיום ${formatDate(visit.date)}.`;
-  return <PaymentDialog patientId={patientId} today={today} due={card.data?.balance.due ?? 0} amount={visitCharge(visit)} about={about} onClose={onClose} />;
+  return <PaymentDialog patientId={patientId} today={today} due={card.data?.balance.due ?? 0} amount={visitCharge(visit)} about={about} method={lastMethod(card.data?.payments ?? [])} onClose={onClose} />;
 }

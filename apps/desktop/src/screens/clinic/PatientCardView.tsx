@@ -42,7 +42,7 @@ import {
   TextAreaField, TextField, useDiscreet, usePaged, useShownName, VisitRow,
 } from "./parts";
 import { PathwayDialog } from "./PathwayDialog";
-import { PaymentDialog, visitCharge } from "./PaymentDialog";
+import { lastMethod, PaymentDialog, visitCharge } from "./PaymentDialog";
 import { PatientDialog } from "./PatientDialog";
 import { VisitDialog } from "./VisitDialog";
 import { SendMenu } from "./SendMenu";
@@ -729,7 +729,7 @@ function MoneyBox({ card, today }: { card: PatientCard; today: string }) {
       <Pager page={paged.page} pages={paged.pages} onPage={paged.setPage} label="עמודי החיובים והתקבולים" />
 
       {open?.kind === "charge" && <ChargeDialog patientId={card.patient.id} today={today} onClose={() => setOpen(null)} />}
-      {open?.kind === "payment" && <PaymentDialog patientId={card.patient.id} today={today} due={b.due} onClose={() => setOpen(null)} />}
+      {open?.kind === "payment" && <PaymentDialog patientId={card.patient.id} today={today} due={b.due} method={lastMethod(card.payments)} onClose={() => setOpen(null)} />}
       {open?.kind === "void" && <VoidDialog line={open.line} onClose={() => setOpen(null)} />}
     </Section>
   );

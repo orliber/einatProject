@@ -6,6 +6,8 @@ import type { ClinicRequest } from "../../ipc/generated/ClinicRequest";
 import { a11yViolations } from "../../test/a11y";
 import { appApi, Host, serve, type Override } from "../../test/host";
 import { ClinicScreen, forgetDiscreet } from "./ClinicScreen";
+import type { Payment } from "../../ipc/generated/Payment";
+import { lastMethod } from "./PaymentDialog";
 
 configure({ asyncUtilTimeout: 5000 });
 vi.setConfig({ testTimeout: 30_000 });
@@ -84,5 +86,19 @@ describe("“לרשום תקבול” from a visit's row", () => {
     await user.click(within(dialog).getByRole("button", { name: "רישום התקבול" }));
     expect(await within(dialog).findByText("התקבול לא נרשם: בדיקה.")).toBeInTheDocument();
     expect(notes).not.toContain("התקבול נרשם");
+  });
+});
+
+describe("the method the payment box opens on", () => {
+  const pay = (date: string, method: Payment["method"], voided = false): Payment =>
+    ({ id: date, patient_id: "p", date, amount: 100, method, receipt: "", payer: "", note: "", voided, void_reason: "" });
+
+  it("is how the family paid last time, and a bank transfer when nothing was paid yet", () => {
+    expect(lastMethod([])).toBe("transfer");
+    expect(lastMethod([pay("2026-10-01", "cash"), pay("2026-11-02", "bit"), pay("2026-09-01", "transfer")])).toBe("bit");
+  });
+
+  it("does not learn from a payment that was voided", () => {
+    expect(lastMethod([pay("2026-10-01", "cash"), pay("2026-11-02", "bit", true)])).toBe("cash");
   });
 });
