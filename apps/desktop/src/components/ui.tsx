@@ -262,7 +262,8 @@ export function Dialog(props: {
       <section ref={ref} tabIndex={-1} role="dialog" aria-modal="true" aria-label={props.title}
         data-help={props.help} data-help-panel={props.helpPanel ? "" : undefined}
         className={props.narrow ? "dialog dialog-narrow" : props.wide ? "dialog dialog-wide" : "dialog"}>
-        <header className="dialog-head">
+        {/* Not a banner and not a page footer: the window has one of each, on the page (axe: one banner). */}
+        <header className="dialog-head" role="none">
           {props.icon}
           <div className="grow stack" style={{ gap: 4 }}>
             <h2>{props.title}</h2>
@@ -284,7 +285,7 @@ export function Dialog(props: {
             <button type="button" className="btn" onClick={onClose}>לסגור בלי לשמור</button>
           </footer>
         ) : (
-          footer && <footer className="dialog-foot">{footer}</footer>
+          footer && <footer className="dialog-foot" role="none">{footer}</footer>
         )}
       </section>
     </div>

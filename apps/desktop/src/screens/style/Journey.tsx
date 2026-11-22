@@ -1,3 +1,4 @@
+import { scrollGlide } from "../../motionPref";
 import type { StyleOverview } from "../../ipc/client";
 import { sinceLabel } from "./labels";
 
@@ -20,7 +21,7 @@ type Stage = {
   disabled: boolean;
 };
 
-const scrollTo = (id: string) => () => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+const scrollTo = (id: string) => () => document.getElementById(id)?.scrollIntoView({ behavior: scrollGlide(), block: "start" });
 
 /** The whole process in one strip: my reports, analysis, approval, in use. Each stage says where
  * it stands and what to do next; the current one is marked. */

@@ -1,3 +1,4 @@
+import { scrollGlide } from "../motionPref";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { useDiscreet, useShownName } from "../discreet";
 import { getKept, useKept } from "../kept";
@@ -163,7 +164,7 @@ export function ConsultScreen({ caseId }: { caseId?: string | undefined }) {
   const followDown = useCallback(() => end.current?.scrollIntoView({ block: "end" }), []);
   // Follow the conversation down, like any chat.
   useEffect(() => {
-    end.current?.scrollIntoView({ block: "end", behavior: "smooth" });
+    end.current?.scrollIntoView({ block: "end", behavior: scrollGlide() });
   }, [turns.length, waitingSince]);
   // The kept question changed elsewhere (given back after a failed preparation, maybe while
   // another visit of this screen was open): the box takes it, unless she has typed in it since.
@@ -339,7 +340,7 @@ export function ConsultScreen({ caseId }: { caseId?: string | undefined }) {
           </nav>
         </aside>
 
-        <section className="card consult-chat" aria-label="השיחה">
+        <section className="card consult-chat" aria-label="השיחה" data-page-content="">
           {turns.length > 0 && (
             <div className="consult-head">
               <strong className="consult-head-title">{titleOf(turns) || title}</strong>

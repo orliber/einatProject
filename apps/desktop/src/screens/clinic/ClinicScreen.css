@@ -36,6 +36,7 @@ html:has(.clinic-panel) {
   text-decoration-color: var(--line-strong);
   text-underline-offset: 3px;
   cursor: pointer;
+  min-height: 24px;
 }
 .clinic-name-link.clinic-name-strong {
   font-weight: 600;
@@ -302,8 +303,8 @@ html:has(.clinic-panel) {
 }
 .clinic-task input[type="checkbox"],
 .clinic-check input[type="checkbox"] {
-  width: 20px;
-  height: 20px;
+  width: 24px;
+  height: 24px;
   margin: 2px 0 0;
   flex-shrink: 0;
   accent-color: var(--primary);

@@ -124,6 +124,9 @@ function ClinicPages({ route }: { route: Route | undefined }) {
   }
 
   return (
+    // The tabs sit inside a navigation landmark, so a screen reader finds them among the page's
+    // regions; the landmark takes no box of its own.
+    <nav className="subbar-landmark" aria-label="עמודי ניהול הקליניקה">
     <div className="subbar" role="tablist" aria-label="חלקי הקליניקה" onKeyDown={onKey}>
       {CLINIC_TABS.map((t) => (
         <button key={t.id} type="button" role="tab" id={`clinic-tab-${t.id}`} aria-selected={t.id === active}
@@ -135,5 +138,6 @@ function ClinicPages({ route }: { route: Route | undefined }) {
         </button>
       ))}
     </div>
+    </nav>
   );
 }

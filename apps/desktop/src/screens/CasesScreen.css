@@ -89,6 +89,13 @@
   color: var(--ink-muted);
   cursor: pointer;
   border-radius: 6px;
+  position: relative;
+}
+/* The arrow keeps its narrow box in the tree; the place that takes a click is 28px wide. */
+.tree-arrow::before {
+  content: "";
+  position: absolute;
+  inset: 0 -4px;
 }
 button.tree-arrow:hover {
   background: var(--sand-strong);

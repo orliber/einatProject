@@ -1,0 +1,29 @@
+/* The skip link takes no room at all until the keyboard reaches it. */
+.skip-link {
+  position: fixed;
+  inset-block-start: 0;
+  inset-inline-start: 0;
+  z-index: 1000;
+  inline-size: 0;
+  block-size: 0;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  background: var(--primary);
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+}
+.skip-link:focus,
+.skip-link:focus-visible {
+  inline-size: auto;
+  block-size: auto;
+  min-block-size: 44px;
+  padding: var(--space-2) var(--space-4);
+  margin: var(--space-2);
+  border-radius: var(--radius-md);
+  outline: 3px solid var(--surface);
+  outline-offset: -5px;
+  box-shadow: 0 2px 10px rgb(0 0 0 / 0.25);
+}

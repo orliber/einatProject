@@ -26,6 +26,7 @@ import type { SettingsPane } from "./screens/settingsPanes";
 import type { ClinicTab } from "./screens/clinic/tabs";
 import { areaOf, homeOf, lastArea, rememberArea } from "./areas";
 import { isDiscreet, setDiscreet } from "./discreet";
+import { SkipLink, usePageTitle } from "./components/PageAids";
 
 // The pages she opens rarely load on their own, so the first paint and the case pages carry
 // only what they need; they are fetched in the background right after the vault opens.
@@ -359,6 +360,7 @@ function Shell(props: {
     const area = areaOf(route.name);
     if (area) rememberArea(area);
   }, [route.name]);
+  usePageTitle(route);
   const api = useMemo<AppApi>(
     () => ({ status, route, go, refresh, notify, fail, lockNow, showHelp }),
     [status, route, go, refresh, notify, fail, lockNow, showHelp],
@@ -375,6 +377,7 @@ function Shell(props: {
   return (
     <QueryClientProvider client={queryClient}>
     <AppContext.Provider value={api}>
+      <SkipLink />
       {route.name === "cases" && <CasesScreen />}
       {route.name === "case" && <CaseScreen key={route.id} caseId={route.id} view={route.view} {...(route.section ? { section: route.section } : {})} />}
       <Suspense fallback={<PageLoading />}>

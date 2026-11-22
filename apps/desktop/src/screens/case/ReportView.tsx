@@ -1,3 +1,4 @@
+import { scrollGlide } from "../../motionPref";
 import { Fragment, useEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { useApp } from "../../App";
 import { ipc, type CaseDetail, type ReportSettings, type TemplateView } from "../../ipc/client";
@@ -69,8 +70,8 @@ export function ReportView({ api, current, focus, onPick }: {
     if (!el) return;
     // To one paragraph of it when asked (the first one held back by "approve all", D-161).
     const para = focus.para ? document.getElementById(`para-${focus.para}`) : null;
-    if (para) para.scrollIntoView({ block: "center", behavior: "smooth" });
-    else el.scrollIntoView({ block: "start", behavior: "smooth" });
+    if (para) para.scrollIntoView({ block: "center", behavior: scrollGlide() });
+    else el.scrollIntoView({ block: "start", behavior: scrollGlide() });
     el.classList.add("a4-flash");
     el.querySelector<HTMLElement>(".a4-heading")?.focus({ preventScroll: true });
     const t = setTimeout(() => el.classList.remove("a4-flash"), 1600);

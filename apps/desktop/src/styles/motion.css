@@ -213,3 +213,56 @@ li {
     animation-delay: 0ms !important;
   }
 }
+
+/* A touch screen or a pen (a laptop with a touch screen, a tablet): everything she presses is
+   at least 44px (WCAG 2.5.5), without changing the layout for a mouse. */
+@media (pointer: coarse) {
+  .btn,
+  .icon-btn,
+  .link-btn,
+  .subbar-link,
+  .topbar-area,
+  .input,
+  .select,
+  .settings-nav-btn,
+  .contents-item,
+  .stage,
+  .case-back,
+  [role="menuitem"],
+  [role="tab"],
+  [role="radio"] {
+    min-height: 44px;
+  }
+  .icon-btn,
+  .tree-arrow {
+    min-width: 44px;
+  }
+  .clinic-name-link {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
+  input[type="checkbox"],
+  input[type="radio"] {
+    width: 24px;
+    height: 24px;
+  }
+  label:has(> input[type="checkbox"]),
+  label:has(> input[type="radio"]) {
+    min-height: 44px;
+    align-items: center;
+  }
+}
+
+/* The safety net for "reduce motion": whatever a component's own stylesheet forgot, nothing
+   slides, fades or spins for longer than a blink. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

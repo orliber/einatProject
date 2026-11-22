@@ -655,7 +655,7 @@ export function CaseScreen({ caseId, view, section }: { caseId: string; view: st
             onApproveAll={(ids, held) => void approveAll(ids, held)} approvingAll={approvingAll}
             approvedAll={approvedAll} onOpenParagraph={(key, para) => toReport(key, para)} />
         )}
-        <div className="work">
+        <div className="work" role="main">
           {view === "materials" && <MaterialsView api={api} onWrite={() => void toWriting()} />}
           {view === "details" && <DetailsView api={api} />}
           {view === "report" && <ReportView api={api} onWriteAll={writeAll} focus={focus} current={focusKey}
