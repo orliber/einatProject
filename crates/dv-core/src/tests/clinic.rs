@@ -1033,6 +1033,61 @@ fn only_a_planned_visit_without_a_note_can_be_removed() {
     assert_eq!(calendar(&mut core, "2027-01-01", "2027-02-28").len(), 2);
 }
 
+// ------------------------------------------------------------------ the search over the notes (D-216)
+
+#[test]
+fn a_search_reads_the_notes_of_every_card_and_leaves_no_trace() {
+    let (_dir, mut core) = open_clinic();
+    let noam = new_patient(&mut core, "נועם");
+    let tamar = new_patient(&mut core, "תמר");
+    save_note(
+        &mut core,
+        SessionNote {
+            personal: "מחשבה-פרטית-בדויה".to_owned(),
+            ..a_note(&noam, None, "שיחה עם הגננת על המעברים.")
+        },
+    );
+    save_note(&mut core, a_note(&tamar, None, "המעברים קשים גם בבית."));
+    let search = |core: &mut Core, text: &str, personal: bool| match ask(
+        core,
+        ClinicRequest::SearchNotes {
+            text: text.to_owned(),
+            personal,
+        },
+    ) {
+        ClinicReply::Found(found) => found,
+        other => panic!("{other:?}"),
+    };
+    let events = |core: &mut Core| core.activity(None).unwrap().entries.len();
+    let before = events(&mut core);
+
+    let both = search(&mut core, "המעברים", false);
+    let mut names: Vec<&str> = both.hits.iter().map(|h| h.patient_name.as_str()).collect();
+    names.sort_unstable();
+    assert_eq!(names, ["נועם", "תמר"]);
+    assert_eq!(
+        search(&mut core, "הגננת", false).hits[0].patient_id,
+        noam.id
+    );
+    // The personal note only when she asks, and never its words.
+    assert!(search(&mut core, "מחשבה-פרטית-בדויה", false)
+        .hits
+        .is_empty());
+    let own = search(&mut core, "מחשבה-פרטית-בדויה", true);
+    assert!(own.hits[0].in_personal && own.hits[0].snippet.is_empty());
+    // A search is a read: the event log does not know one was made.
+    assert_eq!(events(&mut core), before);
+
+    // One letter is refused in her words.
+    assert!(matches!(
+        core.clinic(ClinicRequest::SearchNotes {
+            text: "א".to_owned(),
+            personal: false
+        }),
+        Err(CoreError::Refused(_))
+    ));
+}
+
 // ------------------------------------------------------------------ session notes
 
 #[test]

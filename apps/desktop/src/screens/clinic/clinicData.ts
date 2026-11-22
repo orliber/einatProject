@@ -120,6 +120,10 @@ export const useProposedPathway = (patientId: string, from: string, date: string
 export const useInsights = (from: string, to: string, date: string) =>
   useRead(clinicKeys.insights(from, to, date), () => clinicApi.insights(today(), from, to));
 
+/** The session notes that hold the words of `text` (D-216); nothing is asked under two letters. */
+export const useNoteSearch = (text: string, personal: boolean) =>
+  useRead(["clinic", "note-search", text, personal], () => clinicApi.searchNotes(text, personal), { enabled: text.replace(/\s/g, "").length >= 2 });
+
 /** Reads the clinic's data again: what "לנסות שוב" does after a read that failed. */
 export function useReloadClinic(): () => void {
   const qc = useQueryClient();

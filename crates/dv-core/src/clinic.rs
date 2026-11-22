@@ -757,6 +757,9 @@ impl Core {
             ClinicRequest::StarterTasks { patient_id, today } => {
                 self.clinic_starter_tasks(&patient_id, &today)
             }
+            ClinicRequest::SearchNotes { text, personal } => {
+                self.clinic_search_notes(&text, personal)
+            }
             ClinicRequest::Insights {
                 today,
                 from_month,
@@ -1236,6 +1239,22 @@ impl Core {
             case: case.map(|(id, c)| c.link(id)),
             alerts,
         })))
+    }
+
+    /// The session notes that hold the words she typed (D-216). Read inside the vault and
+    /// answered to the screen; nothing is written, nothing goes to the event log (not even
+    /// that a search was made), and nothing leaves.
+    fn clinic_search_notes(
+        &mut self,
+        text: &str,
+        personal: bool,
+    ) -> Result<ClinicReply, CoreError> {
+        let v = self.vault_ref()?;
+        let notes: Vec<SessionNote> = all(v)?;
+        let visits: Vec<Visit> = all(v)?;
+        let found = rules::search_notes(&notes, &visits, &names_of(&patients(v)?), text, personal)
+            .map_err(refusal)?;
+        Ok(ClinicReply::Found(found))
     }
 
     fn clinic_tasks(&mut self, today: &Today) -> Result<ClinicReply, CoreError> {

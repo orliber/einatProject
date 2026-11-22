@@ -738,6 +738,33 @@ pub struct TaskView {
     pub overdue: bool,
 }
 
+/// A session note a search found (D-216): whose it is, when, and a few words around what was
+/// found in its record. The personal note is searched only when she asks, and its words are
+/// never in the answer: `in_personal` says the match is there.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct NoteHit {
+    pub note_id: String,
+    pub patient_id: String,
+    pub patient_name: String,
+    pub date: String,
+    /// The kind of the visit it documents; `None`: a note on its own (a phone call).
+    pub visit_kind: Option<VisitKind>,
+    /// The words around the first match in the record; empty when only the personal note
+    /// matched.
+    pub snippet: String,
+    pub in_personal: bool,
+}
+
+/// What a search over the session notes found (D-216): the newest first, at most
+/// [`logic::NOTE_HITS_MAX`]; `more` says there were more than that.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct NoteSearch {
+    pub hits: Vec<NoteHit>,
+    pub more: bool,
+}
+
 /// Everything about one patient.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export)]
@@ -1153,6 +1180,13 @@ pub enum ClinicRequest {
         from_month: String,
         to_month: String,
     },
+    /// The session notes of every card that hold all the words of `text` (D-216). A read
+    /// inside the vault: nothing is written, logged or sent. `personal`: read the personal
+    /// notes too (off in discreet mode).
+    SearchNotes {
+        text: String,
+        personal: bool,
+    },
 }
 
 /// The answer to each [`ClinicRequest`].
@@ -1183,6 +1217,7 @@ pub enum ClinicReply {
     Slots(Vec<Slot>),
     Proposed(Vec<Visit>),
     Insights(Box<Insights>),
+    Found(NoteSearch),
     Sound(RecordingSound),
     Done,
 }

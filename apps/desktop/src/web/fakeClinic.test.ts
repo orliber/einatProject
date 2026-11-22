@@ -80,7 +80,7 @@ describe("the typed client", () => {
     expect(Object.keys(clinicApi).sort()).toEqual([
       "calendar", "caseChoices", "createCase", "deleteNote", "deleteRecording", "deleteTask", "deleteVisit", "diary", "erasePatient", "freeSlots", "history", "holidays",
       "income", "insights", "linkCase", "message", "noteToCase", "overview", "patientCard", "patients", "proposePathway", "recording", "saveCharge", "saveNote",
-      "savePathway", "savePatient", "savePayment", "saveRecording", "saveSettings", "saveTask", "saveVisit", "settings", "starterTasks", "tasks", "voidCharge",
+      "savePathway", "savePatient", "savePayment", "saveRecording", "saveSettings", "saveTask", "saveVisit", "searchNotes", "settings", "starterTasks", "tasks", "voidCharge",
       "voidPayment",
     ]);
   });

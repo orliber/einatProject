@@ -95,3 +95,24 @@ th[aria-sort="descending"] .patients-sort {
 .patients-visit {
   gap: 0;
 }
+
+/* What the search found inside the session notes (D-216). */
+.notes-found-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-3) 0;
+  border-block-start: 1px solid var(--line);
+  cursor: pointer;
+}
+.notes-found-row:first-child {
+  border-block-start: 0;
+}
+.notes-found-head {
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+.notes-found-text {
+  color: var(--ink-soft);
+  overflow-wrap: anywhere;
+}

@@ -36,6 +36,8 @@ import type { IncomeYear } from "../ipc/generated/IncomeYear";
 import type { InputKind } from "../ipc/generated/InputKind";
 import type { KindCount } from "../ipc/generated/KindCount";
 import type { MessageKind } from "../ipc/generated/MessageKind";
+import type { NoteHit } from "../ipc/generated/NoteHit";
+import type { NoteSearch } from "../ipc/generated/NoteSearch";
 import type { Overview } from "../ipc/generated/Overview";
 import type { Patient } from "../ipc/generated/Patient";
 import type { PatientCard } from "../ipc/generated/PatientCard";
@@ -137,6 +139,23 @@ export function standInHost(): ClinicHost & { inputs: { id: string; caseId: stri
 function refuse(message: string, code = "refused"): never {
   const e: UiError = { code, message, details: [], action: { kind: "dismiss" } };
   throw e;
+}
+
+/** As the core's `snippet`: a few words of the record around the first place the word is. */
+function snippetOf(record: string, word: string): string {
+  const flat = Array.from(record.split(/\s+/).filter(Boolean).join(" "));
+  const lower = flat.map((c) => c.toLowerCase());
+  const needle = Array.from(word);
+  let at = 0;
+  for (let i = 0; i + needle.length <= lower.length; i += 1) {
+    if (needle.every((c, j) => lower[i + j] === c)) {
+      at = i;
+      break;
+    }
+  }
+  const from = Math.max(0, at - 40);
+  const to = Math.min(flat.length, at + needle.length + 100);
+  return `${from > 0 ? "…" : ""}${flat.slice(from, to).join("")}${to < flat.length ? "…" : ""}`;
 }
 
 function need(ok: boolean, message: string): asserts ok {
@@ -469,6 +488,8 @@ export class FakeClinic {
         return { kind: "saved", data: this.savePathway(r.patient_id, r.visits, r.package, this.today(r.today)) };
       case "starter_tasks":
         return { kind: "tasks", data: this.starterTasks(r.patient_id, this.today(r.today)) };
+      case "search_notes":
+        return { kind: "found", data: this.searchNotes(r.text, r.personal) };
       case "insights": {
         const today = this.today(r.today);
         const data = fakeInsights(
@@ -478,6 +499,38 @@ export class FakeClinic {
         return { kind: "insights", data };
       }
     }
+  }
+
+  // ---------------------------------------------------------------- the search over the notes (D-216)
+
+  /** As the core's `search_notes`: every word in the record or (with `personal`) in the
+   *  personal note; newest first, at most 50; the personal note's words never come back. */
+  private searchNotes(text: string, personal: boolean): NoteSearch {
+    const trimmed = text.trim();
+    need(chars(trimmed.replace(/\s/g, "")) >= 2, "כדי לחפש בסיכומים צריך לכתוב לפחות שתי אותיות.");
+    need(chars(trimmed) <= 200, "הטקסט לחיפוש ארוך מדי. אפשר לחפש מילה או שתיים.");
+    const words = trimmed.split(/\s+/).map((w) => w.toLowerCase());
+    const names = new Map(this.patients.map((p) => [p.id, p.name]));
+    const kinds = new Map(this.visits.map((v) => [v.id, v.kind]));
+    const found = this.notes
+      .filter((n) => names.has(n.patient_id))
+      .filter((n) => {
+        const record = n.record.toLowerCase();
+        const own = personal ? n.personal.toLowerCase() : "";
+        return words.every((w) => record.includes(w) || own.includes(w));
+      })
+      .sort((a, b) => (a.date === b.date ? (a.id < b.id ? 1 : -1) : a.date < b.date ? 1 : -1));
+    const hits = found.slice(0, 50).map((n): NoteHit => {
+      const record = n.record.toLowerCase();
+      const inRecord = words.find((w) => record.includes(w));
+      return {
+        note_id: n.id, patient_id: n.patient_id, patient_name: names.get(n.patient_id) ?? "", date: n.date,
+        visit_kind: n.visit_id === null ? null : (kinds.get(n.visit_id) ?? null),
+        snippet: inRecord === undefined ? "" : snippetOf(n.record, inRecord),
+        in_personal: inRecord === undefined || words.some((w) => !record.includes(w)),
+      };
+    });
+    return { hits, more: found.length > 50 };
   }
 
   // ---------------------------------------------------------------- free times, the pathway, the starter kit (D-197..D-199)

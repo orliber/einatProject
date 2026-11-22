@@ -5286,3 +5286,106 @@ fn a_recording_is_base64_sound_of_a_known_kind_and_size() {
     refusal(recording_mime("video/webm"));
     refusal(recording_mime(""));
 }
+
+// ------------------------------------------------------------------ the search over the notes (D-216)
+
+fn found(notes: &[SessionNote], text: &str, personal: bool) -> NoteSearch {
+    let names: HashMap<String, String> = [("p1".to_owned(), "ילד בדוי".to_owned())].into();
+    let visits = [visit(
+        "v1",
+        VisitKind::Observation,
+        "2026-08-09",
+        540,
+        VisitStatus::Held,
+    )];
+    search_notes(notes, &visits, &names, text, personal).unwrap()
+}
+
+#[test]
+fn a_search_finds_the_notes_that_hold_every_word_newest_first() {
+    let notes = [
+        SessionNote {
+            record: "שיחה עם הגננת על המעברים בגן.".to_owned(),
+            ..note("n1", Some("v1"), "2026-08-09")
+        },
+        SessionNote {
+            record: "המעברים בבית קשים יותר בבוקר.".to_owned(),
+            ..note("n2", None, "2026-10-01")
+        },
+        note("n3", None, "2026-11-01"),
+    ];
+    let both = found(&notes, "המעברים", false);
+    assert_eq!(
+        both.hits
+            .iter()
+            .map(|h| h.note_id.as_str())
+            .collect::<Vec<_>>(),
+        ["n2", "n1"]
+    );
+    assert!(!both.more);
+    let one = found(&notes, "  הגננת   המעברים ", false);
+    assert_eq!(one.hits.len(), 1);
+    assert_eq!(one.hits[0].patient_name, "ילד בדוי");
+    assert_eq!(one.hits[0].visit_kind, Some(VisitKind::Observation));
+    assert_eq!(one.hits[0].snippet, "שיחה עם הגננת על המעברים בגן.");
+    assert!(!one.hits[0].in_personal);
+    assert!(found(&notes, "אין-מילה-כזו", false).hits.is_empty());
+}
+
+#[test]
+fn the_personal_note_is_searched_only_when_asked_and_its_words_never_come_back() {
+    let notes = [SessionNote {
+        record: "מפגש שני.".to_owned(),
+        personal: "מחשבה-פרטית-בדויה על השינה".to_owned(),
+        ..note("n1", None, "2026-08-09")
+    }];
+    assert!(found(&notes, "השינה", false).hits.is_empty());
+    let hit = &found(&notes, "השינה", true).hits[0];
+    assert!(hit.in_personal);
+    assert_eq!(hit.snippet, "");
+    // One word in the record and one in the personal note: the record's words only.
+    let mixed = &found(&notes, "מפגש השינה", true).hits[0];
+    assert!(mixed.in_personal);
+    assert_eq!(mixed.snippet, "מפגש שני.");
+    assert!(!serde_json::to_string(&found(&notes, "מפגש השינה", true))
+        .unwrap()
+        .contains("מחשבה-פרטית-בדויה"));
+}
+
+#[test]
+fn a_long_record_comes_back_as_a_few_words_around_what_was_found() {
+    let long = format!(
+        "{} המילה-המבוקשת {}",
+        "פתיחה ".repeat(40),
+        "המשך ".repeat(60)
+    );
+    let notes = [SessionNote {
+        record: long,
+        ..note("n1", None, "2026-08-09")
+    }];
+    let hit = &found(&notes, "המילה-המבוקשת", false).hits[0];
+    assert!(hit.snippet.starts_with('…') && hit.snippet.ends_with('…'));
+    assert!(hit.snippet.contains("המילה-המבוקשת"));
+    assert!(hit.snippet.chars().count() < 200, "{}", hit.snippet);
+}
+
+#[test]
+fn a_search_is_at_least_two_letters_answers_with_fifty_and_skips_a_note_without_a_card() {
+    let names: HashMap<String, String> = [("p1".to_owned(), "ילד בדוי".to_owned())].into();
+    assert!(search_notes(&[], &[], &names, " א ", false).is_err());
+    assert!(search_notes(&[], &[], &names, &"א".repeat(201), false).is_err());
+    let many: Vec<SessionNote> = (0..60)
+        .map(|i| note(&format!("n{i:02}"), None, "2026-08-09"))
+        .collect();
+    let all = search_notes(&many, &[], &names, "שיתף", false).unwrap();
+    assert_eq!(all.hits.len(), NOTE_HITS_MAX);
+    assert!(all.more);
+    let orphan = [SessionNote {
+        patient_id: "p-gone".to_owned(),
+        ..note("n1", None, "2026-08-09")
+    }];
+    assert!(search_notes(&orphan, &[], &names, "שיתף", false)
+        .unwrap()
+        .hits
+        .is_empty());
+}

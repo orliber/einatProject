@@ -13,9 +13,9 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use super::{
     Agorot, Alert, AlertKind, Balance, Charge, ClinicSettings, ClinicTask, Contact, ContactRole,
     DiaryDay, DiaryErased, DiaryLine, DiaryMonth, ErasedCards, ErasedMethod, ErasedMonth,
-    ErasedTally, IncomeMonth, IncomeYear, KindCount, KindDefault, MethodTotal, Patient,
-    PatientStatus, PayMethod, Payment, ProcessStep, RememberItem, Repeat, SessionNote, StepState,
-    TaskKind, TaskView, Today, Visit, VisitKind, VisitStatus, VisitView, VisitWhen,
+    ErasedTally, IncomeMonth, IncomeYear, KindCount, KindDefault, MethodTotal, NoteHit, NoteSearch,
+    Patient, PatientStatus, PayMethod, Payment, ProcessStep, RememberItem, Repeat, SessionNote,
+    StepState, TaskKind, TaskView, Today, Visit, VisitKind, VisitStatus, VisitView, VisitWhen,
 };
 use crate::dates::{
     add_years, civil_from_days, days_from_civil, days_in_month, iso, parse_iso, Ymd,
@@ -2856,6 +2856,112 @@ pub fn task_views(
             task: task.clone(),
         })
         .collect()
+}
+
+/// The most notes a search answers with (D-216).
+pub const NOTE_HITS_MAX: usize = 50;
+/// The shortest search, in letters: one letter finds nearly every note.
+pub const NOTE_SEARCH_MIN: usize = 2;
+/// The longest search text.
+pub const NOTE_SEARCH_MAX: usize = 200;
+/// How many characters of the record a hit shows before and after what was found.
+const SNIPPET_BEFORE: usize = 40;
+const SNIPPET_AFTER: usize = 100;
+
+/// The words of a search: lower case, split at spaces. `Err` when it is too short or too long.
+pub fn search_words(text: &str) -> Result<Vec<String>, DomainError> {
+    let text = text.trim();
+    let letters = text.chars().filter(|c| !c.is_whitespace()).count();
+    if letters < NOTE_SEARCH_MIN {
+        return refuse("כדי לחפש בסיכומים צריך לכתוב לפחות שתי אותיות.");
+    }
+    if text.chars().count() > NOTE_SEARCH_MAX {
+        return refuse("הטקסט לחיפוש ארוך מדי. אפשר לחפש מילה או שתיים.");
+    }
+    Ok(text.split_whitespace().map(str::to_lowercase).collect())
+}
+
+/// A few words of `record` around the first place `word` (lower case) is found, on one line,
+/// with "…" where the record goes on. The whole record when it is short.
+fn snippet(record: &str, word: &str) -> String {
+    let flat: Vec<char> = record
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .collect();
+    let lower: Vec<char> = flat.iter().flat_map(|c| c.to_lowercase().next()).collect();
+    let needle: Vec<char> = word.chars().collect();
+    // `lower` has one character for each of `flat`, so a place in one is the place in the other.
+    let at = if needle.is_empty() || lower.len() != flat.len() {
+        0
+    } else {
+        lower
+            .windows(needle.len())
+            .position(|w| w == needle.as_slice())
+            .unwrap_or(0)
+    };
+    let from = at.saturating_sub(SNIPPET_BEFORE);
+    let to = (at + needle.len() + SNIPPET_AFTER).min(flat.len());
+    let mut out = String::new();
+    if from > 0 {
+        out.push('…');
+    }
+    out.extend(flat.iter().skip(from).take(to.saturating_sub(from)));
+    if to < flat.len() {
+        out.push('…');
+    }
+    out
+}
+
+/// The session notes that hold every word of the search (D-216), newest first. A word may be
+/// in the record or, with `personal`, in the personal note; the answer never carries words
+/// of the personal note. A note whose card is not in `names` is left out.
+pub fn search_notes(
+    notes: &[SessionNote],
+    visits: &[Visit],
+    names: &HashMap<String, String>,
+    text: &str,
+    personal: bool,
+) -> Result<NoteSearch, DomainError> {
+    let words = search_words(text)?;
+    let kinds: HashMap<&str, VisitKind> = visits.iter().map(|v| (v.id.as_str(), v.kind)).collect();
+    let mut found: Vec<&SessionNote> = notes
+        .iter()
+        .filter(|n| names.contains_key(&n.patient_id))
+        .filter(|n| {
+            let record = n.record.to_lowercase();
+            let own = if personal {
+                n.personal.to_lowercase()
+            } else {
+                String::new()
+            };
+            words
+                .iter()
+                .all(|w| record.contains(w.as_str()) || own.contains(w.as_str()))
+        })
+        .collect();
+    found.sort_by(|a, b| (&b.date, &b.id).cmp(&(&a.date, &a.id)));
+    let more = found.len() > NOTE_HITS_MAX;
+    let hits = found
+        .into_iter()
+        .take(NOTE_HITS_MAX)
+        .map(|n| {
+            let record = n.record.to_lowercase();
+            let in_record = words.iter().find(|w| record.contains(w.as_str()));
+            NoteHit {
+                note_id: n.id.clone(),
+                patient_id: n.patient_id.clone(),
+                patient_name: names.get(&n.patient_id).cloned().unwrap_or_default(),
+                date: n.date.clone(),
+                visit_kind: n.visit_id.as_deref().and_then(|id| kinds.get(id)).copied(),
+                snippet: in_record.map_or_else(String::new, |w| snippet(&n.record, w)),
+                in_personal: words.iter().any(|w| !record.contains(w.as_str()))
+                    || in_record.is_none(),
+            }
+        })
+        .collect();
+    Ok(NoteSearch { hits, more })
 }
 
 /// How many tasks of a patient are still open.

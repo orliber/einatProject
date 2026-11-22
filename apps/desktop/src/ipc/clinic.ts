@@ -13,6 +13,7 @@
 //   holidays → holidays · free_slots → slots · propose_pathway → proposed · save_pathway → saved
 //   starter_tasks → tasks · insights → insights
 //   save_recording, delete_recording → note · recording → sound (D-208)
+//   search_notes → found (D-216)
 import { ipc, type UiError } from "./client";
 import type { CaseChoice } from "./generated/CaseChoice";
 import type { CaseLink } from "./generated/CaseLink";
@@ -27,6 +28,7 @@ import type { Holiday } from "./generated/Holiday";
 import type { Insights } from "./generated/Insights";
 import type { IncomeYear } from "./generated/IncomeYear";
 import type { MessageKind } from "./generated/MessageKind";
+import type { NoteSearch } from "./generated/NoteSearch";
 import type { Overview } from "./generated/Overview";
 import type { Patient } from "./generated/Patient";
 import type { PatientCard } from "./generated/PatientCard";
@@ -107,6 +109,8 @@ export const clinicApi = {
   diary: (month: string): Promise<DiaryMonth> => ask({ op: "diary", month }, "diary"),
   income: (year: number): Promise<IncomeYear> => ask({ op: "income", year }, "income"),
   history: (recordId: string): Promise<HistoryEntry[]> => ask({ op: "history", record_id: recordId }, "history"),
+  /** The session notes of every card that hold all the words of `text` (D-216); `personal`: read the personal notes too. */
+  searchNotes: (text: string, personal: boolean): Promise<NoteSearch> => ask({ op: "search_notes", text, personal }, "found"),
   settings: (): Promise<ClinicSettings> => ask({ op: "settings" }, "settings"),
   saveSettings: (settings: ClinicSettings): Promise<ClinicSettings> => ask({ op: "save_settings", settings }, "settings"),
   /** The filled text of a message to the parents, for her to copy. */

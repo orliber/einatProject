@@ -10,6 +10,7 @@ import type { PatientRow } from "../../ipc/generated/PatientRow";
 import { useDebounced, usePatients, useReloadClinic, useToday } from "./clinicData";
 import { CONTACT_ROLE_LABEL, formatDate, formatDateShort, formatTime, PATIENT_STATUS_LABEL, VISIT_KIND_LABEL } from "./format";
 import { EmptyState, Money, Pager, PatientName, ReadError, useClinicNav, useDiscreet, usePaged, useShownName } from "./parts";
+import { NotesFound } from "./NotesFound";
 import { PatientDialog } from "./PatientDialog";
 import "./PatientsTab.css";
 
@@ -134,7 +135,7 @@ export function PatientsTab() {
       <header className="patients-head">
         <div className="field patients-search">
           <label htmlFor="patients-search">חיפוש</label>
-          <input id="patients-search" type="search" className="input" value={text} autoComplete="off" placeholder="שם הילד, שם של הורה או טלפון"
+          <input id="patients-search" type="search" className="input" value={text} autoComplete="off" placeholder="שם, טלפון, או מילה מסיכום פגישה"
             onChange={(e) => { setText(e.target.value); paged.setPage(0); }} />
         </div>
         <div className="field">
@@ -167,7 +168,7 @@ export function PatientsTab() {
               <p>
                 {query !== "" && elsewhere > 0
                   ? (elsewhere === 1 ? "יש כרטיס אחד שמתאים לחיפוש, אבל הוא לא בסינון הזה (ברשימת ההמתנה או בין הכרטיסים שהסתיימו)." : `יש ${elsewhere} כרטיסים שמתאימים לחיפוש, אבל הם לא בסינון הזה.`)
-                  : query !== "" ? "אפשר לחפש לפי שם הילד, שם של אחד ההורים או מספר טלפון."
+                  : query !== "" ? "אפשר לחפש לפי שם הילד, שם של אחד ההורים או מספר טלפון, וגם לפי מילה שנכתבה בסיכום פגישה."
                   : filter === "closed" ? "כרטיס שנסגר נשאר שמור, ומופיע כאן."
                   : "משפחות שעוד ממתינות נמצאות ברשימת ההמתנה."}
               </p>
@@ -236,6 +237,8 @@ export function PatientsTab() {
             </div>
           )}
           <Pager page={paged.page} pages={paged.pages} onPage={paged.setPage} label="עמודי רשימת המטופלים" />
+          {/* The same words, inside the session notes of every card (D-216). */}
+          <NotesFound query={query} />
         </>
       )}
 

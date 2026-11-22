@@ -564,18 +564,53 @@ function CasePicker({ patientId, onClose }: { patientId: string; onClose: () => 
 
 // ------------------------------------------------------------------ session notes
 
+/** From how many notes the box offers a search (fewer fit on one page, in front of her). */
+const SEARCH_FROM = 6;
+
+/** A session note answers a search by its record, its date as it is shown ("08.11.2026"), the
+ *  kind of its visit, and its personal note, which is not read in discreet mode. */
+export function noteMatches(note: SessionNote, visit: Visit | null, query: string, discreet: boolean): boolean {
+  const q = query.trim().toLowerCase();
+  if (q === "") return true;
+  const hay = [note.record, formatDate(note.date), visit ? VISIT_KIND_LABEL[visit.kind] : "שיחה", discreet ? "" : note.personal].join("\n").toLowerCase();
+  return q.split(/\s+/).every((word) => hay.includes(word));
+}
+
 function NotesBox({ card, onNew, onEdit }: { card: PatientCard; onNew: () => void; onEdit: (noteId: string) => void }) {
-  const paged = usePaged(card.notes, 5);
+  const discreet = useDiscreet();
+  const [query, setQuery] = useState("");
   const visits = useMemo(() => new Map(card.visits.map((v) => [v.visit.id, v.visit])), [card.visits]);
+  const found = useMemo(
+    () => card.notes.filter((n) => noteMatches(n, n.visit_id === null ? null : (visits.get(n.visit_id) ?? null), query, discreet)),
+    [card.notes, visits, query, discreet],
+  );
+  const paged = usePaged(found, 5, query.trim());
+  const searching = query.trim() !== "";
   return (
     <Section title="סיכומי פגישות" aside={<button type="button" className="btn btn-small" onClick={onNew}><PlusIcon /> סיכום שיחה</button>}>
+      {card.notes.length >= SEARCH_FROM && (
+        <div className="field pcard-notes-search">
+          <label htmlFor="pcard-notes-search">חיפוש בסיכומים</label>
+          <input id="pcard-notes-search" type="search" className="input fit-l" value={query} autoComplete="off" placeholder="מילה מהסיכום, או תאריך"
+            onChange={(e) => setQuery(e.target.value)} />
+          <span className="muted small" role="status">
+            {searching ? (found.length === 0 ? "" : found.length === 1 ? "סיכום אחד מתאים" : `${found.length} סיכומים מתאימים`) : ""}
+          </span>
+        </div>
+      )}
       {card.notes.length === 0
         ? <p className="muted clinic-quiet">עוד אין סיכומים. סיכום של פגישה נכתב מהשורה שלה, בלחיצה על "לכתוב סיכום".</p>
-        : (
-          <ul className="clinic-list pcard-notes">
-            {paged.shown.map((n) => <NoteItem key={n.id} note={n} visit={n.visit_id === null ? null : (visits.get(n.visit_id) ?? null)} caseCode={card.case?.code ?? null} onEdit={() => onEdit(n.id)} />)}
-          </ul>
-        )}
+        : found.length === 0
+          ? (
+            <p className="muted clinic-quiet" role="status">
+              אין סיכום שמתאים לחיפוש. <button type="button" className="link-btn" onClick={() => setQuery("")}>לנקות את החיפוש</button>
+            </p>
+          )
+          : (
+            <ul className="clinic-list pcard-notes">
+              {paged.shown.map((n) => <NoteItem key={n.id} note={n} visit={n.visit_id === null ? null : (visits.get(n.visit_id) ?? null)} caseCode={card.case?.code ?? null} onEdit={() => onEdit(n.id)} />)}
+            </ul>
+          )}
       <Pager page={paged.page} pages={paged.pages} onPage={paged.setPage} label="עמודי הסיכומים" />
     </Section>
   );
