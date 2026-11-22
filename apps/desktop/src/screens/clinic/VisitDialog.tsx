@@ -22,6 +22,7 @@ import type { VisitStatus } from "../../ipc/generated/VisitStatus";
 import type { VisitView } from "../../ipc/generated/VisitView";
 import { FreeTimes, HolidayLine } from "./FreeTimes";
 import { RememberList } from "./RememberList";
+import { VisitPrep } from "./VisitPrep";
 import { useClinicSettings, useDeleteVisit, usePatients, useReloadClinic, useSaveVisit, useToday } from "./clinicData";
 import {
   addDays, formatDate, formatDateLong, formatTime, leftAloneWords, optionsWith, ownTime, parseMoney, parseTime, VISIT_KIND_LABEL, VISIT_KINDS,
@@ -265,6 +266,11 @@ export function VisitDialog(props: VisitDialogProps) {
 
         {/* Opening a visit, she first sees what not to forget for it (D-207). */}
         {existing && <RememberList id="visit-remember" items={form.remember} onChange={(remember) => set({ remember })} />}
+
+        {/* And, while it is still ahead, what the last session left and what is open for this family. */}
+        {existing && existing.status === "planned" && !block && existing.patient_id !== null && (
+          <VisitPrep patientId={existing.patient_id} visit={existing} today={now.date} />
+        )}
 
         <SelectField id="visit-kind" label="סוג הפגישה" value={form.kind}
           options={optionsWith(kinds, VISIT_KIND_LABEL, form.kind)}

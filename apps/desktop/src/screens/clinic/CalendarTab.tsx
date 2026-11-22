@@ -31,6 +31,7 @@ import {
   visitTitle, weekday,
 } from "./format";
 import { NoteDialog } from "./NoteDialog";
+import { VisitPaymentDialog } from "./PaymentDialog";
 import { EmptyState, Pager, PatientName, ReadError, Section, StatusBadge, usePaged, useShownName, VisitRow } from "./parts";
 import { VisitActions } from "./VisitActions";
 import { VisitDialog, type VisitStart } from "./VisitDialog";
@@ -92,6 +93,7 @@ type Open =
   | { kind: "visit"; view: VisitView }
   | { kind: "new"; start?: VisitStart }
   | { kind: "note"; patientId: string; visit: Visit }
+  | { kind: "payment"; patientId: string; visit: Visit }
   | { kind: "scope"; view: VisitView; by: MoveBy | null; refocus: boolean }
   | null;
 
@@ -325,7 +327,8 @@ export function CalendarTab() {
         {stage}
         <DaySide bar={bar}>
           <Agenda key={anchor} date={anchor} now={now} visits={days.get(anchor) ?? NO_VISITS} onOpen={grid.open} onNew={() => newOn(anchor)}
-            onHold={(v) => void hold(v)} onNote={(patientId, visit) => setOpen({ kind: "note", patientId, visit })} />
+            onHold={(v) => void hold(v)} onNote={(patientId, visit) => setOpen({ kind: "note", patientId, visit })}
+            onPay={(patientId, visit) => setOpen({ kind: "payment", patientId, visit })} />
         </DaySide>
       </div>
     );
@@ -362,6 +365,7 @@ export function CalendarTab() {
       {open?.kind === "visit" && <VisitDialog view={open.view} onClose={() => setOpen(null)} />}
       {open?.kind === "new" && (open.start ? <VisitDialog start={open.start} onClose={() => setOpen(null)} /> : <VisitDialog onClose={() => setOpen(null)} />)}
       {open?.kind === "note" && <NoteDialog patientId={open.patientId} visit={open.visit} onClose={() => setOpen(null)} />}
+      {open?.kind === "payment" && <VisitPaymentDialog patientId={open.patientId} visit={open.visit} today={now.date} onClose={() => setOpen(null)} />}
       {open?.kind === "scope" && (
         <Dialog narrow title="פגישה מסדרה חוזרת" onClose={() => setOpen(null)}
           footer={<>
@@ -700,9 +704,9 @@ function DaySide({ bar, children }: { bar: ReactNode; children: ReactNode }) {
 
 /** The day as a list beside its grid. Each visit offers one step by the time and the rest under
  *  "⋯", as on the front page (`VisitActions`, D-204); her own time has neither. */
-function Agenda({ date, now, visits, onOpen, onNew, onHold, onNote }: {
+function Agenda({ date, now, visits, onOpen, onNew, onHold, onNote, onPay }: {
   date: string; now: Today; visits: VisitView[]; onOpen: (view: VisitView) => void; onNew: () => void;
-  onHold: (visit: Visit) => void; onNote: (patientId: string, visit: Visit) => void;
+  onHold: (visit: Visit) => void; onNote: (patientId: string, visit: Visit) => void; onPay: (patientId: string, visit: Visit) => void;
 }) {
   const { shown, page, pages, setPage } = usePaged(visits, 12);
   return (
@@ -722,7 +726,8 @@ function Agenda({ date, now, visits, onOpen, onNew, onHold, onNote }: {
               return (
                 <VisitRow key={v.id} view={view} onOpen={() => onOpen(view)}
                   actions={pid !== null
-                    ? <VisitActions view={view} patientId={pid} now={now} onHold={onHold} onNote={(x) => onNote(pid, x)} onOpen={() => onOpen(view)} />
+                    ? <VisitActions view={view} patientId={pid} now={now} onHold={onHold} onNote={(x) => onNote(pid, x)} onOpen={() => onOpen(view)}
+                        onPay={(x) => onPay(pid, x)} />
                     : undefined} />
               );
             })}

@@ -513,7 +513,7 @@ describe("the day", () => {
     await waitFor(() => expect(saves()[0]).toMatchObject({ scope: "one", visit: { status: "held" } }));
     // Held without a note: its one step is "לכתוב סיכום", and nothing is left to mark.
     expect(within(row("תמר")).getByRole("button", { name: "לכתוב סיכום" })).toBeInTheDocument();
-    expect(await menuOf(user, row("תמר"))).toEqual(["לפתוח את הפגישה"]);
+    expect(await menuOf(user, row("תמר"))).toEqual(["לרשום תקבול", "לפתוח את הפגישה"]);
     // Her own time has nothing to mark, and no "⋯".
     const own = within(screen.getByRole("region", { name: "סדר היום" })).getAllByRole("listitem")[2] as HTMLElement;
     expect(own).toHaveTextContent("כתיבת דוחות");

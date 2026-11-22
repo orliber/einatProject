@@ -19,6 +19,7 @@ import { formatDate, formatDateLong, formatMoney, formatTime, greeting, nowIndex
 import { NoteDialog } from "./NoteDialog";
 import { AlertGroups, EmptyState, PatientName, ReadError, Section, useClinicNav, VisitRow } from "./parts";
 import { PatientDialog } from "./PatientDialog";
+import { VisitPaymentDialog } from "./PaymentDialog";
 import { VisitActions } from "./VisitActions";
 import { VisitDialog } from "./VisitDialog";
 
@@ -27,6 +28,7 @@ type Open =
   | { kind: "visit"; view?: VisitView }
   | { kind: "patient" }
   | { kind: "note"; patientId: string; visit: Visit }
+  | { kind: "payment"; patientId: string; visit: Visit }
   | null;
 
 const markHeld = (v: VisitView, id: string): VisitView => (v.visit.id === id ? { ...v, visit: { ...v.visit, status: "held" } } : v);
@@ -99,7 +101,8 @@ export function TodayTab() {
               onOpen={() => setOpen({ kind: "visit", view })}
               actions={pid !== null
                 ? <VisitActions view={view} patientId={pid} now={now} onHold={(x) => void hold(x)}
-                    onNote={(x) => setOpen({ kind: "note", patientId: pid, visit: x })} onOpen={() => setOpen({ kind: "visit", view })} />
+                    onNote={(x) => setOpen({ kind: "note", patientId: pid, visit: x })} onOpen={() => setOpen({ kind: "visit", view })}
+                    onPay={(x) => setOpen({ kind: "payment", patientId: pid, visit: x })} />
                 : undefined} />
           </Fragment>
         );
@@ -191,6 +194,7 @@ export function TodayTab() {
       )}
       {open?.kind === "patient" && <PatientDialog onClose={() => setOpen(null)} />}
       {open?.kind === "note" && <NoteDialog patientId={open.patientId} visit={open.visit} onClose={() => setOpen(null)} />}
+      {open?.kind === "payment" && <VisitPaymentDialog patientId={open.patientId} visit={open.visit} today={now.date} onClose={() => setOpen(null)} />}
     </div>
   );
 }

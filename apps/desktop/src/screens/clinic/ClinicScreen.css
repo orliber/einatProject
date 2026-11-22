@@ -708,3 +708,26 @@ html:has(.clinic-panel) {
     opacity: 0.3;
   }
 }
+
+/* "לקראת הפגישה": what the last session left, in the dialog of a visit still ahead. */
+.clinic-prep {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--line);
+  border-inline-start: 3px solid var(--primary);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+.clinic-prep-title {
+  font-size: var(--text-md);
+  margin: 0;
+}
+.clinic-prep-part {
+  gap: var(--space-1);
+}
+.clinic-prep-tasks {
+  margin: 0;
+  padding-inline-start: var(--space-5);
+}

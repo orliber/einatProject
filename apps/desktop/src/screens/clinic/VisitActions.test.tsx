@@ -124,6 +124,30 @@ describe("one action by the time, the rest under “⋯”", () => {
     expect(on.onOpen).toHaveBeenCalledTimes(1);
   });
 
+  it("with onPay, a visit that charges offers “לרשום תקבול” before “לפתוח את הפגישה”; one that does not charge never does", async () => {
+    const onPay = vi.fn<(v: Visit) => void>();
+    const user = userEvent.setup();
+    await serve(opened);
+    const draw = (view: VisitView) => (
+      <Host app={appApi({})}><div className="row">
+        <VisitActions key={JSON.stringify(view)} view={view} patientId="p-invented" now={NOW} onHold={() => undefined} onNote={() => undefined} onOpen={() => undefined} onPay={onPay} />
+      </div></Host>
+    );
+    const view = render(draw(viewOf({ status: "held", fee: 45000 }, true)));
+    expect(await menuOf(user)).toEqual(["לפתוח את הסיכום", "לרשום תקבול", "לפתוח את הפגישה"]);
+    await user.click(more());
+    await user.click(await screen.findByRole("menuitem", { name: "לרשום תקבול" }));
+    expect(onPay).toHaveBeenCalledWith(expect.objectContaining({ id: "v-invented", fee: 45000 }));
+    // Held without a fee, still planned, or missed without "לחייב בכל זאת": nothing to receive for it.
+    for (const over of [{ status: "held", fee: 0 }, { status: "planned", fee: 45000 }, { status: "no_show", fee: 45000 }] as Partial<Visit>[]) {
+      view.rerender(draw(viewOf(over, true)));
+      expect(await menuOf(user)).not.toContain("לרשום תקבול");
+    }
+    // Missed and charged anyway: the family still pays for it.
+    view.rerender(draw(viewOf({ status: "no_show", fee: 45000, charge_missed: true }, true)));
+    expect(await menuOf(user)).toContain("לרשום תקבול");
+  });
+
   it("a cancelled visit's “⋯” holds only “לפתוח את הפגישה”", async () => {
     const { user, view } = await show(viewOf({ status: "cancelled" }));
     expect(within(view.container).getAllByRole("button")).toEqual([more()]);
