@@ -5,6 +5,7 @@
 // (`VisitActions`, D-204): "התקיימה" once it has begun, "לכתוב סיכום" once it was held,
 // "תזכורת" while it is ahead. A line "עכשיו" stands between the visits that began and the
 // ones still ahead, and "מה דורש אותי" is grouped by topic (`AlertGroups`).
+import { useApp } from "../../App";
 import { Fragment, useState } from "react";
 import { PlusIcon, Skeleton } from "../../components/ui";
 import { clinicApi } from "../../ipc/clinic";
@@ -40,6 +41,7 @@ export function TodayTab() {
   const nav = useClinicNav();
   const [open, setOpen] = useState<Open>(null);
   const reload = useReloadClinic();
+  const { notify } = useApp();
 
   // A visit marked "held" shows so at once, on today's list and on the next day's, and its
   // "פגישה שלא סומנה" leaves "מה דורש אותי". The "בלי סיכום" that follows comes with the next read.
@@ -53,6 +55,16 @@ export function TodayTab() {
     }),
     (visit) => clinicApi.saveVisit({ ...visit, status: "held", status_note: "", charge_missed: false }),
   );
+  // "כולן התקיימו" in the day's closing: one visit after the other, so a refusal names the one
+  // that stopped it and the ones before it stay marked; the page is read again either way.
+  const holdAll = async (visits: Visit[]) => {
+    try {
+      for (const visit of visits) await clinicApi.saveVisit({ ...visit, status: "held", status_note: "", charge_missed: false });
+      notify(`${visits.length} פגישות סומנו "התקיימה"`);
+    } finally {
+      reload();
+    }
+  };
   // A task ticked off shows done at once; the next read takes it off the list.
   const finish = useOptimistic<Overview, ClinicTask>(
     clinicKeys.overview(now.date),
@@ -165,7 +177,7 @@ export function TodayTab() {
                   ? <p className="muted clinic-quiet">אין פגישות היום.</p>
                   : rows(o.visits, at, soon)}
               </Section>
-              <DayClose overview={o} now={now} />
+              <DayClose overview={o} now={now} onHoldAll={holdAll} />
               {o.next_day !== null && (
                 <Section title={`הפגישות הבאות: ${formatDateLong(o.next_day)}`}>
                   {rows(o.next_visits)}

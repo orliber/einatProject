@@ -446,8 +446,11 @@ export function AlertGroups({ alerts, onVisit, holdOf, empty }: {
  * (the date, when it is shown, and the hours), so it can be asked for by what she sees, and
  * two visits at the same hour of different days are not called the same.
  */
-export function VisitRow({ view, actions, onOpen, showDate = false, quietPlanned = false, soon }: {
+export function VisitRow({ view, actions, onOpen, showDate = false, quietPlanned = false, soon, onCard = false }: {
   view: VisitView;
+  /** On the patient's own card: the name is the page's title, so a row does not repeat it (and
+   *  does not link the card to itself). */
+  onCard?: boolean;
   actions?: ReactNode;
   onOpen?: () => void;
   showDate?: boolean;
@@ -480,7 +483,7 @@ export function VisitRow({ view, actions, onOpen, showDate = false, quietPlanned
         <span className="row clinic-visit-head">
           {ownVisit(v)
             ? <span className="clinic-name clinic-name-strong">{who}</span>
-            : <PatientName name={view.patient_name} id={v.patient_id} strong />}
+            : !onCard && <PatientName name={view.patient_name} id={v.patient_id} strong />}
           <KindBadge kind={v.kind} />
           {!ownVisit(v) && (quietPlanned && v.status === "planned"
             ? <span className="visually-hidden">{VISIT_STATUS_LABEL.planned}</span>

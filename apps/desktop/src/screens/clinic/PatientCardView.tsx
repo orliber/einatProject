@@ -238,7 +238,7 @@ function CardBody({ card, today, now, back, onBack }: { card: PatientCard; today
   };
   const rows = (views: VisitView[]) => (
     <ul className="clinic-list clinic-visits">
-      {views.map((view) => <VisitRow key={view.visit.id} view={view} showDate actions={actionsOf(view)} onOpen={() => setOpen({ kind: "visit", view })} />)}
+      {views.map((view) => <VisitRow key={view.visit.id} view={view} showDate onCard actions={actionsOf(view)} onOpen={() => setOpen({ kind: "visit", view })} />)}
     </ul>
   );
 

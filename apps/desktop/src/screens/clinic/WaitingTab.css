@@ -54,8 +54,9 @@
 .waiting-actions {
   flex-shrink: 0;
   display: flex;
-  flex-direction: column;
-  align-items: stretch;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
   gap: var(--space-2);
 }
 /* A narrow window, or a large text size: the actions go under the family, side by side. */

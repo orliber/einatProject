@@ -27,6 +27,16 @@ const list = () => screen.findByRole("list", { name: /המשפחות שממתי�
 /** The families on the list, in the order shown. */
 const families = async () => within(await list()).getAllByRole("group").map((g) => g.closest("li") as HTMLElement);
 const familyOf = (name: string) => screen.getByRole("group", { name: `פעולות עבור ${name}` }).closest("li") as HTMLElement;
+type User = Awaited<ReturnType<typeof openOn>>["user"];
+/** What "⋯" of a family offers: the menu is opened, and its items are answered. */
+async function more(user: User, name: string): Promise<HTMLElement> {
+  await user.click(within(familyOf(name)).getByRole("button", { name: `עוד פעולות עבור ${name}` }));
+  return screen.findByRole("menu");
+}
+/** One of the family's less common actions, from its "⋯". */
+async function pick(user: User, name: string, item: string): Promise<void> {
+  await user.click(within(await more(user, name)).getByRole("menuitem", { name: item }));
+}
 
 describe("the waiting list", () => {
   it("shows who waits, the urgent first, with how long, why and who referred", async () => {
@@ -56,16 +66,16 @@ describe("the waiting list", () => {
   it("“לסמן כדחוף” shows at once and is saved; the mark can be taken off", async () => {
     const { user, requests } = await openOn(WAITING);
     await list();
-    const press = within(familyOf("שירה")).getByRole("button", { name: "לסמן כדחוף" });
-    expect(press).toHaveAttribute("aria-pressed", "false");
-    await user.click(press);
+    // In front of each family: the first meeting and the whole pathway; the rest is behind "⋯".
+    expect(within(familyOf("שירה")).getAllByRole("button").map((b) => b.textContent)).toEqual(["שירה", "לקבוע פגישת היכרות", "לקבוע את כל המסלול", ""]);
+    await pick(user, "שירה", "לסמן כדחוף");
     expect(within(familyOf("שירה")).getByText("דחוף")).toBeInTheDocument();
     await waitFor(() => expect(requests().some((r) => r.op === "save_patient" && r.patient.name === "שירה" && r.patient.urgent)).toBe(true));
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("2 מהן דחופות"));
     // Both urgent: whoever waits longer is still first.
     expect(within((await families())[0] as HTMLElement).getByRole("button", { name: "עומר" })).toBeInTheDocument();
 
-    await user.click(within(familyOf("עומר")).getByRole("button", { name: "להסיר את הסימון דחוף" }));
+    await pick(user, "עומר", "להסיר את הסימון דחוף");
     await waitFor(() => expect(within(familyOf("עומר")).queryByText("דחוף")).toBeNull());
     // Now שירה alone is urgent, and comes first.
     await waitFor(async () => expect(within((await families())[0] as HTMLElement).getByRole("button", { name: "שירה" })).toBeInTheDocument());
@@ -74,10 +84,11 @@ describe("the waiting list", () => {
   it("a mark the vault refuses rolls back, and says why", async () => {
     const { user, notes } = await openOn(WAITING, refusing("save_patient", "הכרטיס לא נשמר."));
     await list();
-    await user.click(within(familyOf("שירה")).getByRole("button", { name: "לסמן כדחוף" }));
+    await pick(user, "שירה", "לסמן כדחוף");
     await waitFor(() => expect(notes).toContain("הכרטיס לא נשמר."));
     await waitFor(() => expect(within(familyOf("שירה")).queryByText("דחוף")).toBeNull());
-    expect(within(familyOf("שירה")).getByRole("button", { name: "לסמן כדחוף" })).toHaveAttribute("aria-pressed", "false");
+    // Not urgent after all: the menu offers to mark it again.
+    expect(within(await more(user, "שירה")).getByRole("menuitem", { name: "לסמן כדחוף" })).toBeInTheDocument();
   });
 
   it("“לקבוע פגישת היכרות” opens the visit ready for this family, and saving takes it off the list", async () => {
@@ -106,7 +117,7 @@ describe("the waiting list", () => {
     const served = await openOn(WAITING);
     const { user, requests, notes } = served;
     await list();
-    await user.click(within(familyOf("עומר")).getByRole("button", { name: "להסיר מהרשימה" }));
+    await pick(user, "עומר", "להסיר מהרשימה");
     const confirm = await screen.findByRole("dialog", { name: "להסיר מרשימת ההמתנה" });
     expect(confirm).toHaveTextContent("המשפחה של עומר תרד מרשימת ההמתנה, והכרטיס ייסגר.");
     expect(confirm).toHaveTextContent("שום דבר לא נמחק");
@@ -124,7 +135,7 @@ describe("the waiting list", () => {
   it("a removal the vault refuses is said in the dialog, and the family stays", async () => {
     const { user } = await openOn(WAITING, refusing("save_patient", "הכרטיס לא נשמר."));
     await list();
-    await user.click(within(familyOf("עומר")).getByRole("button", { name: "להסיר מהרשימה" }));
+    await pick(user, "עומר", "להסיר מהרשימה");
     const confirm = await screen.findByRole("dialog", { name: "להסיר מרשימת ההמתנה" });
     await user.click(within(confirm).getByRole("button", { name: "להסיר מהרשימה" }));
     expect(await within(confirm).findByText("הכרטיס לא נשמר.")).toBeInTheDocument();
@@ -152,7 +163,7 @@ describe("the waiting list", () => {
   it("the family's name opens its card, and its details can be edited from the list", async () => {
     const { user, went } = await openOn(WAITING);
     await list();
-    await user.click(within(familyOf("שירה")).getByRole("button", { name: "עריכת הפרטים" }));
+    await pick(user, "שירה", "עריכת הפרטים");
     const dialog = await screen.findByRole("dialog", { name: "פרטי המטופל" });
     expect(within(dialog).getByLabelText("שם הילד או הילדה")).toHaveValue("שירה");
     await user.click(within(dialog).getByRole("button", { name: "ביטול" }));
@@ -178,7 +189,7 @@ describe("the waiting list", () => {
     const panel = screen.getByRole("tabpanel");
     for (const name of ["עומר", "שירה", "רונית", "גיל"]) expect(within(panel).queryByText(name, { exact: false }), name).toBeNull();
     expect(panel).toHaveTextContent("אמא: ר.");
-    await user.click(within(familyOf("ע.")).getByRole("button", { name: "להסיר מהרשימה" }));
+    await pick(user, "ע.", "להסיר מהרשימה");
     const confirm = await screen.findByRole("dialog", { name: "להסיר מרשימת ההמתנה" });
     expect(confirm).toHaveTextContent("המשפחה של ע. תרד מרשימת ההמתנה");
     expect(confirm).not.toHaveTextContent("עומר");

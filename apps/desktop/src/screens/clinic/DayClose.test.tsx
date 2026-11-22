@@ -89,4 +89,35 @@ describe("on the front page", () => {
     expect(box).toHaveTextContent("נשאר לסגור");
     expect(box).not.toHaveTextContent("אפשר לנעול");
   });
+
+  it("“כולן התקיימו” lists the visits first, and marks them all only after she confirms", async () => {
+    const { user, calls } = await open(20);
+    const box = await screen.findByRole("region", { name: "סגירת היום" });
+    const today = screen.getByRole("region", { name: "הפגישות של היום" });
+    const waiting = within(today).getAllByRole("button", { name: "התקיימה" }).length;
+    expect(waiting).toBeGreaterThanOrEqual(2);
+    await user.click(within(box).getByRole("button", { name: "כולן התקיימו" }));
+    const ask = await screen.findByRole("dialog", { name: "לסמן את הפגישות של היום" });
+    expect(within(within(ask).getByRole("list", { name: "הפגישות שיסומנו" })).getAllByRole("listitem")).toHaveLength(waiting);
+    expect(ask).toHaveTextContent("סימון שנעשה בטעות אפשר לתקן");
+    expect(await a11yViolations(ask)).toEqual([]);
+    const saves = () => calls.filter((c) => c.cmd === "clinic" && (c.args as { request: { op: string } }).request.op === "save_visit").length;
+    // Nothing is written until she says so.
+    expect(saves()).toBe(0);
+    await user.click(within(ask).getByRole("button", { name: `לסמן ${waiting} פגישות כ"התקיימה"` }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(saves()).toBe(waiting);
+    await waitFor(() => expect(within(today).queryByRole("button", { name: "התקיימה" })).toBeNull());
+    await waitFor(() => expect(box).not.toHaveTextContent(/עוד לא סומנ/));
+    expect(within(box).queryByRole("button", { name: "כולן התקיימו" })).toBeNull();
+  });
+
+  it("closing the window marks nothing", async () => {
+    const { user } = await open(20);
+    const box = await screen.findByRole("region", { name: "סגירת היום" });
+    await user.click(within(box).getByRole("button", { name: "כולן התקיימו" }));
+    const ask = await screen.findByRole("dialog", { name: "לסמן את הפגישות של היום" });
+    await user.click(within(ask).getByRole("button", { name: "ביטול" }));
+    expect(box).toHaveTextContent(/עוד לא סומנ/);
+  });
 });
