@@ -21,8 +21,8 @@ use dv_domain::clinic::{
     self as rules, CaseChoice, CaseLink, Channel, Charge, ClinicReply, ClinicRequest,
     ClinicSettings, ClinicTask, Composed, ContactRole, Delivery, ErasedCards, ErasedTally,
     HistoryEntry, IncomeExport, MessageKind, MessageValues, Overview, Patient, PatientCard,
-    PatientRecords, PatientRow, PatientStatus, Payment, Repeat, SavedVisits, Scope, SessionNote,
-    Today, Visit, VisitKind, VisitStatus, VisitView,
+    PatientRecords, PatientRow, PatientStatus, Payment, RecordingInfo, RecordingSound, Repeat,
+    SavedVisits, Scope, SessionNote, Today, Visit, VisitKind, VisitStatus, VisitView,
 };
 use dv_domain::{CaseMeta, DomainError, IdentityInput, InputKind, Role};
 use dv_vault::{AuditEvent, StoredClinicRecord, Vault, VaultError};
@@ -40,6 +40,8 @@ const SETTINGS_ID: &str = "settings";
 const TALLY: &str = "tally";
 const TALLY_ID: &str = "tally";
 const CREATED: &str = "created";
+/// The record that holds the sound of a recording (D-208).
+const RECORDING: &str = "recording";
 /// The last date the clinic keeps (`rules::date_of_day`).
 const LAST_DATE: &str = "2200-12-31";
 /// The longest stretch of holidays one request may ask for, in days after the first.
@@ -84,6 +86,17 @@ fn from_json<T: DeserializeOwned>(json: &str) -> Result<T, CoreError> {
 
 fn count(n: usize) -> u32 {
     u32::try_from(n).unwrap_or(u32::MAX)
+}
+
+/// What describes a recording to keep, besides its sound (D-208).
+struct NewRecording {
+    patient_id: String,
+    note_id: String,
+    visit_id: Option<String>,
+    date: String,
+    mime: String,
+    seconds: u32,
+    name: String,
 }
 
 /// A clinic record as the vault keeps it: its kind, and what the vault indexes it by.
@@ -317,8 +330,12 @@ fn patient_exists(v: &Vault, id: &str) -> Result<(), CoreError> {
 /// the defaults are shown, and the stored row stays as it is until she saves settings.
 fn settings_counted(v: &Vault) -> (ClinicSettings, u32) {
     match v.clinic_get(SETTINGS_ID) {
-        Ok(Some(row)) if row.kind == SETTINGS => match from_json(&row.json) {
-            Ok(settings) => (settings, 0),
+        Ok(Some(row)) if row.kind == SETTINGS => match from_json::<ClinicSettings>(&row.json) {
+            Ok(mut settings) => {
+                // A kind added since they were saved has its usual length (D-207).
+                rules::fill_kind_defaults(&mut settings);
+                (settings, 0)
+            }
             Err(_) => (ClinicSettings::default(), 1),
         },
         Ok(_) => (ClinicSettings::default(), 0),
@@ -661,6 +678,31 @@ impl Core {
             ClinicRequest::SaveNote { note } => self.clinic_save_note(note),
             ClinicRequest::DeleteNote { id } => self.clinic_delete_note(&id),
             ClinicRequest::NoteToCase { id } => self.clinic_note_to_case(&id),
+            ClinicRequest::SaveRecording {
+                patient_id,
+                note_id,
+                visit_id,
+                date,
+                mime,
+                seconds,
+                name,
+                data,
+            } => self.clinic_save_recording(
+                NewRecording {
+                    patient_id,
+                    note_id,
+                    visit_id,
+                    date,
+                    mime,
+                    seconds,
+                    name,
+                },
+                data,
+            ),
+            ClinicRequest::Recording { id } => self.clinic_recording(&id),
+            ClinicRequest::DeleteRecording { note_id, id } => {
+                self.clinic_delete_recording(&note_id, &id)
+            }
             ClinicRequest::SavePayment { payment } => self.clinic_save_payment(payment),
             ClinicRequest::VoidPayment { id, reason } => self.clinic_void_payment(&id, &reason),
             ClinicRequest::SaveCharge { charge } => self.clinic_save_charge(charge),
@@ -830,7 +872,7 @@ impl Core {
             if !visit.id.is_empty() || visit.patient_id.as_deref() != Some(patient_id) {
                 return refuse("במסלול יש פגישה שלא שייכת לכרטיס הזה. אפשר לפתוח את המסלול מחדש.");
             }
-            if visit.kind == VisitKind::Block {
+            if visit.kind.own_time() {
                 return refuse("במסלול האבחון אין זמנים שמורים, רק פגישות.");
             }
             if visit.date < today.date {
@@ -1460,11 +1502,18 @@ impl Core {
                 Some(repeat) => {
                     let dates = rules::series_dates(&visit.date, repeat).map_err(refusal)?;
                     let series = dv_vault::crypto::random_id()?;
+                    // What not to forget belongs to the first visit only (D-207).
                     dates
                         .into_iter()
-                        .map(|date| Visit {
+                        .enumerate()
+                        .map(|(i, date)| Visit {
                             date,
                             series_id: Some(series.clone()),
+                            remember: if i == 0 {
+                                visit.remember.clone()
+                            } else {
+                                Vec::new()
+                            },
                             ..visit.clone()
                         })
                         .collect()
@@ -1781,6 +1830,11 @@ impl Core {
         };
         // Whether the record was copied to a case is the core's to say, never the window's.
         note.case_input_id = stored.as_ref().and_then(|s| s.case_input_id.clone());
+        // So are the recordings it keeps (D-208): only their own requests change them.
+        note.recordings = stored
+            .as_ref()
+            .map(|s| s.recordings.clone())
+            .unwrap_or_default();
         rules::validate_note(&note).map_err(refusal)?;
         if stored
             .as_ref()
@@ -1810,11 +1864,152 @@ impl Core {
         Ok(ClinicReply::Note(note))
     }
 
+    /// Keeps a recording with a session note (D-208). The sound is its own record, sealed in
+    /// the vault like every clinic record and written with no history (a copy of the sound
+    /// in the history would outlive its removal); the note lists it. Nothing of it ever
+    /// leaves the vault: it is not printed, exported, copied into a case or sent.
+    fn clinic_save_recording(
+        &mut self,
+        new: NewRecording,
+        data: String,
+    ) -> Result<ClinicReply, CoreError> {
+        let bytes = rules::recording_bytes(&data).map_err(refusal)?;
+        let mime = rules::recording_mime(&new.mime).map_err(refusal)?;
+        let v = self.vault_ref()?;
+        patient_exists(v, &new.patient_id)?;
+        // The note it goes with: the one named, the one of the visit, or a new one.
+        let stored: Option<SessionNote> = if new.note_id.is_empty() {
+            match new.visit_id.as_deref().filter(|id| !id.trim().is_empty()) {
+                Some(visit_id) => {
+                    let visit: Visit = find(v, visit_id)?;
+                    if visit.patient_id.as_deref() != Some(new.patient_id.as_str()) {
+                        return refuse("הפגישה שנבחרה שייכת למטופל אחר.");
+                    }
+                    all::<SessionNote>(v)?
+                        .into_iter()
+                        .find(|n| n.visit_id.as_deref() == Some(visit_id))
+                }
+                None => None,
+            }
+        } else {
+            Some(find(v, &new.note_id)?)
+        };
+        let note = match stored.clone() {
+            Some(note) => note,
+            None => {
+                let date = match new.visit_id.as_deref().filter(|id| !id.trim().is_empty()) {
+                    Some(visit_id) => find::<Visit>(v, visit_id)?.date,
+                    None => new.date.trim().to_owned(),
+                };
+                rules::normalize_note(SessionNote {
+                    patient_id: new.patient_id.clone(),
+                    visit_id: new.visit_id.clone(),
+                    date,
+                    ..SessionNote::default()
+                })
+            }
+        };
+        if note.patient_id != new.patient_id {
+            return refuse("ההקלטה שייכת לסיכום של מטופל אחר.");
+        }
+        if note.recordings.len() >= rules::RECORDINGS_MAX {
+            return refuse(&format!(
+                "לסיכום אחד אפשר לשמור עד {} הקלטות.",
+                rules::RECORDINGS_MAX
+            ));
+        }
+        let saved_on = iso(today());
+        let mut info = RecordingInfo {
+            id: String::new(),
+            mime: mime.clone(),
+            seconds: new.seconds.min(rules::RECORDING_MAX_SECONDS),
+            bytes: u32::try_from(bytes).unwrap_or(u32::MAX),
+            date: saved_on.clone(),
+            name: rules::clean_line(&new.name)
+                .chars()
+                .take(rules::SHORT_MAX)
+                .collect(),
+        };
+        // What the vault holds in all: within what a backup can be restored from (D-208).
+        let kept: u64 = all::<SessionNote>(v)?
+            .iter()
+            .flat_map(|n| n.recordings.iter())
+            .map(|r| u64::from(r.bytes))
+            .sum();
+        if kept.saturating_add(u64::from(info.bytes)) > rules::RECORDINGS_TOTAL_MAX_BYTES {
+            return refuse(&format!(
+                "בכספת כבר שמורות הקלטות בהיקף של כ-{} מגה-בייט, וזה המקסימום, כדי שהגיבוי יישאר קטן מספיק לשחזור. אפשר למחוק הקלטות ישנות שכבר לא צריך.",
+                rules::RECORDINGS_TOTAL_MAX_BYTES / (1024 * 1024)
+            ));
+        }
+        // Checked before anything is written: the id is the only thing still missing.
+        let mut check = note.clone();
+        check.recordings.push(info.clone());
+        rules::validate_note(&check).map_err(refusal)?;
+        let sound = to_json(&RecordingSound { mime, data })?;
+        let day = rules::day_number(&saved_on).unwrap_or_default();
+        let action = if stored.is_some() { CHANGED } else { CREATED };
+        let note_day = day_of(&note);
+        let patient_id = new.patient_id.clone();
+        let mut kept_note = note.clone();
+        let (_, note_id) = self.vault_mut()?.clinic_add_recording(
+            &patient_id,
+            day,
+            &sound,
+            |sound_id| {
+                info.id = sound_id.to_owned();
+                kept_note.recordings.push(info.clone());
+                let json = serde_json::to_string(&kept_note)
+                    .map_err(|_| VaultError::Refused("a note could not be written".to_owned()))?;
+                let id = (!kept_note.id.is_empty()).then(|| kept_note.id.clone());
+                Ok((id, Some(patient_id.clone()), note_day, json))
+            },
+            action,
+        )?;
+        let mut note = kept_note;
+        note.id = note_id;
+        Ok(ClinicReply::Note(note))
+    }
+
+    /// The sound of a recording, to play.
+    fn clinic_recording(&mut self, id: &str) -> Result<ClinicReply, CoreError> {
+        let v = self.vault_ref()?;
+        match v.clinic_get(id)? {
+            Some(row) if row.kind == RECORDING => Ok(ClinicReply::Sound(from_json(&row.json)?)),
+            _ => Err(CoreError::NotFound("ההקלטה".to_owned())),
+        }
+    }
+
+    /// Removes a recording from its note, for good: the sound and its line in the note.
+    fn clinic_delete_recording(
+        &mut self,
+        note_id: &str,
+        id: &str,
+    ) -> Result<ClinicReply, CoreError> {
+        let v = self.vault_ref()?;
+        let mut note: SessionNote = find(v, note_id)?;
+        if !note.recordings.iter().any(|r| r.id == id) {
+            return Err(CoreError::NotFound("ההקלטה".to_owned()));
+        }
+        note.recordings.retain(|r| r.id != id);
+        let vault = self.vault_mut()?;
+        match vault.clinic_get(id)? {
+            Some(row) if row.kind == RECORDING => vault.clinic_delete(id, false)?,
+            Some(_) => return Err(CoreError::NotFound("ההקלטה".to_owned())),
+            None => {}
+        }
+        write(vault, &mut note, Some(CHANGED))?;
+        Ok(ClinicReply::Note(note))
+    }
+
     /// A session note is the clinical record: once it says something it is edited, with its
     /// history, and never removed. Only one that holds nothing at all can go.
     fn clinic_delete_note(&mut self, id: &str) -> Result<ClinicReply, CoreError> {
         let note: SessionNote = find(self.vault_ref()?, id)?;
-        if !(note.record.trim().is_empty() && note.personal.trim().is_empty()) {
+        if !(note.record.trim().is_empty()
+            && note.personal.trim().is_empty()
+            && note.recordings.is_empty())
+        {
             return refuse(
                 "סיכום פגישה הוא חלק מהרשומה, ולכן לא מוחקים אותו. אפשר לערוך אותו, וכל שינוי נשמר בהיסטוריה.",
             );

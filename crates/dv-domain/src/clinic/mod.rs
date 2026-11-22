@@ -142,10 +142,22 @@ pub enum VisitKind {
     Other,
     /// Time she blocks for herself: writing reports, a day off. Never has a patient or a fee.
     Block,
+    /// Professional supervision, given or received (D-207). Like [`VisitKind::Block`], it is
+    /// her own time: never a patient, never a fee. Parent guidance is [`VisitKind::Guidance`].
+    Supervision,
     /// A value this version does not know (a row written by a later one, D-178). Shown as
     /// it is, and never saved: a record that carries it is refused until she picks a value.
     #[serde(other)]
     Unknown,
+}
+
+impl VisitKind {
+    /// Her own time (D-207): a block or a supervision. It never has a patient or a fee, is
+    /// not a visit in the counts, and the calendar copy calls it "לא פנויה".
+    #[must_use]
+    pub fn own_time(self) -> bool {
+        matches!(self, Self::Block | Self::Supervision)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS, Default)]
@@ -169,7 +181,7 @@ pub enum VisitStatus {
 #[ts(export)]
 pub struct Visit {
     pub id: String,
-    /// `None` only for [`VisitKind::Block`].
+    /// `None` only for her own time ([`VisitKind::own_time`]).
     pub patient_id: Option<String>,
     pub kind: VisitKind,
     /// Her own words for it; the calendar shows them instead of the kind's name when set.
@@ -191,6 +203,18 @@ pub struct Visit {
     pub series_id: Option<String>,
     /// A short practical note ("להביא את השאלונים").
     pub note: String,
+    /// What not to forget ahead of it (D-207): "לדבר עם הגננת". Each line is ticked once
+    /// done. It belongs to this visit only: a change to a series never copies it.
+    pub remember: Vec<RememberItem>,
+}
+
+/// One thing not to forget ahead of a visit (D-207).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS, Default)]
+#[serde(default)]
+#[ts(export)]
+pub struct RememberItem {
+    pub text: String,
+    pub done: bool,
 }
 
 /// Repeat a new visit: every `every_weeks` weeks, `count` visits in all (the first included).
@@ -232,6 +256,39 @@ pub struct SessionNote {
     pub personal: String,
     /// The material in the patient's case that holds a copy of `record`, once she sent it.
     pub case_input_id: Option<String>,
+    /// The recordings she kept for herself with this note (D-208). Like the personal note,
+    /// they are hers alone: never printed, exported, copied into a case or sent anywhere.
+    /// Only what describes each one is here; the sound is its own record, read when she
+    /// plays it. Only the core writes this list: what a save sends for it is ignored.
+    pub recordings: Vec<RecordingInfo>,
+}
+
+/// What describes one recording of a session note (D-208).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS, Default)]
+#[serde(default)]
+#[ts(export)]
+pub struct RecordingInfo {
+    /// The id of the record that holds the sound.
+    pub id: String,
+    /// `audio/webm`, `audio/mp4`, ... as recorded or as the file said.
+    pub mime: String,
+    /// How long, in seconds, as the screen measured it; 0 when unknown.
+    pub seconds: u32,
+    /// The size of the sound, in bytes.
+    pub bytes: u32,
+    /// When it was saved, `YYYY-MM-DD`.
+    pub date: String,
+    /// The file's own name when she attached one; empty for one recorded in the app.
+    pub name: String,
+}
+
+/// The sound of a recording, to play (D-208).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct RecordingSound {
+    pub mime: String,
+    /// The sound itself, in base64.
+    pub data: String,
 }
 
 // ------------------------------------------------------------------ money
@@ -466,6 +523,7 @@ impl Default for ClinicSettings {
                 d(VisitKind::Meeting, 30),
                 d(VisitKind::Other, 50),
                 d(VisitKind::Block, 60),
+                d(VisitKind::Supervision, 60),
             ],
             places: vec!["הקליניקה".to_owned()],
             // The strictest default: no child's name in a message that leaves by her hand.
@@ -939,6 +997,28 @@ pub enum ClinicRequest {
     NoteToCase {
         id: String,
     },
+    /// Keeps a recording with a session note (D-208). `note_id` empty: the note of `visit_id`
+    /// (or a new note on its own) is created for it. `data` is the sound in base64. Answers
+    /// the note as kept.
+    SaveRecording {
+        patient_id: String,
+        note_id: String,
+        visit_id: Option<String>,
+        date: String,
+        mime: String,
+        seconds: u32,
+        name: String,
+        data: String,
+    },
+    /// The sound of a recording, to play.
+    Recording {
+        id: String,
+    },
+    /// Removes a recording from its note, for good. Answers the note as kept.
+    DeleteRecording {
+        note_id: String,
+        id: String,
+    },
     SavePayment {
         payment: Payment,
     },
@@ -1075,5 +1155,6 @@ pub enum ClinicReply {
     Slots(Vec<Slot>),
     Proposed(Vec<Visit>),
     Insights(Box<Insights>),
+    Sound(RecordingSound),
     Done,
 }

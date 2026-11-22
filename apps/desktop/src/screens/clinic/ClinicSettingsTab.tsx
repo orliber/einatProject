@@ -19,7 +19,7 @@ import type { ClinicGroup } from "../settingsPanes";
 import { CalendarSyncSection } from "./CalendarSyncSection";
 import { useClinicSettings, useReloadClinic, useSaveSettings } from "./clinicData";
 import { defaultClinicSettings, fillPreview, PLACEHOLDERS, sampleValues } from "./clinicDefaults";
-import { formatTime, moneyInput, parseMoney, parseTime, TASK_KIND_LABEL, TASK_KINDS, VISIT_KIND_LABEL, VISIT_KINDS } from "./format";
+import { formatTime, moneyInput, ownTime, parseMoney, parseTime, TASK_KIND_LABEL, TASK_KINDS, VISIT_KIND_LABEL, VISIT_KINDS } from "./format";
 import { CheckField, ConfirmDialog, ReadError, Section, SelectField, TextAreaField, TextField, TimeField } from "./parts";
 import "./ClinicScreen.css";
 import "./ClinicSettingsTab.css";
@@ -56,7 +56,7 @@ const TEMPLATE_MAX = 5000;
 const MAX_STEPS = 12;
 const MAX_STARTER = 20;
 /** The kinds a step of the pathway can be: every visit with the family or the child. */
-const STEP_KINDS = VISIT_KINDS.filter((k) => k !== "block");
+const STEP_KINDS = VISIT_KINDS.filter((k) => !ownTime(k));
 
 const DAY_NAMES = ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת"];
 
@@ -97,7 +97,7 @@ export function fromDraft(d: SettingsDraft): { settings: ClinicSettings } | { pr
     const label = VISIT_KIND_LABEL[k.kind];
     const minutes = wholeNumber(k.minutes);
     if (minutes === null) return { problem: `המשך של ${label} צריך להיות מספר של דקות, למשל 50.` };
-    const fee = k.kind === "block" || k.fee.trim() === "" ? 0 : parseMoney(k.fee);
+    const fee = ownTime(k.kind) || k.fee.trim() === "" ? 0 : parseMoney(k.fee);
     if (fee === null) return { problem: `המחיר של ${label} צריך להיות סכום בשקלים, למשל 450 או 450.50, עד 100,000.` };
     defaults.push({ kind: k.kind, minutes, fee });
   }
@@ -376,7 +376,7 @@ function SettingsForm({ stored, group }: { stored: ClinicSettings; group: Clinic
                         aria-label={`משך של ${label}, בדקות`} onChange={(e) => setKind(k.kind, { minutes: e.target.value })} />
                     </td>
                     <td>
-                      {k.kind === "block"
+                      {ownTime(k.kind)
                         ? <span className="muted small">זמן שלך, בלי מחיר</span>
                         : (
                           <input className="input num clinic-settings-num" dir="ltr" inputMode="decimal" value={k.fee} maxLength={12}

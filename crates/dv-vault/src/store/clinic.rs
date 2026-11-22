@@ -37,13 +37,24 @@ pub struct StoredClinicHistory {
     pub json: String,
 }
 
-const KINDS: [&str; 7] = [
-    "visit", "note", "payment", "charge", "task", "settings", "tally",
+const KINDS: [&str; 8] = [
+    "visit",
+    "note",
+    "payment",
+    "charge",
+    "task",
+    "settings",
+    "tally",
+    // The sound of a recording kept with a session note (D-208). Written with no history,
+    // left out of a patient's records, and erased with the patient.
+    "recording",
 ];
 const ACTIONS: [&str; 4] = ["created", "changed", "voided", "deleted"];
 /// What may be removed one record at a time. A payment and a charge are voided, never removed
 /// (D-172), and the settings record is only replaced: those go only with their patient.
-const REMOVABLE: [&str; 3] = ["visit", "note", "task"];
+const REMOVABLE: [&str; 4] = ["visit", "note", "task", "recording"];
+/// The sound of a recording (D-208): never written to the history.
+const RECORDING: &str = "recording";
 /// The one settings record has a fixed id.
 const SETTINGS_ID: &str = "settings";
 /// The anonymous tally of the cards that were erased (D-179): one record with a fixed id,
@@ -147,6 +158,11 @@ fn put_row(
     row: &ClinicPut,
     history: Option<&str>,
 ) -> Result<String, VaultError> {
+    if kind == RECORDING && history.is_some() {
+        return Err(VaultError::Refused(
+            "the sound of a recording is never written to the history".to_owned(),
+        ));
+    }
     let (id, patient_id, day, json) = row;
     let patient_id = patient_id.as_deref();
     let existing: Option<String> = match id {
@@ -285,6 +301,39 @@ impl Vault {
         Ok(all)
     }
 
+    /// The sound of a recording and the note that lists it, in ONE transaction (D-208): both
+    /// are written or neither, so no sound is ever kept that no note lists. `note` is given
+    /// the new sound's id and answers the note's row; the sound has no history, the note gets
+    /// `note_action`. Answers the ids of the sound and of the note.
+    pub fn clinic_add_recording(
+        &mut self,
+        patient_id: &str,
+        day: i64,
+        sound_json: &str,
+        note: impl FnOnce(&str) -> Result<ClinicPut, VaultError>,
+        note_action: &str,
+    ) -> Result<(String, String), VaultError> {
+        check_action(Some(note_action))?;
+        let key = &self.keys.settings;
+        let tx = self.main.unchecked_transaction()?;
+        let sound: ClinicPut = (
+            None,
+            Some(patient_id.to_owned()),
+            day,
+            sound_json.to_owned(),
+        );
+        let sound_id = put_row(&tx, key, RECORDING, &sound, None)?;
+        let note_row = note(&sound_id)?;
+        if note_row.1.as_deref() != Some(patient_id) {
+            return Err(VaultError::Refused(
+                "a recording goes only to a note of its own patient".to_owned(),
+            ));
+        }
+        let note_id = put_row(&tx, key, "note", &note_row, Some(note_action))?;
+        tx.commit()?;
+        Ok((sound_id, note_id))
+    }
+
     /// A session note's formal record goes into a case as a material, and the note is saved
     /// with the material's id, in ONE transaction (D-177): either both are written or
     /// neither, so asking again after a failure never adds the material twice. `input_id` is
@@ -381,11 +430,16 @@ impl Vault {
     }
 
     /// How many clinic rows (records and patient cards) do not open: a row damaged on disk,
-    /// or one whose clear columns were changed (D-177, D-178). A number only.
+    /// or one whose clear columns were changed (D-177, D-178). A number only. The sound of a
+    /// recording (D-208) is left out: it can be tens of megabytes, this runs with every look
+    /// at the front page, and a damaged one is said when she plays it.
     pub fn clinic_unreadable(&self) -> Result<u32, VaultError> {
         let key = &self.keys.settings;
         let records = self
-            .clinic_rows(&format!("SELECT {RECORD_COLUMNS} FROM clinic_records"), &[])?
+            .clinic_rows(
+                &format!("SELECT {RECORD_COLUMNS} FROM clinic_records WHERE kind != 'recording'"),
+                &[],
+            )?
             .into_iter()
             .filter(|r| open_record(key, r.clone()).is_err())
             .count();
@@ -448,16 +502,18 @@ impl Vault {
         )
     }
 
-    /// Every record of a patient, of every kind, by day then id. One that does not open is
-    /// an error: what is decided from a patient's records (an erase, what the family owes)
-    /// is never decided with a row missing.
+    /// Every record of a patient, of every kind but the sound of a recording (D-208: the note
+    /// lists it, and the sound is read only to play it), by day then id. One that does not
+    /// open is an error: what is decided from a patient's records (an erase, what the family
+    /// owes) is never decided with a row missing.
     pub fn clinic_of_patient(
         &self,
         patient_id: &str,
     ) -> Result<Vec<StoredClinicRecord>, VaultError> {
         self.clinic_query(
             &format!(
-                "SELECT {RECORD_COLUMNS} FROM clinic_records WHERE patient_id = ?1
+                "SELECT {RECORD_COLUMNS} FROM clinic_records
+                 WHERE patient_id = ?1 AND kind != 'recording'
                  ORDER BY day, id"
             ),
             &[&patient_id],
@@ -490,7 +546,7 @@ impl Vault {
                     row.1
                 )));
             }
-            if history {
+            if history && row.1 != RECORDING {
                 let rec = open_record(key, row)?;
                 history_row(
                     &tx,

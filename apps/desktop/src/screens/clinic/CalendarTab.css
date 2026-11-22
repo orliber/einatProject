@@ -211,7 +211,8 @@
   --kind-soft: var(--kind-feedback-soft);
   --kind-line: var(--kind-feedback-line);
 }
-.cal-kind-guidance {
+.cal-kind-guidance,
+.cal-kind-supervision {
   --kind-bar: var(--kind-guidance);
   --kind-soft: var(--kind-guidance-soft);
   --kind-line: var(--kind-guidance-line);

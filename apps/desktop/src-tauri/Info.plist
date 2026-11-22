@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Merged by Tauri into the Mac app's Info.plist. D-208: macOS asks her once before the app may
+  use the microphone, with this sentence; without it the app would be stopped at its first
+  recording. The microphone is used only when she presses "להקליט" beside a session note.
+-->
+<plist version="1.0">
+<dict>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>כדי להקליט לעצמך אחרי פגישה. ההקלטה נשמרת מוצפנת בכספת, רק במחשב הזה, ולא נשלחת לשום מקום.</string>
+</dict>
+</plist>

@@ -126,7 +126,7 @@ describe("the time of a visit", () => {
   const NOW = { date: "2026-11-15", minute: 600 };
   const visit = (over: Partial<Visit> = {}): Visit => ({
     id: "v1", patient_id: "p1", kind: "assessment", title: "", date: "2026-11-15", start: 600, minutes: 50, place: "", status: "planned",
-    status_note: "", fee: 0, charge_missed: false, series_id: null, note: "", ...over,
+    status_note: "", fee: 0, charge_missed: false, series_id: null, note: "", remember: [], ...over,
   });
 
   it("a visit has begun at its very start, and ended at its very end", () => {
@@ -246,7 +246,7 @@ describe("labels", () => {
   it("the words are the core's own (logic.rs: kind_label, status_label, method_label, task_kind_label, patient_status_label, contact_role_label)", () => {
     expect(VISIT_KIND_LABEL).toEqual({
       intake: "פגישת היכרות", assessment: "מפגש אבחון", observation: "תצפית", feedback: "שיחת משוב", therapy: "פגישת טיפול",
-      guidance: "הדרכת הורים", meeting: "פגישה מקצועית", other: "פגישה אחרת", block: "זמן שמור", unknown: "סוג לא מוכר",
+      guidance: "הדרכת הורים", meeting: "פגישה מקצועית", other: "פגישה אחרת", block: "זמן שמור", supervision: "הדרכה", unknown: "סוג לא מוכר",
     });
     expect(VISIT_STATUS_LABEL).toEqual({ planned: "מתוכננת", held: "התקיימה", cancelled: "בוטלה", no_show: "לא הגיעו", unknown: "מצב לא מוכר" });
     expect(PAY_METHOD_LABEL).toEqual({ cash: "מזומן", transfer: "העברה בנקאית", bit: "ביט", paybox: "פייבוקס", check: "צ'ק", card: "כרטיס אשראי", other: "אחר", unknown: "אמצעי לא מוכר" });
@@ -254,7 +254,7 @@ describe("labels", () => {
     expect(PATIENT_STATUS_LABEL).toEqual({ waiting: "ברשימת ההמתנה", active: "בתהליך", closed: "הסתיים", unknown: "מצב לא מוכר" });
     expect(CONTACT_ROLE_LABEL).toEqual({ mother: "אמא", father: "אבא", guardian: "אפוטרופוס", other: "אחר", unknown: "קשר לא מוכר" });
     // And in the core's order.
-    expect(VISIT_KINDS).toEqual(["intake", "assessment", "observation", "feedback", "therapy", "guidance", "meeting", "other", "block"]);
+    expect(VISIT_KINDS).toEqual(["intake", "assessment", "observation", "feedback", "therapy", "guidance", "meeting", "other", "block", "supervision"]);
     expect(PAY_METHODS).toEqual(["cash", "transfer", "bit", "paybox", "check", "card", "other"]);
   });
 

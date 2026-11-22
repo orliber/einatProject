@@ -26,7 +26,7 @@ function viewOf(over: Partial<Visit> = {}, hasNote = false): VisitView {
   return {
     visit: {
       id: "v-invented", patient_id: "p-invented", kind: "assessment", title: "", date: "2026-11-15", start: 580, minutes: 50, place: "", status: "planned",
-      status_note: "", fee: 0, charge_missed: false, series_id: null, note: "", ...over,
+      status_note: "", fee: 0, charge_missed: false, series_id: null, note: "", remember: [], ...over,
     },
     patient_name: "נועם לדוגמה",
     has_note: hasNote,

@@ -10,7 +10,7 @@ import {
 const view = (id: string, date: string, start: number, over: Partial<Visit> = {}): VisitView => ({
   visit: {
     id, patient_id: "patient-1", kind: "therapy", title: "", date, start, minutes: 50, place: "", status: "planned", status_note: "", fee: 0,
-    charge_missed: false, series_id: null, note: "", ...over,
+    charge_missed: false, series_id: null, note: "", remember: [], ...over,
   },
   patient_name: "מאיה",
   has_note: false,
