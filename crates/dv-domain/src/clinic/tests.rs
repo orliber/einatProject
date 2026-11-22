@@ -51,7 +51,7 @@ fn patient(id: &str, name: &str) -> Patient {
 fn visit(id: &str, kind: VisitKind, date: &str, start: u16, status: VisitStatus) -> Visit {
     Visit {
         id: id.to_owned(),
-        patient_id: (kind != VisitKind::Block).then(|| "p1".to_owned()),
+        patient_id: (!kind.own_time()).then(|| "p1".to_owned()),
         kind,
         title: String::new(),
         date: date.to_owned(),
@@ -64,6 +64,7 @@ fn visit(id: &str, kind: VisitKind, date: &str, start: u16, status: VisitStatus)
         charge_missed: false,
         series_id: None,
         note: String::new(),
+        remember: Vec::new(),
     }
 }
 
@@ -83,6 +84,7 @@ fn note(id: &str, visit_id: Option<&str>, date: &str) -> SessionNote {
         record: "הילד שיתף פעולה לאורך המפגש.".to_owned(),
         personal: String::new(),
         case_input_id: None,
+        recordings: Vec::new(),
     }
 }
 
@@ -604,16 +606,19 @@ fn a_patient_card_within_its_limits() {
 
 #[test]
 fn a_block_has_no_patient_and_no_fee_and_the_rest_need_a_patient() {
-    let block = visit("v1", VisitKind::Block, TODAY, 600, VisitStatus::Planned);
-    assert!(validate_visit(&block).is_ok());
-    let mut with_patient = block.clone();
-    with_patient.patient_id = Some("p1".to_owned());
-    refusal(validate_visit(&with_patient));
-    let mut with_fee = block;
-    with_fee.fee = 100;
-    refusal(validate_visit(&with_fee));
+    // A supervision is her own time too (D-207).
+    for own in [VisitKind::Block, VisitKind::Supervision] {
+        let block = visit("v1", own, TODAY, 600, VisitStatus::Planned);
+        assert!(validate_visit(&block).is_ok());
+        let mut with_patient = block.clone();
+        with_patient.patient_id = Some("p1".to_owned());
+        refusal(validate_visit(&with_patient));
+        let mut with_fee = block;
+        with_fee.fee = 100;
+        refusal(validate_visit(&with_fee));
+    }
 
-    for kind in VISIT_KINDS.into_iter().filter(|k| *k != VisitKind::Block) {
+    for kind in VISIT_KINDS.into_iter().filter(|k| !k.own_time()) {
         let ok = visit("v1", kind, TODAY, 600, VisitStatus::Planned);
         assert!(validate_visit(&ok).is_ok());
         let mut nobody = ok.clone();
@@ -5120,4 +5125,127 @@ fn settings_of_the_pathway_and_the_kit_are_checked() {
     }));
     assert!(bad(|s| s.starter_tasks[0].title = "  ".to_owned()));
     assert!(bad(|s| s.starter_tasks[0].due_days = 366));
+}
+
+// ------------------------------------------------------------------ D-207, D-208
+
+#[test]
+fn supervision_is_her_own_time_and_is_named_supervision() {
+    assert!(VisitKind::Supervision.own_time());
+    assert!(VisitKind::Block.own_time());
+    assert!(!VisitKind::Guidance.own_time());
+    assert_eq!(kind_label(VisitKind::Supervision), "הדרכה");
+    assert_eq!(kind_label(VisitKind::Guidance), "הדרכת הורים");
+    assert!(VISIT_KINDS.contains(&VisitKind::Supervision));
+    let json = serde_json::to_string(&VisitKind::Supervision).unwrap_or_default();
+    assert_eq!(json, "\"supervision\"");
+    assert_eq!(
+        default_fee(None, &ClinicSettings::default(), VisitKind::Supervision),
+        0
+    );
+}
+
+#[test]
+fn settings_saved_before_supervision_get_its_usual_length() {
+    let mut old = ClinicSettings::default();
+    old.defaults.retain(|d| d.kind != VisitKind::Supervision);
+    assert!(validate_settings(&old).is_err());
+    let filled = normalize_settings(old);
+    assert!(validate_settings(&filled).is_ok());
+    assert_eq!(
+        filled
+            .defaults
+            .iter()
+            .filter(|d| d.kind == VisitKind::Supervision)
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn what_not_to_forget_is_trimmed_bounded_and_printed() {
+    let mut v = visit("v1", VisitKind::Feedback, TODAY, 600, VisitStatus::Planned);
+    v.remember = vec![
+        RememberItem {
+            text: "  לדבר עם הגננת  ".to_owned(),
+            done: false,
+        },
+        RememberItem {
+            text: "   ".to_owned(),
+            done: true,
+        },
+        RememberItem {
+            text: "להביא את השאלונים".to_owned(),
+            done: true,
+        },
+    ];
+    let v = normalize_visit(v);
+    assert_eq!(v.remember.len(), 2);
+    assert_eq!(v.remember[0].text, "לדבר עם הגננת");
+    assert!(validate_visit(&v).is_ok());
+
+    let mut long = v.clone();
+    long.remember[0].text = "א".repeat(SHORT_MAX + 1);
+    refusal(validate_visit(&long));
+    let mut many = v.clone();
+    many.remember = vec![
+        RememberItem {
+            text: "x".to_owned(),
+            done: false
+        };
+        REMEMBER_MAX + 1
+    ];
+    refusal(validate_visit(&many));
+
+    // A visit saved before D-207 reads with nothing to remember.
+    let old: Visit = serde_json::from_str(r#"{"id":"v9","kind":"therapy"}"#).unwrap_or_default();
+    assert!(old.remember.is_empty());
+}
+
+#[test]
+fn a_note_with_only_a_recording_is_not_empty() {
+    let mut n = note("n1", None, TODAY);
+    n.record = String::new();
+    refusal(validate_note(&n));
+    n.recordings.push(RecordingInfo {
+        id: "r1".to_owned(),
+        mime: "audio/webm".to_owned(),
+        ..RecordingInfo::default()
+    });
+    assert!(validate_note(&n).is_ok());
+}
+
+#[test]
+fn a_recording_is_base64_sound_of_a_known_kind_and_size() {
+    assert_eq!(recording_bytes("AAAA").ok(), Some(3));
+    assert_eq!(recording_bytes("AAA=").ok(), Some(2));
+    assert_eq!(recording_bytes("AA==").ok(), Some(1));
+    refusal(recording_bytes(""));
+    refusal(recording_bytes("AAA"));
+    refusal(recording_bytes("A==="));
+    refusal(recording_bytes("AA=A"));
+    refusal(recording_bytes("AA\nA"));
+    refusal(recording_bytes("<scr"));
+    let too_big = "A".repeat((RECORDING_MAX_BYTES / 3 + 1) * 4);
+    refusal(recording_bytes(&too_big));
+
+    assert_eq!(
+        recording_mime("audio/webm;codecs=opus").ok().as_deref(),
+        Some("audio/webm")
+    );
+    assert_eq!(
+        recording_mime(" Audio/MP4 ").ok().as_deref(),
+        Some("audio/mp4")
+    );
+    assert_eq!(
+        recording_mime("audio/x-wav").ok().as_deref(),
+        Some("audio/wav")
+    );
+    assert_eq!(
+        recording_mime("audio/m4a").ok().as_deref(),
+        Some("audio/x-m4a")
+    );
+    refusal(recording_mime("text/html"));
+    refusal(recording_mime("video/webm"));
+    refusal(recording_mime(""));
 }

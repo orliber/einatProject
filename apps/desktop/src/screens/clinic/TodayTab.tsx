@@ -15,7 +15,7 @@ import type { TaskView } from "../../ipc/generated/TaskView";
 import type { Visit } from "../../ipc/generated/Visit";
 import type { VisitView } from "../../ipc/generated/VisitView";
 import { clinicKeys, useOptimistic, useOverview, useReloadClinic, useToday } from "./clinicData";
-import { formatDate, formatDateLong, formatMoney, formatTime, greeting, nowIndex, TASK_KIND_LABEL, todayCountWords, untilWords } from "./format";
+import { formatDate, formatDateLong, formatMoney, formatTime, greeting, nowIndex, ownTime, TASK_KIND_LABEL, todayCountWords, untilWords } from "./format";
 import { NoteDialog } from "./NoteDialog";
 import { AlertGroups, EmptyState, PatientName, ReadError, Section, useClinicNav, VisitRow } from "./parts";
 import { PatientDialog } from "./PatientDialog";
@@ -80,7 +80,7 @@ export function TodayTab() {
   // no line is drawn. Time she kept for herself and a cancelled visit are not "next".
   const at = nowIndex(o.visits.map((v) => v.visit.start), now.minute);
   const after = at > 0 ? o.visits.length - at : 0;
-  const next = o.visits.find((v) => v.visit.start > now.minute && v.visit.kind !== "block" && v.visit.status !== "cancelled");
+  const next = o.visits.find((v) => v.visit.start > now.minute && !ownTime(v.visit.kind) && v.visit.status !== "cancelled");
   const soon = next ? { id: next.visit.id, text: untilWords(next.visit.start - now.minute) } : null;
 
   /** A list of visits, each with its one step and its "⋯". The key is the visit's, and the line
@@ -91,7 +91,7 @@ export function TodayTab() {
       {views.map((view, i) => {
         const v = view.visit;
         // Time she kept for herself has no step and no "⋯" (and no empty actions box).
-        const pid = v.kind !== "block" ? v.patient_id : null;
+        const pid = !ownTime(v.kind) ? v.patient_id : null;
         return (
           <Fragment key={v.id}>
             {i === line && <NowLine minute={now.minute} />}

@@ -155,6 +155,8 @@ export const useErasePatient = () => useWrite((a: { id: string; name: string }) 
 export const useSaveNote = () => useWrite((note: SessionNote) => clinicApi.saveNote(note));
 export const useDeleteNote = () => useWrite((id: string) => clinicApi.deleteNote(id));
 export const useNoteToCase = () => useWrite((id: string) => clinicApi.noteToCase(id), true);
+export const useSaveRecording = () => useWrite((a: Parameters<typeof clinicApi.saveRecording>[0]) => clinicApi.saveRecording(a));
+export const useDeleteRecording = () => useWrite((a: { noteId: string; id: string }) => clinicApi.deleteRecording(a.noteId, a.id));
 export const useSavePayment = () => useWrite((payment: Payment) => clinicApi.savePayment(payment));
 export const useVoidPayment = () => useWrite((a: { id: string; reason: string }) => clinicApi.voidPayment(a.id, a.reason));
 export const useSaveCharge = () => useWrite((charge: Charge) => clinicApi.saveCharge(charge));

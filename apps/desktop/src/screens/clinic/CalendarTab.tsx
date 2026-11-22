@@ -27,7 +27,7 @@ import {
 } from "./calendarLayout";
 import { useCalendar, useClinicSettings, useHolidays, useOptimistic, useReloadClinic, useToday } from "./clinicData";
 import {
-  dayName, formatDateLong, formatDateShort, formatMonth, formatSpan, formatTime, leftAloneWords, monthOf, VISIT_KIND_LABEL, VISIT_STATUS_LABEL,
+  dayName, formatDateLong, formatDateShort, formatMonth, formatSpan, formatTime, leftAloneWords, monthOf, ownTime, VISIT_KIND_LABEL, VISIT_STATUS_LABEL,
   visitTitle, weekday,
 } from "./format";
 import { NoteDialog } from "./NoteDialog";
@@ -401,7 +401,7 @@ function MoveBar({ picked, scope, onStep, onScope, onOpen, onDone }: {
   return (
     <div ref={self} className="cal-move cal-move-on" role="group" aria-label="הזזת הפגישה שנבחרה">
       <span className="cal-move-what" role="status">
-        {v.kind === "block" ? <span className="clinic-name clinic-name-strong">{visitTitle(v)}</span> : <PatientName name={picked.patient_name} strong />}
+        {ownTime(v.kind) ? <span className="clinic-name clinic-name-strong">{visitTitle(v)}</span> : <PatientName name={picked.patient_name} strong />}
         <span>{formatDateLong(v.date)}</span>
         <span className="num" dir="ltr">{formatSpan(v.start, v.minutes)}</span>
         {picked.overlaps && <span className="chip chip-warn">חופפת לפגישה אחרת</span>}
@@ -558,7 +558,7 @@ function GridVisit({ view, chosen, short, style, actions }: {
 }) {
   const v = view.visit;
   const shownName = useShownName();
-  const block = v.kind === "block";
+  const block = ownTime(v.kind);
   const who = block ? visitTitle(v) : shownName(view.patient_name);
   function onKey(e: KeyboardEvent<HTMLButtonElement>) {
     if (e.key === "Escape") {
@@ -587,7 +587,7 @@ function GridVisit({ view, chosen, short, style, actions }: {
         <span className="cal-visit-who">{block ? who : <PatientName name={view.patient_name} strong />}</span>
         <span className="visually-hidden">,</span>
         {" "}
-        {block ? <span className="visually-hidden">{VISIT_KIND_LABEL.block}</span> : <span className="cal-visit-kind">{visitTitle(v)}</span>}
+        {block ? <span className="visually-hidden">{VISIT_KIND_LABEL[v.kind]}</span> : <span className="cal-visit-kind">{visitTitle(v)}</span>}
         {!block && <span className="visually-hidden">,</span>}
         {" "}
         {!block && (v.status === "planned" ? <span className="visually-hidden">{VISIT_STATUS_LABEL.planned}</span> : <StatusBadge status={v.status} />)}
@@ -718,7 +718,7 @@ function Agenda({ date, now, visits, onOpen, onNew, onHold, onNote }: {
               const v = view.visit;
               // The key is the visit's and the step keeps its place: after "התקיימה" the focus
               // stays on the same button, now "לכתוב סיכום".
-              const pid = v.kind !== "block" ? v.patient_id : null;
+              const pid = !ownTime(v.kind) ? v.patient_id : null;
               return (
                 <VisitRow key={v.id} view={view} onOpen={() => onOpen(view)}
                   actions={pid !== null
@@ -786,10 +786,10 @@ function MonthDay({ date, visits, today, outside, onDay }: { date: string; visit
           {visits.slice(0, MONTH_ROWS).map((view) => {
             const v = view.visit;
             return (
-              <li key={v.id} className={`cal-month-visit cal-visit-${v.status} cal-kind-${v.kind}${v.kind === "block" ? " cal-visit-block" : ""}`} data-status={v.status}>
+              <li key={v.id} className={`cal-month-visit cal-visit-${v.status} cal-kind-${v.kind}${ownTime(v.kind) ? " cal-visit-block" : ""}`} data-status={v.status}>
                 <span className="num cal-visit-time" dir="ltr">{formatTime(v.start)}</span>
-                <span className="cal-visit-who">{v.kind === "block" ? visitTitle(v) : <PatientName name={view.patient_name} />}</span>
-                {v.kind !== "block" && v.status !== "planned" && <span className="visually-hidden">, {VISIT_STATUS_LABEL[v.status]}</span>}
+                <span className="cal-visit-who">{ownTime(v.kind) ? visitTitle(v) : <PatientName name={view.patient_name} />}</span>
+                {!ownTime(v.kind) && v.status !== "planned" && <span className="visually-hidden">, {VISIT_STATUS_LABEL[v.status]}</span>}
               </li>
             );
           })}

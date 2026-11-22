@@ -190,7 +190,7 @@ describe("the week", () => {
         const itay = rows.find((r) => r.patient.name === "איתי")?.patient.id ?? "";
         const base = visitOfPatient(views, "תמר");
         // Another visit inside תמר's; איתי's own is cancelled; מאיה's was held.
-        await ask(served, { op: "save_visit", repeat: null, scope: "one", visit: { ...base, id: "", patient_id: itay, kind: "guidance", start: 570, minutes: 50, series_id: null, note: "" } });
+        await ask(served, { op: "save_visit", repeat: null, scope: "one", visit: { ...base, id: "", patient_id: itay, kind: "guidance", start: 570, minutes: 50, series_id: null, note: "", remember: [] } });
         await ask(served, { op: "save_visit", repeat: null, scope: "one", visit: { ...visitOfPatient(views, "איתי"), status: "cancelled" } });
         await ask(served, { op: "save_visit", repeat: null, scope: "one", visit: { ...visitOfPatient(views, "מאיה"), status: "held" } });
         await ask(served, { op: "save_visit", repeat: null, scope: "one", visit: { ...visitOfPatient(views, "נועם"), status: "no_show" } });

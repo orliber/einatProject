@@ -209,7 +209,7 @@ pub fn validate_pathway(settings: &ClinicSettings) -> Result<(), DomainError> {
         ));
     }
     for step in &settings.pathway {
-        if matches!(step.kind, VisitKind::Block | VisitKind::Unknown) {
+        if step.kind.own_time() || step.kind == VisitKind::Unknown {
             return refuse("כל שלב במסלול האבחון צריך להיות פגישה עם המשפחה או עם הילד.");
         }
         if step.gap_days > MAX_GAP_DAYS {
@@ -269,6 +269,7 @@ pub fn propose_pathway(
             charge_missed: false,
             series_id: None,
             note: String::new(),
+            remember: Vec::new(),
         };
         proposed.push(visit);
         // The next step: its gap after this one, at least the next day; past the last date

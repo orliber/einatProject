@@ -12,6 +12,7 @@
 //   case_choices → cases · link_case → patient · create_case → case
 //   holidays → holidays · free_slots → slots · propose_pathway → proposed · save_pathway → saved
 //   starter_tasks → tasks · insights → insights
+//   save_recording, delete_recording → note · recording → sound (D-208)
 import { ipc, type UiError } from "./client";
 import type { CaseChoice } from "./generated/CaseChoice";
 import type { CaseLink } from "./generated/CaseLink";
@@ -31,6 +32,7 @@ import type { Patient } from "./generated/Patient";
 import type { PatientCard } from "./generated/PatientCard";
 import type { PatientRow } from "./generated/PatientRow";
 import type { Payment } from "./generated/Payment";
+import type { RecordingSound } from "./generated/RecordingSound";
 import type { Repeat } from "./generated/Repeat";
 import type { SavedVisits } from "./generated/SavedVisits";
 import type { Scope } from "./generated/Scope";
@@ -88,6 +90,12 @@ export const clinicApi = {
   deleteNote: (id: string): Promise<void> => done({ op: "delete_note", id }),
   /** Copies the formal record (never the personal note) into the patient's case. */
   noteToCase: (id: string): Promise<SessionNote> => ask({ op: "note_to_case", id }, "note"),
+  /** Keeps a recording with a note (D-208); `noteId` empty: the visit's note, or a new one. `data` is base64. */
+  saveRecording: (a: { patientId: string; noteId: string; visitId: string | null; date: string; mime: string; seconds: number; name: string; data: string }): Promise<SessionNote> =>
+    ask({ op: "save_recording", patient_id: a.patientId, note_id: a.noteId, visit_id: a.visitId, date: a.date, mime: a.mime, seconds: a.seconds, name: a.name, data: a.data }, "note"),
+  /** The sound of a recording, to play; it never goes anywhere else. */
+  recording: (id: string): Promise<RecordingSound> => ask({ op: "recording", id }, "sound"),
+  deleteRecording: (noteId: string, id: string): Promise<SessionNote> => ask({ op: "delete_recording", note_id: noteId, id }, "note"),
   savePayment: (payment: Payment): Promise<Payment> => ask({ op: "save_payment", payment }, "payment"),
   voidPayment: (id: string, reason: string): Promise<Payment> => ask({ op: "void_payment", id, reason }, "payment"),
   saveCharge: (charge: Charge): Promise<Charge> => ask({ op: "save_charge", charge }, "charge"),

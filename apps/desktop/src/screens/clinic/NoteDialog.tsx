@@ -2,7 +2,7 @@
 // the law keeps them apart (Patient's Rights Law, §17; the code of ethics, 3.14; D-171): the
 // record, which the family may ask to see, and her personal note, which is hers alone. Only
 // the record can go to the patient's diagnostic case.
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { useApp } from "../../App";
 import { DateField } from "../../components/DateField";
 import { Dialog, ErrorLine, Skeleton } from "../../components/ui";
@@ -12,6 +12,7 @@ import type { Visit } from "../../ipc/generated/Visit";
 import { useClinicSettings, useNoteToCase, usePatientCard, useReloadClinic, useSaveNote, useToday } from "./clinicData";
 import { formatDate, formatTime, VISIT_KIND_LABEL } from "./format";
 import { Field, ReadError, RecordHistory, useDiscreet, useShownName } from "./parts";
+import { Recordings } from "./Recordings";
 
 export interface NoteDialogProps {
   patientId: string;
@@ -69,9 +70,12 @@ function NoteForm(props: Omit<NoteDialogProps, "visit"> & {
   /** In discreet mode the personal note waits for her to ask for it, as on the card. */
   const [personalShown, setPersonalShown] = useState(false);
   const personalOpen = !discreet || personalShown;
+  /** A recording under way or being saved: closing now would lose it. */
+  const [recording, setRecording] = useState(false);
+  const onRecordingBusy = useCallback((busy: boolean) => setRecording(busy), []);
 
   const dirty = record !== (stored?.record ?? "") || personal !== (stored?.personal ?? "") || (visit === null && date !== (stored?.date ?? props.today));
-  const empty = record.trim() === "" && personal.trim() === "";
+  const empty = record.trim() === "" && personal.trim() === "" && (stored?.recordings.length ?? 0) === 0;
   const linked = card.case !== null && !card.case.in_trash ? card.case : null;
   const sent = stored !== null && stored.case_input_id !== null;
   const title = visit ? `סיכום ${VISIT_KIND_LABEL[visit.kind]}` : "סיכום שיחה";
@@ -96,7 +100,7 @@ function NoteForm(props: Omit<NoteDialogProps, "visit"> & {
         date: visit?.date ?? date,
         record,
         personal,
-        case_input_id: stored?.case_input_id ?? null,
+        case_input_id: stored?.case_input_id ?? null, recordings: [],
       });
       setStored(saved);
       setRecord(saved.record);
@@ -141,7 +145,7 @@ function NoteForm(props: Omit<NoteDialogProps, "visit"> & {
   }
 
   return (
-    <Dialog help="visit-note" title={title} subtitle={subtitle} dirty={dirty} onClose={onClose}
+    <Dialog help="visit-note" title={title} subtitle={subtitle} dirty={dirty || recording} onClose={onClose}
       footer={(close) => <>
         <span className="grow" />
         <button type="button" className="btn" onClick={close}>ביטול</button>
@@ -177,14 +181,23 @@ function NoteForm(props: Omit<NoteDialogProps, "visit"> & {
         <div className="clinic-note-part clinic-note-personal">
           <header className="clinic-note-head">
             <h3><label htmlFor="note-personal">תרשומת אישית</label></h3>
-            <p className="hint" id="note-personal-hint">שלך בלבד: מחשבות והשערות לעצמך. היא לא מודפסת, לא מיוצאת ולא עוברת לתיק האבחון.</p>
+            <p className="hint" id="note-personal-hint">שלך בלבד: מחשבות והשערות לעצמך, בכתב או בהקלטה. הן לא מודפסות, לא מיוצאות ולא עוברות לתיק האבחון.</p>
           </header>
           {personalOpen ? (
-            <textarea id="note-personal" className="textarea clinic-note-text" rows={5} value={personal} maxLength={NOTE_MAX}
-              aria-describedby="note-personal-hint" onChange={(e) => setPersonal(e.target.value)} />
+            <>
+              <textarea id="note-personal" className="textarea clinic-note-text" rows={5} value={personal} maxLength={NOTE_MAX}
+                aria-describedby="note-personal-hint" onChange={(e) => setPersonal(e.target.value)} />
+              <Recordings note={stored} patientId={card.patient.id} visitId={visit?.id ?? null} date={visit?.date ?? date}
+                onBusy={onRecordingBusy}
+                onNote={(saved) => {
+                  // Only what the recordings changed: the texts she is typing stay hers.
+                  setStored(saved);
+                  props.onSaved?.(saved);
+                }} />
+            </>
           ) : (
             <p className="row clinic-note-hidden">
-              <span className="muted">התרשומת האישית מוסתרת במצב דיסקרטי.</span>
+              <span className="muted">התרשומת האישית וההקלטות מוסתרות במצב דיסקרטי.</span>
               <button type="button" className="btn btn-small" onClick={() => setPersonalShown(true)}>להציג</button>
             </p>
           )}

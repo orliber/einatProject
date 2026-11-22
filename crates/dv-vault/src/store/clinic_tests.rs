@@ -1057,3 +1057,41 @@ fn a_note_goes_into_a_case_with_its_material_or_not_at_all() {
     assert_eq!(v.clinic_get(&note).unwrap().unwrap().json, r#"{"v":2}"#);
     assert_eq!(v.inputs(&case).unwrap().len(), 1);
 }
+
+#[test]
+fn a_recording_has_no_history_is_not_a_patient_record_and_goes_with_the_patient() {
+    let (_d, mut v) = new_vault();
+    let p1 = v.save_clinic_patient(None, r#"{"name":"נועם"}"#).unwrap();
+    // The sound is never written to the history (D-208).
+    assert!(matches!(
+        v.clinic_put(
+            "recording",
+            None,
+            Some(&p1),
+            1,
+            r#"{"data":"AAAA"}"#,
+            Some("created")
+        ),
+        Err(VaultError::Refused(_))
+    ));
+    let sound = put(&mut v, "recording", Some(&p1), 1, r#"{"data":"AAAA"}"#);
+    let note = put(&mut v, "note", Some(&p1), 1, "{}");
+    // The patient's records leave the sound out; it is read by its id.
+    let mine = v.clinic_of_patient(&p1).unwrap();
+    assert_eq!(mine.len(), 1);
+    assert_eq!(mine[0].id, note);
+    assert_eq!(v.clinic_get(&sound).unwrap().unwrap().kind, "recording");
+    // Removed with history asked: still no history row holds it.
+    let other = put(&mut v, "recording", Some(&p1), 2, r#"{"data":"BBBB"}"#);
+    v.clinic_delete(&other, true).unwrap();
+    assert!(v.clinic_history(&other).unwrap().is_empty());
+    assert!(v.clinic_get(&other).unwrap().is_none());
+    // The erase of the patient takes it.
+    v.erase_clinic_patient(&p1, None, None).unwrap();
+    assert!(v.clinic_get(&sound).unwrap().is_none());
+    let left: i64 = v
+        .main
+        .query_row("SELECT COUNT(*) FROM clinic_records", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(left, 0);
+}

@@ -5,7 +5,7 @@
 import type { Scope } from "../../ipc/generated/Scope";
 import type { VisitKind } from "../../ipc/generated/VisitKind";
 import type { VisitView } from "../../ipc/generated/VisitView";
-import { addDays, dayNumber, formatDateLong, formatMonth, monthOf, monthRange, VISIT_KINDS, weekday, weekRange, type DateRange } from "./format";
+import { addDays, dayNumber, formatDateLong, formatMonth, monthOf, monthRange, ownTime, VISIT_KINDS, weekday, weekRange, type DateRange } from "./format";
 
 export type CalendarView = "day" | "week" | "month";
 
@@ -217,7 +217,7 @@ export function byDate(views: VisitView[]): Map<string, VisitView[]> {
 
 /** The order of the legend: her kinds as she chooses them, then one a later version wrote, and
  *  her own time last. */
-const LEGEND_ORDER: VisitKind[] = [...VISIT_KINDS.filter((k) => k !== "block"), "unknown", "block"];
+const LEGEND_ORDER: VisitKind[] = [...VISIT_KINDS.filter((k) => !ownTime(k)), "unknown", "block", "supervision"];
 
 /** The kinds the legend explains: those of the visits shown on these dates (`null`: every date
  *  of the answer), a cancelled visit aside, in the legend's fixed order. */

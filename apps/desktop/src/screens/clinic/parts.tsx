@@ -12,9 +12,10 @@ import type { VisitStatus } from "../../ipc/generated/VisitStatus";
 import type { VisitView } from "../../ipc/generated/VisitView";
 import { useHistory, usePatients, useReloadClinic, useToday } from "./clinicData";
 import {
-  ALERT_KIND_LABEL, formatDate, formatSpan, initials, moneyInput, moneyNumber, parseMoney, parseTime, PATIENT_STATUS_LABEL,
+  ALERT_KIND_LABEL, formatDate, formatSpan, initials, ownTime, moneyInput, moneyNumber, parseMoney, parseTime, PATIENT_STATUS_LABEL,
   VISIT_KIND_LABEL, VISIT_STATUS_LABEL,
 } from "./format";
+import { rememberLine } from "./RememberList";
 import type { ClinicTab } from "./tabs";
 import "./ClinicScreen.css";
 
@@ -455,7 +456,7 @@ export function VisitRow({ view, actions, onOpen, showDate = false, quietPlanned
   const shown = useShownName();
   const discreet = useDiscreet();
   const span = formatSpan(v.start, v.minutes);
-  const who = v.kind === "block" ? (v.title || VISIT_KIND_LABEL.block) : shown(view.patient_name);
+  const who = ownTime(v.kind) ? (v.title || VISIT_KIND_LABEL[v.kind]) : shown(view.patient_name);
   const time = <span className="num clinic-visit-time" dir="ltr">{span}</span>;
   // A space between the date and the hours: they stand one above the other, and the text she
   // sees ("15.11.2026 09:00–09:50") is the start of the button's name, not "15.11.202609:00".
@@ -463,7 +464,9 @@ export function VisitRow({ view, actions, onOpen, showDate = false, quietPlanned
   const openName = `${showDate ? `${formatDate(v.date)} ` : ""}${span}, פתיחת הפגישה של ${who}`;
   // What happened, in her words, may say more than a list should while a family looks on: in
   // discreet mode it stays in the visit's dialog.
-  const more = [v.kind !== "block" ? v.title : "", v.place, discreet ? "" : v.status_note, v.note, soon ?? ""].filter(Boolean).join(" · ");
+  const more = [!ownTime(v.kind) ? v.title : "", v.place, discreet ? "" : v.status_note, v.note, soon ?? ""].filter(Boolean).join(" · ");
+  // What not to forget, while the visit is ahead (D-207); in discreet mode only how many.
+  const remember = v.status === "planned" ? rememberLine(v.remember, discreet) : "";
   return (
     <li className={v.status === "cancelled" ? "clinic-visit clinic-visit-off" : "clinic-visit"} data-status={v.status} data-kind={v.kind}>
       {onOpen
@@ -471,17 +474,18 @@ export function VisitRow({ view, actions, onOpen, showDate = false, quietPlanned
         : <span className="clinic-visit-when">{date}{time}</span>}
       <div className="grow stack clinic-visit-body">
         <span className="row clinic-visit-head">
-          {v.kind === "block"
+          {ownTime(v.kind)
             ? <span className="clinic-name clinic-name-strong">{who}</span>
             : <PatientName name={view.patient_name} id={v.patient_id} strong />}
           <KindBadge kind={v.kind} />
-          {v.kind !== "block" && (quietPlanned && v.status === "planned"
+          {!ownTime(v.kind) && (quietPlanned && v.status === "planned"
             ? <span className="visually-hidden">{VISIT_STATUS_LABEL.planned}</span>
             : <StatusBadge status={v.status} />)}
           {view.has_note && <span className="chip chip-ok">יש סיכום</span>}
           {view.overlaps && <span className="chip chip-warn">חופפת לפגישה אחרת</span>}
         </span>
         {more !== "" && <span className="muted small clinic-visit-more">{more}</span>}
+        {remember !== "" && <span className="small clinic-visit-remember">{remember}</span>}
       </div>
       {actions && <div className="row clinic-visit-actions">{actions}</div>}
     </li>

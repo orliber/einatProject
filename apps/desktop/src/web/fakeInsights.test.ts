@@ -18,7 +18,7 @@ const patient = (over: Partial<Patient> = {}): Patient => ({
 });
 const visit = (patientId: string | null, date: string, over: Partial<Visit> = {}): Visit => ({
   id: `v-${++seq}`, patient_id: patientId, kind: "assessment", title: "", date, start: 9 * 60, minutes: 60, place: "", status: "held",
-  status_note: "", fee: 0, charge_missed: false, series_id: null, note: "", ...over,
+  status_note: "", fee: 0, charge_missed: false, series_id: null, note: "", remember: [], ...over,
 });
 const charge = (patientId: string, date: string, amount: number, voided = false): Charge => ({
   id: `c-${++seq}`, patient_id: patientId, date, amount, what: "חבילת אבחון", voided, void_reason: "",

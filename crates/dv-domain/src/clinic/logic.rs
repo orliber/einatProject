@@ -14,8 +14,8 @@ use super::{
     Agorot, Alert, AlertKind, Balance, Charge, ClinicSettings, ClinicTask, Contact, ContactRole,
     DiaryDay, DiaryErased, DiaryLine, DiaryMonth, ErasedCards, ErasedMethod, ErasedMonth,
     ErasedTally, IncomeMonth, IncomeYear, KindCount, KindDefault, MethodTotal, Patient,
-    PatientStatus, PayMethod, Payment, ProcessStep, Repeat, SessionNote, StepState, TaskKind,
-    TaskView, Today, Visit, VisitKind, VisitStatus, VisitView, VisitWhen,
+    PatientStatus, PayMethod, Payment, ProcessStep, RememberItem, Repeat, SessionNote, StepState,
+    TaskKind, TaskView, Today, Visit, VisitKind, VisitStatus, VisitView, VisitWhen,
 };
 use crate::dates::{
     add_years, civil_from_days, days_from_civil, days_in_month, iso, parse_iso, Ymd,
@@ -33,6 +33,25 @@ pub const SHORT_MAX: usize = 200;
 pub const LONG_MAX: usize = 4_000;
 /// The formal record and the personal note of a session.
 pub const NOTE_MAX: usize = 20_000;
+/// The most things not to forget ahead of one visit (D-207).
+pub const REMEMBER_MAX: usize = 20;
+/// The most recordings one session note keeps (D-208).
+pub const RECORDINGS_MAX: usize = 10;
+/// The largest recording, in bytes (D-208): over an hour at the rate the app records.
+pub const RECORDING_MAX_BYTES: usize = 40 * 1024 * 1024;
+/// The longest a recording is said to be, in seconds (D-208): four hours.
+pub const RECORDING_MAX_SECONDS: u32 = 4 * 60 * 60;
+/// The kinds of sound a recording may be (D-208): what the app records and what a phone or a
+/// recorder saves. Anything else is refused, so the window only ever plays sound.
+pub const RECORDING_MIMES: [&str; 7] = [
+    "audio/webm",
+    "audio/ogg",
+    "audio/mp4",
+    "audio/mpeg",
+    "audio/wav",
+    "audio/x-m4a",
+    "audio/aac",
+];
 /// The reminder and the payment message.
 pub const MESSAGE_MAX: usize = 1_000;
 pub const MAX_CONTACTS: usize = 6;
@@ -59,7 +78,7 @@ pub const FEEDBACK_SOON_DAYS: i64 = 7;
 pub const NO_NEXT_VISIT_DAYS: i64 = 14;
 
 /// Every kind of visit, in the order the screens list them.
-pub const VISIT_KINDS: [VisitKind; 9] = [
+pub const VISIT_KINDS: [VisitKind; 10] = [
     VisitKind::Intake,
     VisitKind::Assessment,
     VisitKind::Observation,
@@ -69,6 +88,7 @@ pub const VISIT_KINDS: [VisitKind; 9] = [
     VisitKind::Meeting,
     VisitKind::Other,
     VisitKind::Block,
+    VisitKind::Supervision,
 ];
 
 /// Every way of paying, in the order the screens list them.
@@ -414,6 +434,16 @@ pub fn normalize_visit(mut visit: Visit) -> Visit {
     visit.status_note = clean_line(&visit.status_note);
     visit.series_id = none_if_blank(visit.series_id);
     visit.note = visit.note.trim().to_owned();
+    // A line left empty is no line (D-207).
+    visit.remember = visit
+        .remember
+        .into_iter()
+        .map(|item| RememberItem {
+            text: clean_line(&item.text),
+            done: item.done,
+        })
+        .filter(|item| !item.text.is_empty())
+        .collect();
     visit
 }
 
@@ -481,7 +511,33 @@ pub fn normalize_settings(mut settings: ClinicSettings) -> ClinicSettings {
     for task in &mut settings.starter_tasks {
         task.title = clean_line(&task.title);
     }
+    fill_kind_defaults(&mut settings);
     settings
+}
+
+/// The kinds added after settings could first be saved (D-207: supervision).
+const ADDED_KINDS: [VisitKind; 1] = [VisitKind::Supervision];
+
+/// Settings saved before a kind was added (D-207: supervision) get that kind's usual length
+/// and fee, so they can be saved again. Only settings that are whole otherwise: what else is
+/// missing stays missing, for her to see.
+pub fn fill_kind_defaults(settings: &mut ClinicSettings) {
+    let has = |kind: VisitKind, s: &ClinicSettings| s.defaults.iter().any(|d| d.kind == kind);
+    let whole = VISIT_KINDS
+        .iter()
+        .filter(|k| !ADDED_KINDS.contains(k))
+        .all(|k| has(*k, settings));
+    if !whole {
+        return;
+    }
+    let usual = ClinicSettings::default().defaults;
+    for kind in ADDED_KINDS {
+        if !has(kind, settings) {
+            if let Some(d) = usual.iter().find(|d| d.kind == kind) {
+                settings.defaults.push(*d);
+            }
+        }
+    }
 }
 
 // ------------------------------------------------------------------ validation
@@ -552,14 +608,15 @@ fn length_ok(start: u16, minutes: u16) -> Result<(), DomainError> {
 pub fn validate_visit(visit: &Visit) -> Result<(), DomainError> {
     visit_known(visit)?;
     let has_patient = visit.patient_id.as_deref().is_some_and(|id| !blank(id));
-    if visit.kind == VisitKind::Block {
+    if visit.kind.own_time() {
+        let what = kind_label(visit.kind);
         if has_patient {
-            return refuse(
-                "זמן שמור הוא בלי מטופל. כדי לקבוע פגישה עם מטופל צריך לבחור סוג פגישה אחר.",
-            );
+            return refuse(format!(
+                "{what} היא בלי מטופל. כדי לקבוע פגישה עם מטופל צריך לבחור סוג פגישה אחר."
+            ));
         }
         if visit.fee != 0 {
-            return refuse("לזמן שמור אין מחיר.");
+            return refuse(format!("ל{what} אין מחיר."));
         }
     } else if !has_patient {
         return refuse("צריך לבחור מטופל לפגישה.");
@@ -570,7 +627,16 @@ pub fn validate_visit(visit: &Visit) -> Result<(), DomainError> {
     at_most(&visit.title, SHORT_MAX, "כותרת")?;
     at_most(&visit.place, SHORT_MAX, "מקום")?;
     at_most(&visit.status_note, SHORT_MAX, "מה קרה")?;
-    at_most(&visit.note, LONG_MAX, "הערה")
+    at_most(&visit.note, LONG_MAX, "הערה")?;
+    if visit.remember.len() > REMEMBER_MAX {
+        return refuse(format!(
+            "אפשר לרשום עד {REMEMBER_MAX} דברים שלא לשכוח לפגישה אחת."
+        ));
+    }
+    for item in &visit.remember {
+        at_most(&item.text, SHORT_MAX, "לא לשכוח")?;
+    }
+    Ok(())
 }
 
 pub fn validate_repeat(repeat: Repeat) -> Result<(), DomainError> {
@@ -586,11 +652,62 @@ pub fn validate_repeat(repeat: Repeat) -> Result<(), DomainError> {
 pub fn validate_note(note: &SessionNote) -> Result<(), DomainError> {
     patient_chosen(&note.patient_id)?;
     real_date(&note.date, "תאריך")?;
-    if blank(&note.record) && blank(&note.personal) {
+    if blank(&note.record) && blank(&note.personal) && note.recordings.is_empty() {
         return refuse("הסיכום ריק. צריך לכתוב משהו ברשומה או בתרשומת האישית.");
     }
     at_most(&note.record, NOTE_MAX, "רשומה")?;
     at_most(&note.personal, NOTE_MAX, "תרשומת אישית")
+}
+
+/// The size in bytes of a recording sent in base64 (D-208), or why it is refused: not
+/// base64, empty, or larger than [`RECORDING_MAX_BYTES`]. Checked without decoding it.
+pub fn recording_bytes(data: &str) -> Result<usize, DomainError> {
+    let body = data.as_bytes();
+    if body.is_empty() {
+        return refuse("ההקלטה ריקה.");
+    }
+    if !body.len().is_multiple_of(4) {
+        return refuse("ההקלטה לא הגיעה בשלמותה. אפשר לנסות שוב.");
+    }
+    let pad = body.iter().rev().take_while(|b| **b == b'=').count();
+    let (text, tail) = body.split_at(body.len() - pad);
+    let good = |b: &u8| b.is_ascii_alphanumeric() || *b == b'+' || *b == b'/';
+    if pad > 2 || !text.iter().all(good) || tail.iter().any(|b| *b != b'=') {
+        return refuse("ההקלטה לא הגיעה בשלמותה. אפשר לנסות שוב.");
+    }
+    let bytes = body.len() / 4 * 3 - pad;
+    if bytes == 0 {
+        return refuse("ההקלטה ריקה.");
+    }
+    if bytes > RECORDING_MAX_BYTES {
+        return refuse(format!(
+            "ההקלטה גדולה מדי. אפשר לשמור הקלטה של עד {} מגה-בייט.",
+            RECORDING_MAX_BYTES / (1024 * 1024)
+        ));
+    }
+    Ok(bytes)
+}
+
+/// The kind of sound as it is kept (D-208): its main part, in lower case, when it is one of
+/// [`RECORDING_MIMES`] (`audio/webm;codecs=opus` is `audio/webm`).
+pub fn recording_mime(mime: &str) -> Result<String, DomainError> {
+    let main = mime
+        .split(';')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    let main = match main.as_str() {
+        "audio/x-wav" | "audio/wave" => "audio/wav".to_owned(),
+        "audio/mp3" => "audio/mpeg".to_owned(),
+        "audio/m4a" => "audio/x-m4a".to_owned(),
+        _ => main,
+    };
+    if RECORDING_MIMES.contains(&main.as_str()) {
+        Ok(main)
+    } else {
+        refuse("אפשר לשמור רק קובץ שמע: הקלטה מהתוכנה, או קובץ מהטלפון (m4a,‏ mp3,‏ wav,‏ ogg,‏ webm).")
+    }
 }
 
 pub fn validate_payment(payment: &Payment) -> Result<(), DomainError> {
@@ -657,8 +774,8 @@ pub fn validate_settings(settings: &ClinicSettings) -> Result<(), DomainError> {
             return refuse("משך הפגישה צריך להיות בין 5 דקות ל-12 שעות.");
         }
         fee_ok(default.fee)?;
-        if default.kind == VisitKind::Block && default.fee != 0 {
-            return refuse("לזמן שמור אין מחיר.");
+        if default.kind.own_time() && default.fee != 0 {
+            return refuse(format!("ל{} אין מחיר.", kind_label(default.kind)));
         }
     }
     if settings.places.len() > MAX_PLACES {
@@ -975,7 +1092,7 @@ pub fn default_fee(
     settings: &ClinicSettings,
     kind: VisitKind,
 ) -> Agorot {
-    if kind == VisitKind::Block {
+    if kind.own_time() {
         return 0;
     }
     patient
@@ -1191,6 +1308,7 @@ pub fn kind_label(kind: VisitKind) -> &'static str {
         VisitKind::Meeting => "פגישה מקצועית",
         VisitKind::Other => "פגישה אחרת",
         VisitKind::Block => "זמן שמור",
+        VisitKind::Supervision => "הדרכה",
         VisitKind::Unknown => "סוג לא מוכר",
     }
 }
@@ -1494,7 +1612,7 @@ impl<'a> Of<'a> {
                 display_time(visit.start)
             );
             match visit.status {
-                VisitStatus::Planned if visit.kind != VisitKind::Block => {
+                VisitStatus::Planned if !visit.kind.own_time() => {
                     let ended =
                         day < now || (day == now && visit_end(visit) <= u32::from(today.minute));
                     if ended {
@@ -2588,7 +2706,7 @@ pub fn visit_history_lines(visit: &Visit, patient_name: Option<&str>) -> Vec<Str
     push_field(&mut lines, "מקום", &visit.place);
     push_field(&mut lines, "מצב", status_label(visit.status));
     push_field(&mut lines, "מה קרה", &visit.status_note);
-    if visit.kind != VisitKind::Block {
+    if !visit.kind.own_time() {
         if visit.fee == 0 {
             lines.push("מחיר: ללא חיוב".to_owned());
         } else {
@@ -2602,6 +2720,10 @@ pub fn visit_history_lines(visit: &Visit, patient_name: Option<&str>) -> Vec<Str
         lines.push("פגישה חוזרת: כן".to_owned());
     }
     push_field(&mut lines, "הערה", &visit.note);
+    for item in &visit.remember {
+        let mark = if item.done { "✓" } else { "○" };
+        lines.push(format!("לא לשכוח: {mark} {}", item.text));
+    }
     lines
 }
 
@@ -2668,6 +2790,10 @@ pub fn note_history_lines(
         Some(_) => "תרשומת אישית: השתנתה",
     };
     lines.push(about_personal.to_owned());
+    // Like the personal note, only how many: never what is in them (D-208).
+    if !note.recordings.is_empty() {
+        lines.push(format!("הקלטות לעצמך: {}", note.recordings.len()));
+    }
     if note.case_input_id.is_some() {
         lines.push("הועבר לחומרי התיק: כן".to_owned());
     }
@@ -2737,7 +2863,7 @@ pub fn open_task_count(tasks: &[ClinicTask]) -> u32 {
 /// A visit with a patient that was not cancelled: what "a visit" means on the front page
 /// (time she blocked for herself is not one).
 fn counts_as_visit(visit: &Visit) -> bool {
-    visit.kind != VisitKind::Block && visit.status != VisitStatus::Cancelled
+    !visit.kind.own_time() && visit.status != VisitStatus::Cancelled
 }
 
 /// Visits in the week of `date` (Sunday to Saturday) that are not cancelled.

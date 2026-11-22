@@ -37,13 +37,24 @@ pub struct StoredClinicHistory {
     pub json: String,
 }
 
-const KINDS: [&str; 7] = [
-    "visit", "note", "payment", "charge", "task", "settings", "tally",
+const KINDS: [&str; 8] = [
+    "visit",
+    "note",
+    "payment",
+    "charge",
+    "task",
+    "settings",
+    "tally",
+    // The sound of a recording kept with a session note (D-208). Written with no history,
+    // left out of a patient's records, and erased with the patient.
+    "recording",
 ];
 const ACTIONS: [&str; 4] = ["created", "changed", "voided", "deleted"];
 /// What may be removed one record at a time. A payment and a charge are voided, never removed
 /// (D-172), and the settings record is only replaced: those go only with their patient.
-const REMOVABLE: [&str; 3] = ["visit", "note", "task"];
+const REMOVABLE: [&str; 4] = ["visit", "note", "task", "recording"];
+/// The sound of a recording (D-208): never written to the history.
+const RECORDING: &str = "recording";
 /// The one settings record has a fixed id.
 const SETTINGS_ID: &str = "settings";
 /// The anonymous tally of the cards that were erased (D-179): one record with a fixed id,
@@ -147,6 +158,11 @@ fn put_row(
     row: &ClinicPut,
     history: Option<&str>,
 ) -> Result<String, VaultError> {
+    if kind == RECORDING && history.is_some() {
+        return Err(VaultError::Refused(
+            "the sound of a recording is never written to the history".to_owned(),
+        ));
+    }
     let (id, patient_id, day, json) = row;
     let patient_id = patient_id.as_deref();
     let existing: Option<String> = match id {
@@ -448,16 +464,18 @@ impl Vault {
         )
     }
 
-    /// Every record of a patient, of every kind, by day then id. One that does not open is
-    /// an error: what is decided from a patient's records (an erase, what the family owes)
-    /// is never decided with a row missing.
+    /// Every record of a patient, of every kind but the sound of a recording (D-208: the note
+    /// lists it, and the sound is read only to play it), by day then id. One that does not
+    /// open is an error: what is decided from a patient's records (an erase, what the family
+    /// owes) is never decided with a row missing.
     pub fn clinic_of_patient(
         &self,
         patient_id: &str,
     ) -> Result<Vec<StoredClinicRecord>, VaultError> {
         self.clinic_query(
             &format!(
-                "SELECT {RECORD_COLUMNS} FROM clinic_records WHERE patient_id = ?1
+                "SELECT {RECORD_COLUMNS} FROM clinic_records
+                 WHERE patient_id = ?1 AND kind != 'recording'
                  ORDER BY day, id"
             ),
             &[&patient_id],
@@ -490,7 +508,7 @@ impl Vault {
                     row.1
                 )));
             }
-            if history {
+            if history && row.1 != RECORDING {
                 let rec = open_record(key, row)?;
                 history_row(
                     &tx,

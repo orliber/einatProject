@@ -48,6 +48,11 @@
       "fee": 0,
       "kind": "block",
       "minutes": 60
+    },
+    {
+      "fee": 0,
+      "kind": "supervision",
+      "minutes": 60
     }
   ],
   "holidays": true,
