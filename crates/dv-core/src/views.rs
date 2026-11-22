@@ -222,6 +222,10 @@ pub struct SectionView {
     pub guide_learned_from: u32,
     /// The lines added for this case only.
     pub case_guide: String,
+    /// The sub-headings the guide names (D-214): a paragraph line that is one of them is
+    /// shown as a heading inside the section.
+    #[serde(default)]
+    pub subheadings: Vec<String>,
     /// What the last answer for the section said beside its paragraphs (D-161): its
     /// questions, what is missing or contradicting, the guide's lines left unanswered.
     #[serde(default)]

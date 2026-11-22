@@ -208,6 +208,7 @@ impl Core {
         content: &str,
     ) -> Result<dv_domain::CaseInput, CoreError> {
         let input = self.vault_mut()?.add_input(case_id, kind, title, content)?;
+        crate::tools_list::refresh(self.vault_mut()?, case_id)?;
         self.learn_input(case_id, title, content)?;
         Ok(input)
     }
@@ -348,6 +349,8 @@ impl Core {
             None => v.add_input(case_id, InputKind::TestScores, &title, &text)?,
         };
         v.set_input_data(case_id, &input.id, &data)?;
+        // D-215: the list of tools in "כלי האבחון" follows the sheets of the case.
+        crate::tools_list::refresh(v, case_id)?;
         if input_id.is_some() {
             // As with any material changed: nothing prepared with the old scores goes.
             self.withdraw_for_material(case_id);
@@ -379,6 +382,7 @@ impl Core {
             // A request that holds the deleted material does not go.
             self.withdraw_for_material(case_id);
         }
+        crate::tools_list::refresh(self.vault_mut()?, case_id)?;
         Ok(())
     }
 

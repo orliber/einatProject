@@ -409,9 +409,16 @@ impl Core {
         let mut polish_notes = 0usize;
         let mut parts = Vec::new();
         let mut signature = settings.signature.clone();
+        // D-214: the sub-headings the sections' guides name, printed as headings in the file.
+        let mut subheadings: Vec<String> = Vec::new();
         for part in &structure.parts {
             let mut sections = Vec::new();
             for s in &part.sections {
+                for h in dv_domain::subheadings(&crate::guides::guide_for(v, &meta, s)?.text()) {
+                    if !subheadings.contains(&h) {
+                        subheadings.push(h);
+                    }
+                }
                 let mut paragraphs: Vec<String> = v
                     .drafts(case_id, &s.key)?
                     .into_iter()
@@ -572,6 +579,7 @@ impl Core {
             confidentiality: settings.confidentiality,
             font: settings.font,
             logo: self.logo()?,
+            subheadings,
             ..dv_export::Report::default()
         };
         for leftover in dv_export::leftover_placeholders(&report) {

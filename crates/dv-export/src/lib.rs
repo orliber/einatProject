@@ -118,6 +118,10 @@ pub struct Report {
     /// written into her template (which has its own).
     #[serde(default)]
     pub logo: Option<Logo>,
+    /// The sub-headings of the report's sections (D-214): a line of a paragraph that is one
+    /// of them, alone, is printed bold, as a heading inside the section.
+    #[serde(default)]
+    pub subheadings: Vec<String>,
 }
 
 impl Report {

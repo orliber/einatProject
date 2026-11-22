@@ -1214,3 +1214,19 @@ describe("the keyboard with the brief folded (D-204)", () => {
     expect(calls.some((c) => c.cmd === "keep_draft_brief")).toBe(false);
   });
 });
+
+describe("a sub-section inside a section (D-214)", () => {
+  it("shows a first line that is one of the section's sub-headings as a heading, and no other line", async () => {
+    const { page } = await openReport((d) => {
+      const s = d.sections.find((x) => x.paragraphs.some((p) => p.status === "approved"));
+      if (!s) throw new Error("no approved paragraph");
+      s.subheadings = ["שפה ותקשורת"];
+      const [first, second] = s.paragraphs;
+      if (first) first.text = "שפה ותקשורת\nהילד דיבר במשפטים קצרים.";
+      if (second) second.text = "שפה ותקשורת היא תחום חזק.";
+    });
+    const head = await within(page).findByText("שפה ותקשורת", { selector: "strong.a4-subhead" });
+    expect(head.parentElement).toHaveTextContent("הילד דיבר במשפטים קצרים.");
+    expect(page.querySelectorAll("strong.a4-subhead")).toHaveLength(1);
+  });
+});

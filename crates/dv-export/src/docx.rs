@@ -41,6 +41,16 @@ pub(crate) fn para(style: &str, text: &str, bold_prefix: Option<&str>) -> String
     p
 }
 
+/// A sub-heading inside a section (D-214): bold and underlined, in the body's own style, kept
+/// on the page of the paragraph under it.
+pub(crate) fn subheading(style: &str, text: &str) -> String {
+    format!(
+        "<w:p><w:pPr><w:pStyle w:val=\"{style}\"/><w:keepNext/><w:bidi/></w:pPr>\
+         <w:r><w:rPr><w:b/><w:bCs/><w:u w:val=\"single\"/><w:rtl/></w:rPr><w:t xml:space=\"preserve\">{}</w:t></w:r></w:p>",
+        esc(text)
+    )
+}
+
 /// The paragraph styles the body uses: (key, Word's style name, paragraph properties, size in
 /// half-points, bold, color). With her template, a style of hers with the same name wins.
 /// One row of [`STYLES`].
@@ -439,7 +449,12 @@ pub(crate) fn body(report: &Report, l: &Layout) -> String {
             p(&mut body, "Heading2", &section.title, None);
             for text in &section.paragraphs {
                 for piece in text.split('\n').filter(|t| !t.trim().is_empty()) {
-                    p(&mut body, "BodyText", piece.trim(), None);
+                    let piece = piece.trim();
+                    if report.subheadings.iter().any(|h| h == piece) {
+                        body.push_str(&subheading(l.id("BodyText"), piece));
+                    } else {
+                        p(&mut body, "BodyText", piece, None);
+                    }
                 }
             }
         }

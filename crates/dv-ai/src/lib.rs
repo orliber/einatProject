@@ -28,7 +28,7 @@ pub use request::{
     ResearchInput, SectionInput, TaggedInput, TaggedTurn, ALLOWED_MODELS, ANTHROPIC_MODELS,
     DECISION_LINE, DEFAULT_MODEL, GEMINI_MODELS, KEY_SCORES_LINE, LOCAL_MODELS, LONG_ANSWER_TOKENS,
     MISTRAL_MODELS, OPENAI_MODELS, ORDER_LINE, POINTS_LINE, REFERRAL_LINE, REFERRAL_LINE_SUMMARY,
-    RESEARCH_ALLOWED_DOMAINS, SHORT_ANSWER_TOKENS,
+    RESEARCH_ALLOWED_DOMAINS, SHORT_ANSWER_TOKENS, SUBHEADING_LINE,
 };
 pub use response::{
     numbers_not_in, parse_consult, parse_derived_section, parse_points_section, parse_section,

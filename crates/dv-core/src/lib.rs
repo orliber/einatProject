@@ -47,6 +47,7 @@ mod sorting;
 mod stage;
 mod style;
 mod system_check;
+mod tools_list;
 mod unsaved;
 pub mod update;
 mod usage;
@@ -794,6 +795,9 @@ enum PendingKind {
         /// A first draft: the guide's lines as they went out, numbered from 1, to find the
         /// ones no paragraph answers (round 29). Empty: not checked.
         guide: Vec<String>,
+        /// The guide lines that name a sub-section (D-214), by their number in the request,
+        /// each with its heading as it went out: put on the paragraph that answers the line.
+        subheads: Vec<(u32, String)>,
         /// Worded from her points only (round 30): no `S#` sources; `approved` holds the points.
         from_points: bool,
     },

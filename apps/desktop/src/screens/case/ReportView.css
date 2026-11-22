@@ -222,6 +222,12 @@
   white-space: pre-wrap;
   text-align: justify;
 }
+/* D-214: a sub-heading inside a section, as the file prints it. */
+.a4-subhead {
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
 .a4-pending {
   border-inline-start: 3px solid var(--warn-line);
   background: var(--warn-paper);

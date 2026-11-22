@@ -143,3 +143,24 @@ describe("the demo case's notes (D-161)", () => {
     expect(after?.polish).toHaveLength(1);
   });
 });
+
+describe("the second pass on her list (D-214, D-215)", () => {
+  it("reads the sub-headings of a guide, and lists the tools of the case in the tools section until she approves", async () => {
+    const { subheadingsOf } = await import("./fakeCore");
+    expect(subheadingsOf("כותרת משנה: שפה ותקשורת. מה נצפה.\nפסקה רגילה.\nכותרת משנה: SRS")).toEqual(["שפה ותקשורת", "SRS"]);
+    const core = new FakeCore();
+    const caseId = await newCase(core);
+    const detail = async () => (await core.handle("case_detail", { caseId })) as import("../ipc/generated/CaseDetail").CaseDetail;
+    const tools = async () => (await detail()).sections.find((s) => s.key === "tools")?.paragraphs ?? [];
+    const sheet = (instrument: string, module: string) => ({ instrument, module, cutoff: null, notes: "", entries: [{ measure: "total", value: instrument === "srs_2" ? 68 : 12, note: "" }] });
+    await core.handle("save_scores", { caseId, inputId: null, sheet: sheet("ados_2", "2") });
+    await core.handle("save_scores", { caseId, inputId: null, sheet: sheet("srs_2", "") });
+    const list = await tools();
+    expect(list).toHaveLength(1);
+    expect(list[0]?.text).toBe("במסגרת האבחון נעשה שימוש בכלים אלו: ADOS-2 (מודול 2), SRS-2.");
+    expect(list[0]?.status).toBe("proposed");
+    // The sections of the template carry their sub-headings to the page.
+    const all = (await detail()).sections;
+    expect(all.find((s) => s.key === "communication")?.subheadings ?? all.find((s) => s.key === "communication_quality")?.subheadings).toBeDefined();
+  });
+});

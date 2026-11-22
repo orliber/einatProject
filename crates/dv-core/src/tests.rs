@@ -43,6 +43,7 @@ mod reading;
 mod real_corpus;
 mod report_check;
 mod sample_flows;
+mod sections_fit;
 mod sort_flows;
 mod surfaces;
 mod templates;
@@ -2013,6 +2014,7 @@ fn fixed_prompt_text_never_collides_with_a_childs_name() {
         dv_ai::REFERRAL_LINE_SUMMARY,
         dv_ai::DECISION_LINE,
         dv_ai::KEY_SCORES_LINE,
+        dv_ai::SUBHEADING_LINE,
         dv_ai::prompts::LETTER_PARENTS,
         dv_ai::prompts::LETTER_SCHOOL,
         dv_ai::prompts::LETTER_TITLE_PARENTS,

@@ -567,7 +567,13 @@ function A4Section({ api, section: s, focused, onPick, onNext }: {
             edit(p.id, p.text);
           }}
           onKeyDown={(e) => paraKey(e, p)}>
-          <MarkedText text={p.text} marks={p.status === "proposed" && focused ? p.style?.marks ?? [] : []} />
+          {(() => {
+            // D-214: a first line that is one of the section's sub-headings is shown as a heading.
+            const marks = p.status === "proposed" && focused ? p.style?.marks ?? [] : [];
+            const [first = "", ...rest] = p.text.split("\n");
+            if (rest.length === 0 || !(s.subheadings ?? []).includes(first.trim())) return <MarkedText text={p.text} marks={marks} />;
+            return <><strong className="a4-subhead">{first.trim()}</strong>{"\n"}<MarkedText text={rest.join("\n")} marks={marks} /></>;
+          })()}
         </p>
         {/* D-161: everything there is to look at, in one folded line (a number unlike the
             score table, a name in the answer or a contradiction keeps a small mark on it). */}

@@ -111,6 +111,7 @@ pub fn for_parents(full: &Report, v: ParentsVersion) -> (Report, usize) {
         confidentiality: full.confidentiality.clone(),
         font: full.font.clone(),
         logo: full.logo.clone(),
+        subheadings: full.subheadings.clone(),
     };
     (report, left_out)
 }
