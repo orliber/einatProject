@@ -8,7 +8,7 @@ import type { VisitStatus } from "./VisitStatus";
  */
 export type Visit = { id: string, 
 /**
- * `None` only for her own time ([`VisitKind::own_time`]).
+ * `None` only for her own time ([`Visit::own_time`]).
  */
 patient_id: string | null, kind: VisitKind, 
 /**
