@@ -745,7 +745,13 @@ fn lay_out(report: &Report, p: &mut Pages<'_>) {
             }
             for text in &s.paragraphs {
                 for piece in text.split('\n').filter(|t| !t.trim().is_empty()) {
-                    p.paragraph(piece.trim(), 12.0, false, INK, Align::Right, 0.0, 6.0, 0.0);
+                    let piece = piece.trim();
+                    if report.subheadings.iter().any(|h| h == piece) {
+                        // D-214: a sub-heading inside the section, kept with what follows.
+                        p.paragraph(piece, 12.0, true, INK, Align::Right, 4.0, 2.0, 30.0);
+                    } else {
+                        p.paragraph(piece, 12.0, false, INK, Align::Right, 0.0, 6.0, 0.0);
+                    }
                 }
             }
         }

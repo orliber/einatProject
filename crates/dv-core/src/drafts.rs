@@ -302,6 +302,7 @@ impl Core {
                     paragraphs,
                     approved,
                     mode: s.mode,
+                    subheadings: dv_domain::subheadings(&guide.text()),
                     guide: guide.general,
                     guide_is_default: guide.is_default,
                     guide_learned_from: guide.learned_from,

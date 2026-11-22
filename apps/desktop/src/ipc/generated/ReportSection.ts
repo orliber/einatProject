@@ -17,4 +17,9 @@ guide: string,
  * Written one paragraph per material, in the order the materials are sent (D-158): the
  * background part sums up each document on its own, instead of by topic.
  */
-per_source: boolean, };
+per_source: boolean, 
+/**
+ * The guide is the order she asked for in so many words (D-214): the order learned from
+ * her past reports does not take its place. Her own edit of the guide still does.
+ */
+pinned_guide: boolean, };

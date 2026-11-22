@@ -208,6 +208,17 @@ fn brief_bands() -> Vec<Band> {
     ]
 }
 
+/// SRS-2 T-scores (mean 50, SD 10), the ranges of the manual's summary: up to 59 within
+/// normal limits, 60–65 mild, 66–75 moderate, 76 and up severe (pending her approval).
+fn srs_bands() -> Vec<Band> {
+    vec![
+        band(30.0, 59.0, "בטווח התקין", 0),
+        band(60.0, 65.0, "קושי בדרגה קלה", 1),
+        band(66.0, 75.0, "קושי בדרגה בינונית", 2),
+        band(76.0, 110.0, "קושי בדרגה חמורה", 3),
+    ]
+}
+
 /// A measure with other names it goes by in reports.
 fn with_aliases(mut x: Measure, aliases: &[&str]) -> Measure {
     x.aliases = aliases.iter().map(|a| (*a).to_owned()).collect();
@@ -572,6 +583,26 @@ fn build_table() -> Vec<Instrument> {
             min_age_months: 24,
             max_age_months: 1200,
             measures: vec![m("total", "ציון כולל", "Total", "ציונים", Cars)],
+        },
+        Instrument {
+            key: "srs_2".into(),
+            name: "SRS-2".into(),
+            description_he: "סולם תגובתיות חברתית (דיווח הורים או צוות המסגרת)".into(),
+            scale_note_he: "ציוני T (ממוצע 50, סטיית תקן 10): עד 59 בטווח התקין, 60 עד 65 קושי בדרגה קלה, 66 עד 75 בדרגה בינונית, 76 ומעלה בדרגה חמורה.".into(),
+            min_age_months: 30,
+            max_age_months: 1200,
+            measures: [
+                ("total", "ציון כולל", "Total", "סולמות"),
+                ("awareness", "מודעות חברתית", "AWR", "סולמות"),
+                ("cognition", "קוגניציה חברתית", "COG", "סולמות"),
+                ("communication", "תקשורת חברתית", "COM", "סולמות"),
+                ("motivation", "מוטיבציה חברתית", "MOT", "סולמות"),
+                ("rrb", "תחומי עניין מוגבלים והתנהגות חזרתית", "RRB", "סולמות"),
+                ("sci", "תקשורת ואינטראקציה חברתית", "SCI", "סולמות DSM-5"),
+            ]
+            .iter()
+            .map(|(k, n, a, g)| with_table(m(k, n, a, g, TConcern), 30.0, 110.0, srs_bands()))
+            .collect(),
         },
     ]
 }

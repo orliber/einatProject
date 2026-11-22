@@ -573,6 +573,11 @@ fn build_section(
     // A first draft of the whole section is checked against the guide's lines, when it has
     // two or more; a rewrite of one paragraph or a turn on a draft is not.
     let lines = dv_ai::guide_lines(&guide_tagged);
+    let subheads: Vec<(u32, String)> = lines
+        .iter()
+        .zip(1u32..)
+        .filter_map(|(l, n)| dv_domain::subheading_of(l).map(|h| (n, h.to_owned())))
+        .collect();
     // Written a paragraph per material (D-158): the guide says what to write about each one,
     // not which paragraphs the section has, so no line is missing.
     let per_material = (read.section.per_source || ask.section_key == sorting::PRIOR_SECTION)
@@ -642,6 +647,7 @@ fn build_section(
         approved,
         replaces: ask.replaces.clone(),
         guide: guide_lines,
+        subheads,
         from_points: points,
     };
     Ok((body, review, kind))
@@ -1285,6 +1291,7 @@ impl Core {
                 mode: dv_domain::SectionMode::Ai,
                 guide: String::new(),
                 per_source: false,
+                pinned_guide: false,
             },
             None => structure
                 .section(section_key)
