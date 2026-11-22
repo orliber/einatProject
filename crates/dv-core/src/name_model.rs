@@ -648,9 +648,15 @@ impl Core {
             return Vec::new();
         }
         self.name_texts = Some(Vec::new());
-        let begun = begin(self);
+        // A panic inside `begin` must not leave the list set: every later `case_hints` would
+        // then only list its texts and return no hints, silently. The list is taken first,
+        // and the panic goes on its way.
+        let begun = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| begin(self)));
         let texts = self.name_texts.take().unwrap_or_default();
-        drop(begun);
+        match begun {
+            Ok(begun) => drop(begun),
+            Err(panic) => std::panic::resume_unwind(panic),
+        }
         texts
     }
 

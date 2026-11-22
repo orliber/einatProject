@@ -183,6 +183,80 @@ fn the_model_reads_her_earlier_questions_in_a_consultation() {
     assert!(!body.contains(ONLY_THE_MODEL), "{body}");
 }
 
+/// A name that left in an answer's time (the model was off when she asked, and the answer
+/// repeated it) does not leave again as the history of her next question: the earlier answer
+/// is filtered like her earlier questions. An answer with nothing to hide goes back as it came.
+#[test]
+fn an_earlier_answer_is_filtered_again_before_it_goes_back() {
+    let fake = FakeTransport::default();
+    let (_dir, mut core, case) = setup(Some(fake.clone()));
+    let said = format!("כדאי לתאם עם {ONLY_THE_MODEL} את המעברים. [ילד] יגיב טוב לשגרה קבועה.");
+    *fake.answer.lock().unwrap() = Some(json!({
+        "stop_reason": "end_turn",
+        "content": [{ "type": "text", "text": said }],
+    }));
+    let first = core
+        .prepare_consult(Some(&case), None, "איך לעבוד על מעברים בגן?")
+        .unwrap();
+    assert!(first.blocked.is_empty(), "{:?}", first.blocked);
+    let answer = core
+        .send_consult(first.approval_id.as_deref().unwrap())
+        .unwrap();
+
+    // Without the model the answer goes back whole: the rules know nothing in it.
+    let next = core
+        .prepare_consult(
+            Some(&case),
+            Some(&answer.conversation_id),
+            "ומה לגבי הבוקר?",
+        )
+        .unwrap();
+    assert!(next.blocked.is_empty(), "{:?}", next.blocked);
+    core.send_consult(next.approval_id.as_deref().unwrap())
+        .unwrap();
+    let body = fake.sent.lock().unwrap().last().unwrap().clone();
+    assert!(body.contains("[ילד] יגיב טוב לשגרה קבועה."), "{body}");
+    assert!(body.contains(ONLY_THE_MODEL), "{body}");
+
+    // With it, the name in the earlier answer is hidden and the rest is as it came.
+    model_on(&mut core);
+    let next = core
+        .prepare_consult(
+            Some(&case),
+            Some(&answer.conversation_id),
+            "ומה לגבי הצהריים?",
+        )
+        .unwrap();
+    assert!(next.blocked.is_empty(), "{:?}", next.blocked);
+    core.send_consult(next.approval_id.as_deref().unwrap())
+        .unwrap();
+    let body = fake.sent.lock().unwrap().last().unwrap().clone();
+    assert!(body.contains("[ילד] יגיב טוב לשגרה קבועה."), "{body}");
+    assert!(!body.contains(ONLY_THE_MODEL), "{body}");
+}
+
+/// A request that panics while its texts are listed leaves the core as it was: the next
+/// request still gets the model's hints (the list of texts is not left set).
+#[test]
+fn a_panic_while_the_texts_are_listed_does_not_turn_the_hints_off() {
+    let fake = FakeTransport::default();
+    let (_dir, mut core, case) = setup(Some(fake.clone()));
+    model_on(&mut core);
+    let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        core.request_name_texts(|_| -> Result<(), CoreError> { panic!("בדיקה") })
+    }));
+    assert!(caught.is_err());
+    let p = core
+        .prepare_section(
+            &case,
+            "kindergarten",
+            &format!("להוסיף ש{ONLY_THE_MODEL} מלווה אותו לגן"),
+        )
+        .unwrap();
+    let body = sent_body(&mut core, &fake, &p);
+    assert!(!body.contains(ONLY_THE_MODEL), "{body}");
+}
+
 /// A consultation about the case: a name only the model finds, in an approved paragraph she
 /// wrote herself, is hidden in the approved sections that go with it.
 #[test]

@@ -763,13 +763,19 @@ fn build_consult(
                 text_tagged: out.tagged,
             });
         } else {
-            // Claude's own answer goes back as it came (it only ever saw tags); shown on the
-            // review screen, without name questions about Claude's own words.
-            let out = filter(tagged, ctx).map_err(internal)?;
+            // Claude's own answer saw only tags, but it is filtered again like her questions,
+            // with today's names and what the name model reads in it, and what goes out is the
+            // filtered text: a name that left before she named it (or before the model was on)
+            // and came back in the answer does not leave a second time. Shown on the review
+            // screen, without name questions about Claude's own words.
+            let out = job.hints.filter(tagged, ctx).map_err(internal)?;
             review.add_context(label("תשובה קודמת"), &out);
+            // What was hidden in it is on the card like any hidden name, so its tag is the
+            // case's and she can bring the word back.
+            review.note_hidden(&out);
             history.push(TaggedTurn {
                 role: role.clone(),
-                text_tagged: tagged.clone(),
+                text_tagged: out.tagged,
             });
         }
     }
@@ -1742,12 +1748,14 @@ impl Core {
         let hints = match &read {
             Texts::Consult(r) => {
                 let mut extra: Vec<&str> = vec![ask.message.as_str()];
-                extra.extend(
-                    r.earlier
-                        .iter()
-                        .filter(|(role, _, _)| role == "user")
-                        .map(|(_, shown, _)| shown.as_str()),
-                );
+                // Her questions as she saw them; Claude's answers as they came (tagged).
+                extra.extend(r.earlier.iter().map(|(role, shown, tagged)| {
+                    if role == "user" {
+                        shown.as_str()
+                    } else {
+                        tagged.as_str()
+                    }
+                }));
                 extra.extend(r.approved.iter().map(|(_, t)| t.as_str()));
                 self.case_hints(&key, &extra)?
             }
