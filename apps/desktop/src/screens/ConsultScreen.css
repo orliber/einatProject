@@ -378,3 +378,7 @@
   max-height: none;
   overflow: visible;
 }
+/* The main landmark around the conversation: a role for a screen reader, no box on the page. */
+.consult-main {
+  display: contents;
+}

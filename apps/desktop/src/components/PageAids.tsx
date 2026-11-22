@@ -43,7 +43,7 @@ export function usePageTitle(route: Route): void {
 /** The page's content: its `main`, or the part that stands for it (the work area of a case,
  *  the conversation of the consultation, which is a named region of its own). */
 function content(): HTMLElement | null {
-  return document.querySelector<HTMLElement>("main, [role=main], [data-page-content]");
+  return document.querySelector<HTMLElement>("[data-page-content]") ?? document.querySelector<HTMLElement>("main, [role=main]");
 }
 
 /** The first stop of the keyboard: invisible until it has the focus, then a button at the top. */

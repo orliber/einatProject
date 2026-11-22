@@ -37,6 +37,7 @@ html:has(.clinic-panel) {
   text-underline-offset: 3px;
   cursor: pointer;
   min-height: 24px;
+  min-width: 24px;
 }
 .clinic-name-link.clinic-name-strong {
   font-weight: 600;

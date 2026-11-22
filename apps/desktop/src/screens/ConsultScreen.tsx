@@ -340,6 +340,8 @@ export function ConsultScreen({ caseId }: { caseId?: string | undefined }) {
           </nav>
         </aside>
 
+        {/* The page's main, with no box of its own: the conversation keeps its name as a region. */}
+        <div role="main" className="consult-main">
         <section className="card consult-chat" aria-label="השיחה" data-page-content="">
           {turns.length > 0 && (
             <div className="consult-head">
@@ -417,6 +419,7 @@ export function ConsultScreen({ caseId }: { caseId?: string | undefined }) {
           {leftOut && <p className="hint" role="status">קטע מהשאלה לא נשלח, כי הבדיקה לא הייתה בטוחה שאין בו שם. אם הוא חשוב, אפשר לנסח אותו בלי פרטים מזהים.</p>}
           <ErrorLine error={error} />
         </section>
+        </div>
       </div>
       {review && (
         <ReviewDialog title={scope ? "שאלה על תיק" : "שאלה כללית"} caseId={scope} prepared={review.prepared}
