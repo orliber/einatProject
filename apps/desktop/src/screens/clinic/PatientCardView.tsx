@@ -43,6 +43,7 @@ import {
   TextAreaField, TextField, useDiscreet, usePaged, useShownName, VisitRow,
 } from "./parts";
 import { PathwayDialog } from "./PathwayDialog";
+import { NotesToCase } from "./NotesToCase";
 import { lastMethod, PaymentDialog, visitCharge } from "./PaymentDialog";
 import { PatientDialog } from "./PatientDialog";
 import { VisitDialog } from "./VisitDialog";
@@ -599,6 +600,7 @@ function NotesBox({ card, onNew, onEdit }: { card: PatientCard; onNew: () => voi
           </span>
         </div>
       )}
+      <NotesToCase card={card} />
       {card.notes.length === 0
         ? <p className="muted clinic-quiet">עוד אין סיכומים. סיכום של פגישה נכתב מהשורה שלה, בלחיצה על "לכתוב סיכום".</p>
         : found.length === 0
