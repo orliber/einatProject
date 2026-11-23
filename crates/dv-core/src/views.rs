@@ -222,6 +222,10 @@ pub struct SectionView {
     pub guide_learned_from: u32,
     /// The lines added for this case only.
     pub case_guide: String,
+    /// The sub-headings the guide names (D-214): a paragraph line that is one of them is
+    /// shown as a heading inside the section.
+    #[serde(default)]
+    pub subheadings: Vec<String>,
     /// What the last answer for the section said beside its paragraphs (D-161): its
     /// questions, what is missing or contradicting, the guide's lines left unanswered.
     #[serde(default)]
@@ -299,7 +303,13 @@ pub struct PriorRecordView {
     pub kind: String,
     pub by: String,
     pub setting: dv_domain::Setting,
+    /// Why the child was referred to that assessment (D-209).
+    pub referral: String,
     pub findings: String,
+    /// Strengths and weaknesses, as that report states them (D-209).
+    pub strengths: String,
+    /// That report's own summary (D-209).
+    pub summary: String,
     pub recommendations: String,
     /// Month and year as written in the document ("3/2024"), read here; empty when none.
     pub date: String,

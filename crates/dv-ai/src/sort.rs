@@ -87,10 +87,13 @@ fn schema(sections: &[SortSection]) -> Value {
                                 "kind": {"type": "string"},
                                 "by": {"type": "string"},
                                 "setting": {"type": "string", "enum": ["institute", "community", "unknown"]},
+                                "referral": {"type": "string"},
                                 "findings": {"type": "string"},
+                                "strengths": {"type": "string"},
+                                "summary": {"type": "string"},
                                 "recommendations": {"type": "string"}
                             },
-                            "required": ["kind", "by", "setting", "findings", "recommendations"],
+                            "required": ["kind", "by", "setting", "referral", "findings", "strengths", "summary", "recommendations"],
                             "additionalProperties": false
                         }
                     },
@@ -190,7 +193,14 @@ struct RawRecord {
     kind: String,
     by: String,
     setting: String,
+    /// The three fields of D-209 are missing in an answer to an older request.
+    #[serde(default)]
+    referral: String,
     findings: String,
+    #[serde(default)]
+    strengths: String,
+    #[serde(default)]
+    summary: String,
     recommendations: String,
 }
 
@@ -232,10 +242,15 @@ fn reading_of(raw: RawMaterial, ignored: &mut u32) -> Reading {
         let fields = [
             bounded(&r.kind, RECORD_FIELD_MAX),
             bounded(&r.by, RECORD_FIELD_MAX),
+            bounded(&r.referral, RECORD_FIELD_MAX),
             bounded(&r.findings, RECORD_FIELD_MAX),
+            bounded(&r.strengths, RECORD_FIELD_MAX),
+            bounded(&r.summary, RECORD_FIELD_MAX),
             bounded(&r.recommendations, RECORD_FIELD_MAX),
         ];
-        let [Some(kind), Some(by), Some(findings), Some(recommendations)] = fields else {
+        let [Some(kind), Some(by), Some(referral), Some(findings), Some(strengths), Some(summary), Some(recommendations)] =
+            fields
+        else {
             drop();
             return None;
         };
@@ -244,7 +259,10 @@ fn reading_of(raw: RawMaterial, ignored: &mut u32) -> Reading {
             kind,
             by,
             setting: Setting::from_key(r.setting.trim()),
+            referral,
             findings,
+            strengths,
+            summary,
             recommendations,
         })
     });

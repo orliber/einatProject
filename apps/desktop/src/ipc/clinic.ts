@@ -12,6 +12,8 @@
 //   case_choices → cases · link_case → patient · create_case → case
 //   holidays → holidays · free_slots → slots · propose_pathway → proposed · save_pathway → saved
 //   starter_tasks → tasks · insights → insights
+//   save_recording, delete_recording → note · recording → sound (D-208)
+//   search_notes → found (D-216)
 import { ipc, type UiError } from "./client";
 import type { CaseChoice } from "./generated/CaseChoice";
 import type { CaseLink } from "./generated/CaseLink";
@@ -26,11 +28,13 @@ import type { Holiday } from "./generated/Holiday";
 import type { Insights } from "./generated/Insights";
 import type { IncomeYear } from "./generated/IncomeYear";
 import type { MessageKind } from "./generated/MessageKind";
+import type { NoteSearch } from "./generated/NoteSearch";
 import type { Overview } from "./generated/Overview";
 import type { Patient } from "./generated/Patient";
 import type { PatientCard } from "./generated/PatientCard";
 import type { PatientRow } from "./generated/PatientRow";
 import type { Payment } from "./generated/Payment";
+import type { RecordingSound } from "./generated/RecordingSound";
 import type { Repeat } from "./generated/Repeat";
 import type { SavedVisits } from "./generated/SavedVisits";
 import type { Scope } from "./generated/Scope";
@@ -88,6 +92,12 @@ export const clinicApi = {
   deleteNote: (id: string): Promise<void> => done({ op: "delete_note", id }),
   /** Copies the formal record (never the personal note) into the patient's case. */
   noteToCase: (id: string): Promise<SessionNote> => ask({ op: "note_to_case", id }, "note"),
+  /** Keeps a recording with a note (D-208); `noteId` empty: the visit's note, or a new one. `data` is base64. */
+  saveRecording: (a: { patientId: string; noteId: string; visitId: string | null; date: string; mime: string; seconds: number; name: string; data: string }): Promise<SessionNote> =>
+    ask({ op: "save_recording", patient_id: a.patientId, note_id: a.noteId, visit_id: a.visitId, date: a.date, mime: a.mime, seconds: a.seconds, name: a.name, data: a.data }, "note"),
+  /** The sound of a recording, to play; it never goes anywhere else. */
+  recording: (id: string): Promise<RecordingSound> => ask({ op: "recording", id }, "sound"),
+  deleteRecording: (noteId: string, id: string): Promise<SessionNote> => ask({ op: "delete_recording", note_id: noteId, id }, "note"),
   savePayment: (payment: Payment): Promise<Payment> => ask({ op: "save_payment", payment }, "payment"),
   voidPayment: (id: string, reason: string): Promise<Payment> => ask({ op: "void_payment", id, reason }, "payment"),
   saveCharge: (charge: Charge): Promise<Charge> => ask({ op: "save_charge", charge }, "charge"),
@@ -99,6 +109,8 @@ export const clinicApi = {
   diary: (month: string): Promise<DiaryMonth> => ask({ op: "diary", month }, "diary"),
   income: (year: number): Promise<IncomeYear> => ask({ op: "income", year }, "income"),
   history: (recordId: string): Promise<HistoryEntry[]> => ask({ op: "history", record_id: recordId }, "history"),
+  /** The session notes of every card that hold all the words of `text` (D-216); `personal`: read the personal notes too. */
+  searchNotes: (text: string, personal: boolean): Promise<NoteSearch> => ask({ op: "search_notes", text, personal }, "found"),
   settings: (): Promise<ClinicSettings> => ask({ op: "settings" }, "settings"),
   saveSettings: (settings: ClinicSettings): Promise<ClinicSettings> => ask({ op: "save_settings", settings }, "settings"),
   /** The filled text of a message to the parents, for her to copy. */

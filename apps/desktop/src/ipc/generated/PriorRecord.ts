@@ -13,4 +13,16 @@ kind: string,
 /**
  * Who did it, by role.
  */
-by: string, setting: Setting, findings: string, recommendations: string, };
+by: string, setting: Setting, 
+/**
+ * Why the child was referred to that assessment (D-209). Empty in a record read before.
+ */
+referral: string, findings: string, 
+/**
+ * The child's strengths and weaknesses, as that report states them (D-209).
+ */
+strengths: string, 
+/**
+ * That report's own summary (D-209).
+ */
+summary: string, recommendations: string, };

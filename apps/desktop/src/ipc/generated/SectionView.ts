@@ -34,6 +34,11 @@ guide_learned_from: number,
  */
 case_guide: string, 
 /**
+ * The sub-headings the guide names (D-214): a paragraph line that is one of them is
+ * shown as a heading inside the section.
+ */
+subheadings: Array<string>, 
+/**
  * What the last answer for the section said beside its paragraphs (D-161): its
  * questions, what is missing or contradicting, the guide's lines left unanswered.
  */

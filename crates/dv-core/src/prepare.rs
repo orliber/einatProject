@@ -573,6 +573,11 @@ fn build_section(
     // A first draft of the whole section is checked against the guide's lines, when it has
     // two or more; a rewrite of one paragraph or a turn on a draft is not.
     let lines = dv_ai::guide_lines(&guide_tagged);
+    let subheads: Vec<(u32, String)> = lines
+        .iter()
+        .zip(1u32..)
+        .filter_map(|(l, n)| dv_domain::subheading_of(l).map(|h| (n, h.to_owned())))
+        .collect();
     // Written a paragraph per material (D-158): the guide says what to write about each one,
     // not which paragraphs the section has, so no line is missing.
     let per_material = (read.section.per_source || ask.section_key == sorting::PRIOR_SECTION)
@@ -642,6 +647,7 @@ fn build_section(
         approved,
         replaces: ask.replaces.clone(),
         guide: guide_lines,
+        subheads,
         from_points: points,
     };
     Ok((body, review, kind))
@@ -763,13 +769,19 @@ fn build_consult(
                 text_tagged: out.tagged,
             });
         } else {
-            // Claude's own answer goes back as it came (it only ever saw tags); shown on the
-            // review screen, without name questions about Claude's own words.
-            let out = filter(tagged, ctx).map_err(internal)?;
+            // Claude's own answer saw only tags, but it is filtered again like her questions,
+            // with today's names and what the name model reads in it, and what goes out is the
+            // filtered text: a name that left before she named it (or before the model was on)
+            // and came back in the answer does not leave a second time. Shown on the review
+            // screen, without name questions about Claude's own words.
+            let out = job.hints.filter(tagged, ctx).map_err(internal)?;
             review.add_context(label("תשובה קודמת"), &out);
+            // What was hidden in it is on the card like any hidden name, so its tag is the
+            // case's and she can bring the word back.
+            review.note_hidden(&out);
             history.push(TaggedTurn {
                 role: role.clone(),
-                text_tagged: tagged.clone(),
+                text_tagged: out.tagged,
             });
         }
     }
@@ -1285,6 +1297,7 @@ impl Core {
                 mode: dv_domain::SectionMode::Ai,
                 guide: String::new(),
                 per_source: false,
+                pinned_guide: false,
             },
             None => structure
                 .section(section_key)
@@ -1299,10 +1312,18 @@ impl Core {
                     .to_owned(),
             ));
         }
+        // D-210: also a section with no material linked to it. Only her points go then too,
+        // so nothing of the case leaves that a section of her own would keep.
         if points && !own {
-            return Err(CoreError::Refused(
-                "ניסוח מהנקודות שלך הוא לסעיפים שאת כותבת בעצמך.".to_owned(),
-            ));
+            let unfed = letter.is_none()
+                && !DERIVED_SECTIONS.contains(&section_key)
+                && read_sources(self.vault_ref()?, &structure, case_id, section_key)?.is_empty();
+            if !unfed {
+                return Err(CoreError::Refused(
+                    "ניסוח מהנקודות שלך הוא לסעיפים שאת כותבת בעצמך, ולסעיף שאין לו חומרים מקושרים. לסעיף הזה יש חומרים, ולכן הוא מנוסח מהם."
+                        .to_owned(),
+                ));
+            }
         }
         // A paragraph worded again is a small job; a whole section is not (D-137).
         let model = if ask.replaces.is_some() {
@@ -1734,12 +1755,14 @@ impl Core {
         let hints = match &read {
             Texts::Consult(r) => {
                 let mut extra: Vec<&str> = vec![ask.message.as_str()];
-                extra.extend(
-                    r.earlier
-                        .iter()
-                        .filter(|(role, _, _)| role == "user")
-                        .map(|(_, shown, _)| shown.as_str()),
-                );
+                // Her questions as she saw them; Claude's answers as they came (tagged).
+                extra.extend(r.earlier.iter().map(|(role, shown, tagged)| {
+                    if role == "user" {
+                        shown.as_str()
+                    } else {
+                        tagged.as_str()
+                    }
+                }));
                 extra.extend(r.approved.iter().map(|(_, t)| t.as_str()));
                 self.case_hints(&key, &extra)?
             }

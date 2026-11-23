@@ -2,6 +2,7 @@ import { useState } from "react";
 import { ActionsMenu, type MenuItem } from "../../components/Menu";
 import { UploadIcon } from "../../components/ui";
 import type { StyleOverview, StyleSourceView } from "../../ipc/client";
+import { MyReportDialog } from "../../components/ReadDocs";
 import { dateOf, sinceLabel } from "./labels";
 
 // הסגנון שלי · my reports
@@ -15,6 +16,8 @@ export function Reports(props: {
 }) {
   const { o } = props;
   const [list, setList] = useState(false);
+  /** D-212: the report opened to read. */
+  const [reading, setReading] = useState<StyleSourceView | null>(null);
   const last = Math.max(...o.sources.map((s) => s.added_at));
   const notRead = o.sources.filter((s) => !s.analyzed).length;
   return (
@@ -40,7 +43,7 @@ export function Reports(props: {
             <li key={s.id} className="style-source">
               <span className="fmt">{s.format.toUpperCase()}</span>
               <div className="stack grow" style={{ gap: 4 }}>
-                <strong>{s.title}</strong>
+                <button type="button" className="link-btn style-source-open" title="לפתוח את הדוח לקריאה" onClick={() => setReading(s)}><strong>{s.title}</strong></button>
                 <span className="muted small">
                   נוסף ב-{dateOf(s.added_at)} · {s.words.toLocaleString("he-IL")} מילים · {s.headings.join(" · ")}
                 </span>
@@ -55,11 +58,13 @@ export function Reports(props: {
                     </span>
                   )
                 : <span className="chip chip-warn">עוד לא נותח</span>}
+              <button type="button" className="btn btn-small" onClick={() => setReading(s)}>לקריאה</button>
               <button type="button" className="btn btn-small btn-danger-quiet" onClick={() => props.onDelete(s)}>מחיקה</button>
             </li>
           ))}
         </ul>
       )}
+      {reading && <MyReportDialog id={reading.id} title={reading.title} onClose={() => setReading(null)} />}
     </section>
   );
 }

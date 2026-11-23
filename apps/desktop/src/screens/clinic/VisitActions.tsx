@@ -11,6 +11,7 @@ import type { Visit } from "../../ipc/generated/Visit";
 import type { VisitView } from "../../ipc/generated/VisitView";
 import { formatDate, formatTime, visitEnded, visitStep } from "./format";
 import { useShownName } from "./parts";
+import { visitCharge } from "./PaymentDialog";
 import { SendMenu } from "./SendMenu";
 
 /** The focus is nowhere: on the page itself, or on an element that has left it. */
@@ -25,13 +26,16 @@ export function focusLost(): boolean {
  * On the card (`onCard`) the "⋯" is named by the visit's date, there is no reminder
  * (`reminders={false}`), and "לא הגיעו" is offered (`onNoShow`).
  */
-export function VisitActions({ view, patientId, now, onHold, onNote, onOpen, onNoShow, reminders = true, onCard = false, follow = false }: {
+export function VisitActions({ view, patientId, now, onHold, onNote, onOpen, onNoShow, onPay, reminders = true, onCard = false, follow = false }: {
   view: VisitView;
   patientId: string;
   now: Today;
   onHold: (v: Visit) => void;
-  onNote: (v: Visit) => void;
+  /** With `record`, from "להקליט לעצמך": the note opens and a recording starts (D-208). */
+  onNote: (v: Visit, record?: boolean) => void;
   onOpen: () => void;
+  /** The lists (not the card, which has "תקבול חדש"): "לרשום תקבול" in "⋯" of a visit that charges. */
+  onPay?: (v: Visit) => void;
   /** The card only: "לא הגיעו" in "⋯". */
   onNoShow?: (v: Visit) => void;
   /** False on the card, which has no reminder. */
@@ -85,6 +89,11 @@ export function VisitActions({ view, patientId, now, onHold, onNote, onOpen, onN
     ...(due && step !== "hold" ? [{ label: "התקיימה", run: () => onHold(v) }] : []),
     ...(due && onNoShow ? [{ label: "לא הגיעו", run: () => onNoShow(v) }] : []),
     ...(v.status !== "cancelled" && step !== "note" ? [{ label: view.has_note ? "לפתוח את הסיכום" : "לכתוב סיכום", run: () => onNote(v) }] : []),
+    // Right after a session, a few words aloud for herself (D-208): once it has begun.
+    ...(v.status !== "cancelled" && v.status !== "no_show" && (v.date < now.date || (v.date === now.date && v.start <= now.minute)) ? [{ label: "להקליט לעצמך", run: () => onNote(v, true) }] : []),
+    // The family pays at the end of the session: recorded from the same row, for a visit that
+    // charges (held with a fee, or missed and charged anyway).
+    ...(onPay && visitCharge(v) > 0 ? [{ label: "לרשום תקבול", run: () => onPay(v) }] : []),
     // Always last, so the menu is never empty.
     { label: "לפתוח את הפגישה", run: onOpen },
   ];

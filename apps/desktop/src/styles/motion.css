@@ -213,3 +213,104 @@ li {
     animation-delay: 0ms !important;
   }
 }
+
+/* A touch screen or a pen (a laptop with a touch screen, a tablet): everything she presses is
+   at least 44px (WCAG 2.5.5), without changing the layout for a mouse. */
+@media (pointer: coarse) {
+  .btn,
+  .icon-btn,
+  .link-btn,
+  .subbar-link,
+  .topbar-area,
+  .input,
+  .select,
+  .settings-nav-btn,
+  .contents-item,
+  .stage,
+  .case-back,
+  [role="menuitem"],
+  [role="tab"],
+  [role="radio"] {
+    min-height: 44px;
+  }
+  .icon-btn,
+  .tree-arrow {
+    min-width: 44px;
+  }
+  .clinic-name-link {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
+  input[type="checkbox"],
+  input[type="radio"] {
+    width: 24px;
+    height: 24px;
+  }
+  label:has(> input[type="checkbox"]),
+  label:has(> input[type="radio"]) {
+    min-height: 44px;
+    align-items: center;
+  }
+}
+
+/* The safety net for "reduce motion": whatever a component's own stylesheet forgot, nothing
+   slides, fades or spins for longer than a blink. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Windows "contrast themes" (forced colours): backgrounds and shadows are dropped by the
+   system, so whatever said "you are here" or "this is chosen" by a fill or a halo says it with
+   a line instead (WCAG 1.4.1, 1.4.11, 2.4.7). */
+@media (forced-colors: active) {
+  :focus-visible {
+    outline: 2px solid Highlight;
+    outline-offset: 2px;
+  }
+  .chat-input:focus-within,
+  .a4-edit-text:focus,
+  .menu-item[data-highlighted],
+  [role="option"][aria-selected="true"] {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
+  .topbar-area-on,
+  .subbar-on,
+  [aria-current="page"],
+  [aria-current="true"],
+  [role="tab"][aria-selected="true"],
+  [role="radio"][aria-checked="true"],
+  [aria-pressed="true"] {
+    outline: 2px solid Highlight;
+    outline-offset: -3px;
+  }
+  .card,
+  .dialog,
+  .chip,
+  .toast,
+  .cal-visit,
+  .skip-link:focus {
+    border: 1px solid CanvasText;
+  }
+  /* A bar of progress is a fill: it keeps its own colours so it can be read. */
+  progress,
+  .clinic-bar-track,
+  .clinic-bar-track *,
+  .chart-bar,
+  .insights-col-bar,
+  .insights-day-bar,
+  .insights-hbar,
+  .insights-rank-bar,
+  .switch,
+  .switch * {
+    forced-color-adjust: none;
+  }
+}

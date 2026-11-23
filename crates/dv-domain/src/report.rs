@@ -49,6 +49,55 @@ pub struct ReportSection {
     /// background part sums up each document on its own, instead of by topic.
     #[serde(default)]
     pub per_source: bool,
+    /// The guide is the order she asked for in so many words (D-214): the order learned from
+    /// her past reports does not take its place. Her own edit of the guide still does.
+    #[serde(default)]
+    pub pinned_guide: bool,
+}
+
+/// How a guide line names a sub-section (D-214): "כותרת משנה: <the heading>. <what to write>".
+pub const SUBHEADING_MARK: &str = "כותרת משנה:";
+
+/// The sub-heading a guide line asks for, if it names one: the words between the mark and the
+/// first full stop (or the end of the line).
+#[must_use]
+pub fn subheading_of(line: &str) -> Option<&str> {
+    let rest = line.trim().strip_prefix(SUBHEADING_MARK)?;
+    let head = rest.split_once('.').map_or(rest, |(h, _)| h).trim();
+    (!head.is_empty()).then_some(head)
+}
+
+/// The sub-headings of a guide, in its order.
+#[must_use]
+pub fn subheadings(guide: &str) -> Vec<String> {
+    guide
+        .lines()
+        .filter_map(subheading_of)
+        .map(str::to_owned)
+        .collect()
+}
+
+/// `text` with `heading` on a line of its own at its top (D-214). A heading the text already
+/// opens with, alone on its line or followed by a colon, a full stop or a dash, is not
+/// written twice. The rest of the text is kept as it is.
+#[must_use]
+pub fn with_subheading(text: &str, heading: &str) -> String {
+    let body = text.trim_start();
+    let rest = body.strip_prefix(heading).map_or(body, |r| {
+        let cut = r.trim_start_matches([':', '.', '-', '–', '—', ' ', '\t']);
+        // "שפה ותקשורתית ..." only begins like the heading: nothing is cut from it.
+        if cut.len() == r.len() && !r.is_empty() && !r.starts_with(['\n', '\r']) {
+            body
+        } else {
+            cut
+        }
+    });
+    let rest = rest.trim_start();
+    if rest.is_empty() {
+        heading.to_owned()
+    } else {
+        format!("{heading}\n{rest}")
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -142,12 +191,13 @@ mod tests {
         }
         assert!(s.contains("behavior_attention"));
         assert_eq!(s.sections().count(), 17);
-        // The institute's order: communication before adaptive, DSM right after communication.
+        // Her order (D-214): communication (ADOS, SRS), then ABAS, and only then DSM-5.
         let keys: Vec<&str> = s.sections().map(|x| x.key.as_str()).collect();
         let at = |k: &str| keys.iter().position(|x| *x == k).unwrap();
         assert!(at("cognitive") < at("communication"));
-        assert_eq!(at("dsm"), at("communication") + 1);
-        assert!(at("adaptive") < at("behavior_attention"));
+        assert_eq!(at("adaptive"), at("communication") + 1);
+        assert_eq!(at("dsm"), at("adaptive") + 1);
+        assert!(at("dsm") < at("behavior_attention"));
         assert!(at("behavior_attention") < at("emotional"));
         // Hers to write by default: the impression and the emotional section.
         let own: Vec<&str> = s
@@ -176,6 +226,50 @@ mod tests {
             DEFAULT_TEMPLATE
         );
         assert!(ReportStructure::for_template(Some("other-v9")).is_err());
+    }
+
+    /// D-214: the sub-sections she asked for are lines of the guide that name a heading, and
+    /// the heading is put on the paragraph in code, once.
+    #[test]
+    fn a_guide_line_names_a_subheading_and_it_is_written_once() {
+        let s = ReportStructure::for_template(Some(INSTITUTE_TEMPLATE)).unwrap();
+        assert_eq!(
+            subheadings(&s.section("communication").unwrap().guide),
+            [
+                "אבחון ADOS",
+                "שפה ותקשורת",
+                "אינטראקציה חברתית הדדית",
+                "משחק והתנהגויות סטריאוטיפיות",
+                "SRS"
+            ]
+        );
+        assert_eq!(
+            subheadings(&s.section("adaptive").unwrap().guide),
+            [
+                "תפקוד יומיומי מסתגל (ABAS)",
+                "הציון הכללי",
+                "התחום המושגי",
+                "התחום החברתי",
+                "התחום המעשי"
+            ]
+        );
+        assert!(s.section("summary").unwrap().pinned_guide);
+        assert_eq!(subheading_of("פסקה על המבחן."), None);
+        assert_eq!(subheading_of("כותרת משנה: SRS"), Some("SRS"));
+        let h = "שפה ותקשורת";
+        for given in [
+            "הילד דיבר במשפטים.",
+            "שפה ותקשורת: הילד דיבר במשפטים.",
+            "שפה ותקשורת\nהילד דיבר במשפטים.",
+            "שפה ותקשורת - הילד דיבר במשפטים.",
+        ] {
+            assert_eq!(with_subheading(given, h), "שפה ותקשורת\nהילד דיבר במשפטים.");
+        }
+        // A sentence that only begins like the heading is kept whole.
+        assert_eq!(
+            with_subheading("שפה ותקשורתית טובה.", h),
+            "שפה ותקשורת\nשפה ותקשורתית טובה."
+        );
     }
 
     #[test]

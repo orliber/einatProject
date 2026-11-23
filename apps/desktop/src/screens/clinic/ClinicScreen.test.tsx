@@ -346,7 +346,7 @@ describe("the front page by the time (D-204)", () => {
 
     // What is not the step waits in "⋯", always ending with the visit itself; a visit that has
     // begun offers no reminder there either.
-    expect(await menuOf(user, rowOf("תמר"))).toEqual(["לכתוב סיכום", "לפתוח את הפגישה"]);
+    expect(await menuOf(user, rowOf("תמר"))).toEqual(["לכתוב סיכום", "להקליט לעצמך", "לפתוח את הפגישה"]);
     expect(await menuOf(user, rowOf("מאיה"))).toEqual(["התקיימה", "לכתוב סיכום", "לפתוח את הפגישה"]);
     await fromMenu(user, rowOf("מאיה"), "לפתוח את הפגישה");
     const dialog = await screen.findByRole("dialog", { name: "פרטי הפגישה" });
@@ -609,7 +609,7 @@ describe("discreet mode in the dialogs", () => {
     const dialog = await screen.findByRole("dialog", { name: "סיכום מפגש אבחון" });
     await within(dialog).findByLabelText("רשומה");
     expect(within(dialog).queryByLabelText("תרשומת אישית")).toBeNull();
-    expect(dialog).toHaveTextContent("התרשומת האישית מוסתרת במצב דיסקרטי.");
+    expect(dialog).toHaveTextContent("התרשומת האישית וההקלטות מוסתרות במצב דיסקרטי.");
     expect(within(dialog).queryByDisplayValue("לבדוק שוב קשב בפעם הבאה.")).toBeNull();
     expect(dialog).not.toHaveTextContent("לבדוק שוב קשב");
 
@@ -760,7 +760,7 @@ describe("the session note", () => {
     const personal = within(dialog).getByLabelText("תרשומת אישית");
     expect(record).not.toBe(personal);
     expect(record).toHaveAccessibleDescription("זו הרשומה הרשמית של הפגישה. המשפחה רשאית לבקש לעיין בה.");
-    expect(personal).toHaveAccessibleDescription("שלך בלבד: מחשבות והשערות לעצמך. היא לא מודפסת, לא מיוצאת ולא עוברת לתיק האבחון.");
+    expect(personal).toHaveAccessibleDescription("שלך בלבד: מחשבות והשערות לעצמך, בכתב או בהקלטה. הן לא מודפסות, לא מיוצאות ולא עוברות לתיק האבחון.");
     expect(await a11yViolations(view.baseElement)).toEqual([]);
     // Nothing to save yet.
     expect(within(dialog).getByRole("button", { name: "שמירה" })).toBeDisabled();
@@ -770,7 +770,7 @@ describe("the session note", () => {
     await user.click(within(dialog).getByRole("button", { name: "שמירה" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     const sent = requests().find((r) => r.op === "save_note");
-    expect(sent).toMatchObject({ note: { id: "", record: "שיתפה פעולה לאורך המפגש.", personal: "לבדוק שוב קשב בפעם הבאה.", date: "2026-11-15", case_input_id: null } });
+    expect(sent).toMatchObject({ note: { id: "", record: "שיתפה פעולה לאורך המפגש.", personal: "לבדוק שוב קשב בפעם הבאה.", date: "2026-11-15", case_input_id: null, recordings: [] } });
     expect(sent?.op === "save_note" && sent.note.visit_id).toMatch(/^visit-/);
 
     // The row says there is a note; opening it again shows each text in its own box.
@@ -1010,5 +1010,202 @@ describe("the visit dialog", () => {
     expect(requests().find((r) => r.op === "delete_visit")).toMatchObject({ scope: "one" });
     expect(notes).toContain("הפגישה נמחקה");
     await waitFor(() => expect(within(todays()).queryByRole("button", { name: "איתי" })).toBeNull());
+  });
+});
+
+describe("supervision, what not to forget, and recordings (D-207, D-208)", () => {
+  it("a supervision without a child is her own time: no fee, and its own words", async () => {
+    const { user, requests } = await openClinic();
+    await within(todays()).findByRole("button", { name: "תמר" });
+    await user.click(screen.getByRole("button", { name: "פגישה חדשה" }));
+    const dialog = await screen.findByRole("dialog", { name: "פגישה חדשה" });
+    await user.selectOptions(await within(dialog).findByLabelText("סוג הפגישה"), "הדרכה");
+    expect(within(dialog).getByLabelText("על איזה ילד (לא חובה)")).toBeInTheDocument();
+    expect(within(dialog).queryByLabelText("מחיר")).toBeNull();
+    expect(dialog).toHaveTextContent("הדרכה של צוות, גננת או מטפלת אחרת");
+    await user.type(within(dialog).getByLabelText("עם מי או על מה (לא חובה)"), "הדרכה קבוצתית");
+    await user.click(within(dialog).getByRole("button", { name: "קביעת הפגישה" }));
+    await waitFor(() => expect(requests().find((r) => r.op === "save_visit")).toBeDefined());
+    expect(requests().find((r) => r.op === "save_visit")).toMatchObject({ visit: { kind: "supervision", patient_id: null, fee: 0, title: "הדרכה קבוצתית" } });
+  });
+
+  it("a supervision about a child (the kindergarten teacher, the staff) goes on the child's card, with a fee", async () => {
+    const { user, requests } = await openClinic();
+    await within(todays()).findByRole("button", { name: "תמר" });
+    await user.click(screen.getByRole("button", { name: "פגישה חדשה" }));
+    const dialog = await screen.findByRole("dialog", { name: "פגישה חדשה" });
+    await user.selectOptions(await within(dialog).findByLabelText("סוג הפגישה"), "הדרכה");
+    await user.type(within(dialog).getByLabelText("על איזה ילד (לא חובה)"), "אית");
+    await user.click(await within(dialog).findByRole("option", { name: "איתי" }));
+    const fee = await within(dialog).findByLabelText("מחיר");
+    await user.clear(fee);
+    await user.type(fee, "300");
+    // Without the child the fee is hidden; picking the child again brings back what she typed.
+    await user.click(within(dialog).getByRole("button", { name: "החלפה" }));
+    expect(within(dialog).queryByLabelText("מחיר")).toBeNull();
+    await user.type(within(dialog).getByLabelText("על איזה ילד (לא חובה)"), "אית");
+    await user.click(await within(dialog).findByRole("option", { name: "איתי" }));
+    expect(await within(dialog).findByLabelText("מחיר")).toHaveValue("300");
+    await user.type(within(dialog).getByLabelText("עם מי או על מה (לא חובה)"), "הדרכת הגננת");
+    await user.click(within(dialog).getByRole("button", { name: "קביעת הפגישה" }));
+    await waitFor(() => expect(requests().find((r) => r.op === "save_visit")).toBeDefined());
+    const sent = requests().find((r) => r.op === "save_visit") as { visit: { patient_id: string | null } };
+    expect(sent).toMatchObject({ visit: { kind: "supervision", fee: 30_000, title: "הדרכת הגננת" } });
+    expect(sent.visit.patient_id).not.toBeNull();
+  });
+
+  it("what not to forget is written in the visit, shown first when it is opened, and under its row (only how many when discreet)", async () => {
+    const { user, requests } = await openClinic();
+    await within(todays()).findByRole("button", { name: "מאיה" });
+    await user.click(within(rowOf("מאיה")).getByRole("button", { name: /פתיחת הפגישה של מאיה/ }));
+    const dialog = await screen.findByRole("dialog", { name: "פרטי הפגישה" });
+    const group = await within(dialog).findByRole("group", { name: "לא לשכוח לקראת הפגישה" });
+    // It comes before the rest of the visit's details.
+    const kind = within(dialog).getByLabelText("סוג הפגישה");
+    expect(group.compareDocumentPosition(kind) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await user.type(within(group).getByLabelText("דבר חדש שלא לשכוח"), "לדבר עם הגננת{Enter}");
+    await user.type(within(group).getByLabelText("דבר חדש שלא לשכוח"), "להביא שאלונים");
+    await user.click(within(group).getByRole("button", { name: "הוספה" }));
+    await user.click(within(group).getByLabelText("להביא שאלונים"));
+    expect(within(group).getByLabelText("להביא שאלונים")).toBeChecked();
+    await user.click(within(dialog).getByRole("button", { name: "שמירה" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(requests().find((r) => r.op === "save_visit")).toMatchObject({
+      visit: { remember: [{ text: "לדבר עם הגננת", done: false }, { text: "להביא שאלונים", done: true }] },
+    });
+    // Only what is still not done, under the row.
+    expect(await within(rowOf("מאיה")).findByText("לא לשכוח: לדבר עם הגננת")).toBeInTheDocument();
+    await user.click(screen.getByRole("switch", { name: "מצב דיסקרטי" }));
+    const row = within(todays()).getAllByRole("listitem").find((li) => li.textContent?.includes("דבר אחד שלא לשכוח"));
+    expect(row).toBeDefined();
+    expect(todays()).not.toHaveTextContent("לדבר עם הגננת");
+  });
+
+  it("a recording from a file is kept with the note, played from the vault, and removed", async () => {
+    const urls: string[] = [];
+    const created = vi.fn(() => {
+      urls.push(`blob:invented-${urls.length}`);
+      return urls[urls.length - 1] ?? "";
+    });
+    const revoked = vi.fn();
+    Object.assign(URL, { createObjectURL: created, revokeObjectURL: revoked });
+    const { user, requests, notes } = await openClinic();
+    await within(todays()).findByRole("button", { name: "תמר" });
+    await fromMenu(user, rowOf("תמר"), "לכתוב סיכום");
+    const dialog = await screen.findByRole("dialog", { name: "סיכום מפגש אבחון" });
+    await within(dialog).findByLabelText("רשומה");
+    expect(dialog).toHaveTextContent("ההקלטה נשמרת מוצפנת בכספת, רק אצלך. היא לא נשלחת לשום מקום, לא ל-AI ולא לתיק האבחון.");
+    const input = dialog.querySelector('input[type="file"]') as HTMLInputElement;
+    const sound = new File([new Uint8Array([1, 2, 3, 4, 5, 6])], "אחרי הפגישה.m4a", { type: "audio/mp4" });
+    await user.upload(input, sound);
+    expect(await within(dialog).findByText("אחרי הפגישה.m4a", {}, { timeout: 8000 })).toBeInTheDocument();
+    const sent = requests().find((r) => r.op === "save_recording");
+    expect(sent).toMatchObject({ note_id: "", mime: "audio/mp4", name: "אחרי הפגישה.m4a", data: "AQIDBAUG" });
+    expect(sent?.op === "save_recording" && sent.visit_id).toMatch(/^visit-/);
+    expect(notes).toContain("ההקלטה נשמרה בכספת");
+    // The first recording made the visit's note; the texts are still hers to write.
+    expect(within(dialog).getByLabelText("רשומה")).toHaveValue("");
+
+    await user.click(within(dialog).getByRole("button", { name: "להשמיע" }));
+    const player = await within(dialog).findByLabelText("השמעת אחרי הפגישה.m4a");
+    expect(player.tagName).toBe("AUDIO");
+    const src = player.getAttribute("src") ?? "";
+    expect(src).toMatch(/^blob:invented-/);
+    expect(requests().some((r) => r.op === "recording")).toBe(true);
+
+    await user.click(within(dialog).getByRole("button", { name: "מחיקת אחרי הפגישה.m4a" }));
+    const confirm = await screen.findByRole("dialog", { name: "מחיקת ההקלטה" });
+    await user.click(within(confirm).getByRole("button", { name: "מחיקה" }));
+    await waitFor(() => expect(within(dialog).queryByText("אחרי הפגישה.m4a")).toBeNull());
+    expect(requests().find((r) => r.op === "delete_recording")).toBeDefined();
+    expect(revoked).toHaveBeenCalledWith(src);
+  });
+
+  it("writing the summary, what not to forget goes onto the patient's next planned visit", async () => {
+    const { user, requests, notes } = await openClinic();
+    await within(todays()).findByRole("button", { name: "תמר" });
+    await fromMenu(user, rowOf("תמר"), "לכתוב סיכום");
+    const dialog = await screen.findByRole("dialog", { name: "סיכום מפגש אבחון" });
+    const group = await within(dialog).findByRole("group", { name: "לא לשכוח לפגישה הבאה" });
+    // Tomorrow's observation is her next visit.
+    expect(group).toHaveTextContent("ייכנס לרשימה של הפגישה ב");
+    expect(group).toHaveTextContent("10:00");
+    await user.type(within(group).getByLabelText("דבר שלא לשכוח בפגישה הבאה"), "לדבר עם הגננת{Enter}");
+    await waitFor(() => expect(requests().find((r) => r.op === "save_visit")).toBeDefined());
+    expect(requests().find((r) => r.op === "save_visit")).toMatchObject({
+      scope: "one", visit: { kind: "observation", remember: [{ text: "לדבר עם הגננת", done: false }] },
+    });
+    expect(await within(group).findByText("לדבר עם הגננת")).toBeInTheDocument();
+    expect(within(group).getByLabelText("דבר שלא לשכוח בפגישה הבאה")).toHaveValue("");
+    expect(notes.some((n) => n.startsWith("נוסף לפגישה של "))).toBe(true);
+    // The note itself is untouched: nothing to save yet.
+    expect(within(dialog).getByRole("button", { name: "שמירה" })).toBeDisabled();
+  });
+
+  it("“להקליט לעצמך” in a visit's “⋯” opens its note and asks for the microphone at once", async () => {
+    const getUserMedia = vi.fn(() => Promise.reject(Object.assign(new Error("denied"), { name: "NotAllowedError" })));
+    Object.defineProperty(navigator, "mediaDevices", { value: { getUserMedia }, configurable: true });
+    vi.stubGlobal("MediaRecorder", Object.assign(function MediaRecorder() {}, { isTypeSupported: () => true }));
+    afternoon();
+    try {
+      const { user } = await openClinic();
+      await within(todays()).findByRole("button", { name: "תמר" });
+      await fromMenu(user, rowOf("תמר"), "להקליט לעצמך");
+      const dialog = await screen.findByRole("dialog", { name: "סיכום מפגש אבחון" });
+      expect(await within(dialog).findByRole("alert")).toHaveTextContent("אין לתוכנה רשות להשתמש במיקרופון.");
+      expect(getUserMedia).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.unstubAllGlobals();
+      Reflect.deleteProperty(navigator, "mediaDevices");
+    }
+  });
+
+  it("a microphone she did not allow is said in her words, and nothing is kept", async () => {
+    const getUserMedia = vi.fn(() => Promise.reject(Object.assign(new Error("denied"), { name: "NotAllowedError" })));
+    Object.defineProperty(navigator, "mediaDevices", { value: { getUserMedia }, configurable: true });
+    vi.stubGlobal("MediaRecorder", Object.assign(function MediaRecorder() {}, { isTypeSupported: () => true }));
+    try {
+      const { user, requests } = await openClinic();
+      await within(todays()).findByRole("button", { name: "תמר" });
+      await fromMenu(user, rowOf("תמר"), "לכתוב סיכום");
+      const dialog = await screen.findByRole("dialog", { name: "סיכום מפגש אבחון" });
+      await user.click(await within(dialog).findByRole("button", { name: "להקליט" }));
+      expect(await within(dialog).findByRole("alert")).toHaveTextContent("אין לתוכנה רשות להשתמש במיקרופון.");
+      expect(getUserMedia).toHaveBeenCalledWith({ audio: true });
+      expect(requests().some((r) => r.op === "save_recording")).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+      Reflect.deleteProperty(navigator, "mediaDevices");
+    }
+  });
+
+  it("while the computer asks for the microphone nothing starts twice, and a microphone granted after the window closed is let go", async () => {
+    let grant: (s: MediaStream) => void = () => undefined;
+    const getUserMedia = vi.fn(() => new Promise<MediaStream>((ok) => { grant = ok; }));
+    Object.defineProperty(navigator, "mediaDevices", { value: { getUserMedia }, configurable: true });
+    const made = vi.fn();
+    vi.stubGlobal("MediaRecorder", Object.assign(function MediaRecorder() { made(); }, { isTypeSupported: () => true }));
+    try {
+      const { user } = await openClinic();
+      await within(todays()).findByRole("button", { name: "תמר" });
+      await fromMenu(user, rowOf("תמר"), "לכתוב סיכום");
+      const dialog = await screen.findByRole("dialog", { name: "סיכום מפגש אבחון" });
+      await user.click(await within(dialog).findByRole("button", { name: "להקליט" }));
+      const waiting = within(dialog).getByRole("button", { name: "מחכה למיקרופון…" });
+      expect(waiting).toBeDisabled();
+      expect(getUserMedia).toHaveBeenCalledTimes(1);
+      // Closing now asks first; she leaves anyway.
+      await user.keyboard("{Escape}");
+      const ask = await within(dialog).findByRole("alertdialog");
+      await user.click(within(ask).getAllByRole("button").find((b) => b.textContent !== "להמשיך לערוך") as HTMLElement);
+      await waitFor(() => expect(screen.queryByRole("dialog", { name: "סיכום מפגש אבחון" })).toBeNull());
+      const stop = vi.fn();
+      grant({ getTracks: () => [{ stop }] } as unknown as MediaStream);
+      await waitFor(() => expect(stop).toHaveBeenCalled());
+      expect(made).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+      Reflect.deleteProperty(navigator, "mediaDevices");
+    }
   });
 });

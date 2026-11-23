@@ -314,8 +314,8 @@ function SettingsForm({ stored, group }: { stored: ClinicSettings; group: Clinic
                 : <TextField id={`settings-step-${i}-gap`} label="ימים אחרי השלב הקודם" value={step.gap} maxLength={3} dir="ltr"
                   inputMode="numeric" className="clinic-narrow" onChange={(gap) => setStep(i, { gap })} />}
               <div className="row clinic-place-actions">
-                <button type="button" className="btn btn-small" disabled={i === 0} aria-label={`להעלות את שלב ${i + 1}`} onClick={() => set({ pathway: moved(draft.pathway, i, -1) })}>למעלה</button>
-                <button type="button" className="btn btn-small" disabled={i === draft.pathway.length - 1} aria-label={`להוריד את שלב ${i + 1}`} onClick={() => set({ pathway: moved(draft.pathway, i, 1) })}>למטה</button>
+                <button type="button" className="btn btn-small" disabled={i === 0} aria-label={`למעלה: שלב ${i + 1}`} onClick={() => set({ pathway: moved(draft.pathway, i, -1) })}>למעלה</button>
+                <button type="button" className="btn btn-small" disabled={i === draft.pathway.length - 1} aria-label={`למטה: שלב ${i + 1}`} onClick={() => set({ pathway: moved(draft.pathway, i, 1) })}>למטה</button>
                 <button type="button" className="btn btn-small icon-btn" aria-label={`הסרת שלב ${i + 1}`} onClick={() => set({ pathway: draft.pathway.filter((_, j) => j !== i) })}><CloseIcon /></button>
               </div>
             </div></li>
@@ -402,8 +402,8 @@ function SettingsForm({ stored, group }: { stored: ClinicSettings; group: Clinic
                   <span className="grow">{place}</span>
                   {i === 0 && <span className="chip chip-sand">מוצע ראשון</span>}
                   <div className="row clinic-place-actions">
-                    <button type="button" className="btn btn-small" disabled={i === 0} aria-label={`להעלות את ${place}`} onClick={() => set({ places: moved(draft.places, i, -1) })}>למעלה</button>
-                    <button type="button" className="btn btn-small" disabled={i === draft.places.length - 1} aria-label={`להוריד את ${place}`} onClick={() => set({ places: moved(draft.places, i, 1) })}>למטה</button>
+                    <button type="button" className="btn btn-small" disabled={i === 0} aria-label={`למעלה: ${place}`} onClick={() => set({ places: moved(draft.places, i, -1) })}>למעלה</button>
+                    <button type="button" className="btn btn-small" disabled={i === draft.places.length - 1} aria-label={`למטה: ${place}`} onClick={() => set({ places: moved(draft.places, i, 1) })}>למטה</button>
                     <button type="button" className="btn btn-small icon-btn" aria-label={`הסרת ${place}`} onClick={() => set({ places: draft.places.filter((_, j) => j !== i) })}><CloseIcon /></button>
                   </div>
                 </li>

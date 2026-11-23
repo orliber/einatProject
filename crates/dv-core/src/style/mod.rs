@@ -120,6 +120,23 @@ pub struct StyleSourceView {
     pub analysis_inferences: u32,
 }
 
+/// One of her past reports as the vault keeps it, to read (D-212): the parts she kept, each
+/// under its heading, neutralized (roles instead of names, no numbers). The file is not kept.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct StyleSourceText {
+    pub id: String,
+    pub title: String,
+    pub parts: Vec<StyleSourcePart>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct StyleSourcePart {
+    pub heading: String,
+    pub text: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct StyleProfileView {
@@ -1524,6 +1541,29 @@ impl Core {
             profile: stored.profile,
             dropped: stored.dropped,
             demo: stored.demo,
+        })
+    }
+
+    /// One of her past reports, to read on her computer (D-212): from the list on "הסגנון
+    /// שלי", and beside the report she is writing. The text is what the vault keeps, already
+    /// neutralized; nothing is sent, and nothing is put back into it.
+    pub fn style_source_text(&mut self, id: &str) -> Result<StyleSourceText, CoreError> {
+        let (id, _, source) = self
+            .stored_sources()?
+            .into_iter()
+            .find(|(sid, _, _)| sid == id)
+            .ok_or_else(|| CoreError::NotFound("הדוח".to_owned()))?;
+        Ok(StyleSourceText {
+            id,
+            title: source.title,
+            parts: source
+                .parts
+                .into_iter()
+                .map(|p| StyleSourcePart {
+                    heading: p.heading,
+                    text: p.text,
+                })
+                .collect(),
         })
     }
 

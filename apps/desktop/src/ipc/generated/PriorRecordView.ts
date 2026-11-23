@@ -4,7 +4,19 @@ import type { Setting } from "./Setting";
 /**
  * A previous assessment or treatment as the materials screen shows it (round 31).
  */
-export type PriorRecordView = { kind: string, by: string, setting: Setting, findings: string, recommendations: string, 
+export type PriorRecordView = { kind: string, by: string, setting: Setting, 
+/**
+ * Why the child was referred to that assessment (D-209).
+ */
+referral: string, findings: string, 
+/**
+ * Strengths and weaknesses, as that report states them (D-209).
+ */
+strengths: string, 
+/**
+ * That report's own summary (D-209).
+ */
+summary: string, recommendations: string, 
 /**
  * Month and year as written in the document ("3/2024"), read here; empty when none.
  */

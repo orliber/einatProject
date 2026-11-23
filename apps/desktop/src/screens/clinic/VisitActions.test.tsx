@@ -26,7 +26,7 @@ function viewOf(over: Partial<Visit> = {}, hasNote = false): VisitView {
   return {
     visit: {
       id: "v-invented", patient_id: "p-invented", kind: "assessment", title: "", date: "2026-11-15", start: 580, minutes: 50, place: "", status: "planned",
-      status_note: "", fee: 0, charge_missed: false, series_id: null, note: "", ...over,
+      status_note: "", fee: 0, charge_missed: false, series_id: null, note: "", remember: [], ...over,
     },
     patient_name: "נועם לדוגמה",
     has_note: hasNote,
@@ -118,10 +118,34 @@ describe("one action by the time, the rest under “⋯”", () => {
   it("a held visit with a note shows only “⋯”, with “לפתוח את הסיכום” and “לפתוח את הפגישה”", async () => {
     const { user, view, on } = await show(viewOf({ status: "held" }, true));
     expect(within(view.container).getAllByRole("button")).toEqual([more()]);
-    expect(await menuOf(user)).toEqual(["לפתוח את הסיכום", "לפתוח את הפגישה"]);
+    expect(await menuOf(user)).toEqual(["לפתוח את הסיכום", "להקליט לעצמך", "לפתוח את הפגישה"]);
     await user.click(more());
     await user.click(await screen.findByRole("menuitem", { name: "לפתוח את הפגישה" }));
     expect(on.onOpen).toHaveBeenCalledTimes(1);
+  });
+
+  it("with onPay, a visit that charges offers “לרשום תקבול” before “לפתוח את הפגישה”; one that does not charge never does", async () => {
+    const onPay = vi.fn<(v: Visit) => void>();
+    const user = userEvent.setup();
+    await serve(opened);
+    const draw = (view: VisitView) => (
+      <Host app={appApi({})}><div className="row">
+        <VisitActions key={JSON.stringify(view)} view={view} patientId="p-invented" now={NOW} onHold={() => undefined} onNote={() => undefined} onOpen={() => undefined} onPay={onPay} />
+      </div></Host>
+    );
+    const view = render(draw(viewOf({ status: "held", fee: 45000 }, true)));
+    expect(await menuOf(user)).toEqual(["לפתוח את הסיכום", "להקליט לעצמך", "לרשום תקבול", "לפתוח את הפגישה"]);
+    await user.click(more());
+    await user.click(await screen.findByRole("menuitem", { name: "לרשום תקבול" }));
+    expect(onPay).toHaveBeenCalledWith(expect.objectContaining({ id: "v-invented", fee: 45000 }));
+    // Held without a fee, still planned, or missed without "לחייב בכל זאת": nothing to receive for it.
+    for (const over of [{ status: "held", fee: 0 }, { status: "planned", fee: 45000 }, { status: "no_show", fee: 45000 }] as Partial<Visit>[]) {
+      view.rerender(draw(viewOf(over, true)));
+      expect(await menuOf(user)).not.toContain("לרשום תקבול");
+    }
+    // Missed and charged anyway: the family still pays for it.
+    view.rerender(draw(viewOf({ status: "no_show", fee: 45000, charge_missed: true }, true)));
+    expect(await menuOf(user)).toContain("לרשום תקבול");
   });
 
   it("a cancelled visit's “⋯” holds only “לפתוח את הפגישה”", async () => {
@@ -134,7 +158,7 @@ describe("one action by the time, the rest under “⋯”", () => {
     const { user, rerender } = await show(viewOf({ start: 660 }));
     expect(await menuOf(user)).toEqual(["התקיימה", "לכתוב סיכום", "לפתוח את הפגישה"]);
     rerender(viewOf());
-    expect(await menuOf(user)).toEqual(["לכתוב סיכום", "לפתוח את הפגישה"]);
+    expect(await menuOf(user)).toEqual(["לכתוב סיכום", "להקליט לעצמך", "לפתוח את הפגישה"]);
   });
 
   it("once the visit has begun no reminder is offered, not as its step and not in “⋯” (D-204 §4)", async () => {

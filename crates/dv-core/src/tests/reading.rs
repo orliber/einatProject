@@ -35,6 +35,8 @@ fn reading() -> Value {
         "materials": [
             {"material": 3, "summary": "אבחון של [ילד] בהתפתחות הילד: עיכוב קל בשפה, ציון 85.", "record": {
                 "kind": "אבחון התפתחותי", "by": "רופאה התפתחותית", "setting": "community",
+                "referral": "[ילד] הופנה עקב דיבור מועט.", "strengths": "הבנה טובה; הבעה דלה.",
+                "summary": "תמונה של עיכוב שפתי קל.",
                 "findings": "עיכוב קל בשפה.", "recommendations": "טיפול בקלינאית תקשורת."
             }},
             {"material": 4, "summary": "אבחון קודם במכון. אלון שיתף פעולה.", "record": {
@@ -92,6 +94,29 @@ fn one_reading_sorts_sums_up_and_records_and_the_order_is_fixed_here() {
         detail.prior_order,
         vec![institute.clone(), community.clone()]
     );
+    // D-209: each record is already a draft paragraph of the section, in her fields and in
+    // the report's order, with the date read here; an older answer's record has fewer lines.
+    let prior = detail
+        .sections
+        .iter()
+        .find(|s| s.key == "prior_assessments")
+        .unwrap();
+    let texts: Vec<&str> = prior.paragraphs.iter().map(|p| p.text.as_str()).collect();
+    assert_eq!(
+        texts,
+        [
+            "סוג האבחון: אבחון פסיכולוגי\nמי אבחן: פסיכולוגית\nתאריך: מרץ 2024\n\
+             ממצאי הבדיקה: תפקוד בטווח הממוצע.\nהמלצות: המשך מעקב.",
+            "סוג האבחון: אבחון התפתחותי\nמי אבחן: רופאה התפתחותית\nתאריך: פברואר 2023\n\
+             סיבת ההפניה: אלון הופנה עקב דיבור מועט.\nממצאי הבדיקה: עיכוב קל בשפה.\n\
+             חוזקות וחולשות: הבנה טובה; הבעה דלה.\nסיכום: תמונה של עיכוב שפתי קל.\n\
+             המלצות: טיפול בקלינאית תקשורת.",
+        ]
+    );
+    assert!(prior
+        .paragraphs
+        .iter()
+        .all(|p| p.status == DraftStatus::Proposed));
     // What no material feeds, by title; the sections that are fed are not listed.
     assert!(!detail.missing.is_empty());
     let fed: Vec<&str> = detail

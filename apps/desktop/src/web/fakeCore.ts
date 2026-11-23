@@ -241,6 +241,14 @@ export function fakeSystemCheck(check: SystemCheck, sendStopped: boolean): Syste
   return { check, lines: lines[check] };
 }
 
+/** The sub-headings a guide names (D-214): "כותרת משנה: <heading>. <what to write>". */
+export function subheadingsOf(guide: string): string[] {
+  return guide
+    .split("\n")
+    .map((l) => /^כותרת משנה:\s*([^.]+)/.exec(l.trim())?.[1]?.trim() ?? "")
+    .filter((h) => h !== "");
+}
+
 export class FakeCore {
   private unlocked = false;
   /** `?setup` in the address opens the first-run screens (for the demo page's pictures). */
@@ -712,6 +720,8 @@ export class FakeCore {
           guide_is_default: !this.guides.has(s.key),
           guide_learned_from: 0,
           case_guide: c.meta.guides?.[s.key] ?? "",
+          // D-214: the sub-headings the guide names, as the core reads them.
+          subheadings: subheadingsOf(`${this.guides.get(s.key) ?? INSTITUTE_GUIDES.get(s.key) ?? ""}\n${c.meta.guides?.[s.key] ?? ""}`),
           // D-161: the preview drafts from the materials word for word and asks nothing, so
           // there is nothing to say beside a section (the core keeps these for the session).
           notes: { questions: [], missing: [], contradictions: [], unanswered: [] },
@@ -896,8 +906,15 @@ export class FakeCore {
       const reading: R.Reading = {
         passageCount: m.count,
         text: sentences(parts.join(" "), 2),
-        ...(report ? { record: { kind: kindLabel[i.kind], by: "", setting: "unknown" as const, findings: sentences(parts[1] ?? parts[0] ?? "", 1), recommendations: advice ? sentences(advice, 1) : "" } } : {}),
+        ...(report ? { record: { kind: kindLabel[i.kind], by: "", setting: "unknown" as const, referral: "", findings: sentences(parts[1] ?? parts[0] ?? "", 1), strengths: "", summary: "", recommendations: advice ? sentences(advice, 1) : "" } } : {}),
       };
+      // D-209: the record is already the section's draft about this document, for her to edit.
+      const label = `${kindLabel[i.kind]} · ${i.title}`;
+      if (reading.record && !c.drafts.some((d) => d.section === "prior_assessments" && d.status !== "superseded" && d.status !== "rejected" && d.sources.some((x) => x.endsWith(label)))) {
+        const rec = reading.record;
+        const lines: [string, string][] = [["סוג האבחון", rec.kind], ["מי אבחן", rec.by], ["סיבת ההפניה", rec.referral], ["ממצאי הבדיקה", rec.findings], ["חוזקות וחולשות", rec.strengths], ["סיכום", rec.summary], ["המלצות", rec.recommendations]];
+        c.drafts.push({ id: newId("d"), section: "prior_assessments", text: lines.filter(([, t]) => t.trim()).map(([l, t]) => `${l}: ${t.trim()}`).join("\n"), status: "proposed", byAi: true, sources: [label] });
+      }
       const r = { ...this.routingOf(c, m.id), reading };
       const placed = R.sortLocally(parts, keys);
       if (!placed.length) {
@@ -1181,7 +1198,9 @@ export class FakeCore {
         return { examples: [], openings: [], closings: [], phrases: [] };
       case "prepare_from_points": {
         const c = this.find(a.caseId);
-        if (this.modes.get(String(a.sectionKey)) !== "self") fail("refused", "ניסוח מהנקודות שלך הוא לסעיפים שאת כותבת בעצמך.");
+        // D-210: her own section, or one the AI writes that no material feeds.
+        const unfed = SORTABLE.some((s) => s.key === a.sectionKey) && !this.routing(c).some((r) => r.feeds.includes(String(a.sectionKey)));
+        if (this.modes.get(String(a.sectionKey)) !== "self" && !unfed) fail("refused", "ניסוח מהנקודות שלך הוא לסעיפים שאת כותבת בעצמך, ולסעיף שאין לו חומרים מקושרים. לסעיף הזה יש חומרים, ולכן הוא מנוסח מהם.");
         if (!String(a.points).trim()) fail("refused", "כותבים קודם את הנקודות, ואז מנסחים מהן.");
         return this.prepareSection(c, String(a.sectionKey), String(a.points), null, true);
       }
@@ -1504,6 +1523,20 @@ export class FakeCore {
         const existing = c.inputs.find((i) => i.id === a.inputId);
         const input = existing ? Object.assign(existing, { title, content: text }) : this.addInput(c, "test_scores", title, text);
         c.sheets.set(input.id, sheet);
+        // D-215: the list of tools in "כלי האבחון", from the sheets of the case, while the
+        // section holds nothing of hers.
+        const opening = "במסגרת האבחון נעשה שימוש בכלים אלו:";
+        const inTools = c.drafts.filter((d) => d.section === "tools" && (d.status === "proposed" || d.status === "approved"));
+        if (inTools.every((d) => d.status === "proposed" && d.byAi && d.text.startsWith(opening))) {
+          const names = [...c.sheets.values()].map((sh) => {
+            const name = instruments.find((i) => i.key === sh.instrument)?.name ?? "";
+            return sh.module.trim() ? `${name} (מודול ${sh.module.trim()})` : name;
+          }).filter((n, i, all) => n && all.indexOf(n) === i);
+          const listText = `${opening} ${names.join(", ")}.`;
+          const mine = inTools[0];
+          if (mine) mine.text = listText;
+          else c.drafts.push({ id: newId("d"), section: "tools", text: listText, status: "proposed", byAi: true, sources: [title] });
+        }
         return input;
       }
       case "paragraph_sources": {

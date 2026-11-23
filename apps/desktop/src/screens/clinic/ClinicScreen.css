@@ -36,6 +36,8 @@ html:has(.clinic-panel) {
   text-decoration-color: var(--line-strong);
   text-underline-offset: 3px;
   cursor: pointer;
+  min-height: 24px;
+  min-width: 24px;
 }
 .clinic-name-link.clinic-name-strong {
   font-weight: 600;
@@ -95,6 +97,7 @@ html:has(.clinic-panel) {
   background: var(--surface);
   text-align: center;
 }
+.clinic-empty h2,
 .clinic-empty h3 {
   font-size: var(--text-xl);
 }
@@ -190,7 +193,8 @@ html:has(.clinic-panel) {
 }
 
 /* Time she kept for herself, on the front page: hatched, its hours quiet (D-204). */
-.clinic-today .clinic-visit[data-kind="block"] .clinic-visit-body {
+.clinic-today .clinic-visit[data-kind="block"] .clinic-visit-body,
+.clinic-today .clinic-visit[data-kind="supervision"] .clinic-visit-body {
   padding: var(--space-1) var(--space-3);
   border: 1px dashed var(--line-strong);
   border-radius: var(--radius-sm);
@@ -301,8 +305,8 @@ html:has(.clinic-panel) {
 }
 .clinic-task input[type="checkbox"],
 .clinic-check input[type="checkbox"] {
-  width: 20px;
-  height: 20px;
+  width: 24px;
+  height: 24px;
   margin: 2px 0 0;
   flex-shrink: 0;
   accent-color: var(--primary);
@@ -635,4 +639,135 @@ html:has(.clinic-panel) {
   margin: 0;
   flex-wrap: wrap;
   gap: var(--space-2);
+}
+
+/* What not to forget ahead of a visit (D-207): a short list she ticks. */
+.clinic-remember-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.clinic-remember-list li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.clinic-remember-done label {
+  color: var(--ink-muted);
+  text-decoration: line-through;
+}
+.clinic-remember-add {
+  margin-top: var(--space-2);
+}
+.clinic-visit-remember {
+  color: var(--warn-ink);
+}
+.clinic-remember legend {
+  font-weight: 600;
+}
+
+/* The recordings she keeps for herself with a note (D-208). */
+.clinic-recordings {
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+.clinic-recordings-title {
+  margin: 0;
+  font-size: 1em;
+}
+.clinic-recordings-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.clinic-recording-player {
+  width: 100%;
+}
+.clinic-recording-now {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-alt);
+}
+.clinic-recording-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--block);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .clinic-recording-dot {
+    animation: clinic-recording-pulse 1.2s ease-in-out infinite;
+  }
+}
+@keyframes clinic-recording-pulse {
+  50% {
+    opacity: 0.3;
+  }
+}
+
+/* "לקראת הפגישה": what the last session left, in the dialog of a visit still ahead. */
+.clinic-prep {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--line);
+  border-inline-start: 3px solid var(--primary);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+.clinic-prep-title {
+  font-size: var(--text-md);
+  margin: 0;
+}
+.clinic-prep-part {
+  gap: var(--space-1);
+}
+.clinic-prep-tasks {
+  margin: 0;
+  padding-inline-start: var(--space-5);
+}
+
+/* "סגירת היום": the day's last lines on the front page, once its visits are over. */
+.clinic-dayclose {
+  gap: var(--space-2);
+}
+.clinic-dayclose-line {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+}
+.clinic-dayclose-mark {
+  flex: none;
+  inline-size: 1.25em;
+  text-align: center;
+  color: var(--ink-muted);
+  font-weight: 600;
+}
+.clinic-dayclose-done .clinic-dayclose-mark {
+  color: var(--ok);
+}
+.clinic-dayclose-open {
+  color: var(--warn-ink);
+  font-weight: 600;
+}
+.clinic-dayclose-open .clinic-dayclose-mark {
+  color: var(--warn);
+}
+.clinic-dayclose-end {
+  margin-block-start: var(--space-3);
+}
+.clinic-dayclose-all {
+  gap: var(--space-2);
+}
+.clinic-dayclose-all li {
+  gap: var(--space-3);
+  align-items: baseline;
 }

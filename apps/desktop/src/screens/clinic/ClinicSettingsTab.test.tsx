@@ -108,7 +108,7 @@ describe("the clinic's settings", () => {
 
     await user.click(topic("פגישות ומחירים"));
     const kinds = within(part("סוגי הפגישות")).getByRole("table", { name: "המשך והמחיר הרגילים של כל סוג פגישה" });
-    expect(within(kinds).getAllByRole("rowheader").map((h) => h.textContent)).toEqual(["פגישת היכרות", "מפגש אבחון", "תצפית", "שיחת משוב", "פגישת טיפול", "הדרכת הורים", "פגישה מקצועית", "פגישה אחרת", "זמן שמור"]);
+    expect(within(kinds).getAllByRole("rowheader").map((h) => h.textContent)).toEqual(["פגישת היכרות", "מפגש אבחון", "תצפית", "שיחת משוב", "פגישת טיפול", "הדרכת הורים", "פגישה מקצועית", "פגישה אחרת", "זמן שמור", "הדרכה"]);
     expect(within(kinds).getByLabelText("משך של מפגש אבחון, בדקות")).toHaveValue("90");
     expect(within(kinds).getByLabelText("מחיר של מפגש אבחון, בשקלים")).toHaveValue("600");
     // Time she keeps for herself has a length and no fee.
@@ -162,7 +162,7 @@ describe("the clinic's settings", () => {
     expect(sent).toHaveLength(1);
     expect(sent[0]).toMatchObject({ day_start: 480, day_end: 1170, work_days: [0, 1, 2, 3, 4, 5], waiting_weeks: 4, report_days: 21, debt_days: 30 });
     expect(sent[0]?.defaults.find((d) => d.kind === "therapy")).toEqual({ kind: "therapy", minutes: 50, fee: 42_050 });
-    expect(sent[0]?.defaults).toHaveLength(9);
+    expect(sent[0]?.defaults).toHaveLength(10);
     await waitFor(() => expect(saveButton()).toBeDisabled());
     await user.click(topic("פגישות ומחירים"));
     expect(screen.getByLabelText("מחיר של פגישת טיפול, בשקלים")).toHaveValue("420.50");
@@ -234,12 +234,12 @@ describe("the clinic's settings", () => {
     await user.click(topic("פגישות ומחירים"));
     const places = part("מקומות");
     const names = () => within(within(places).getByRole("list", { name: "המקומות, לפי הסדר" })).getAllByRole("listitem").map((li) => li.firstElementChild?.textContent);
-    expect(within(places).getByRole("button", { name: "להעלות את הקליניקה" })).toBeDisabled();
-    expect(within(places).getByRole("button", { name: "להוריד את שיחת וידאו" })).toBeDisabled();
-    await user.click(within(places).getByRole("button", { name: "להעלות את שיחת וידאו" }));
-    await user.click(within(places).getByRole("button", { name: "להעלות את שיחת וידאו" }));
+    expect(within(places).getByRole("button", { name: "למעלה: הקליניקה" })).toBeDisabled();
+    expect(within(places).getByRole("button", { name: "למטה: שיחת וידאו" })).toBeDisabled();
+    await user.click(within(places).getByRole("button", { name: "למעלה: שיחת וידאו" }));
+    await user.click(within(places).getByRole("button", { name: "למעלה: שיחת וידאו" }));
     expect(names()).toEqual(["שיחת וידאו", "הקליניקה", "בגן או בבית הספר"]);
-    await user.click(within(places).getByRole("button", { name: "להוריד את הקליניקה" }));
+    await user.click(within(places).getByRole("button", { name: "למטה: הקליניקה" }));
     expect(names()).toEqual(["שיחת וידאו", "בגן או בבית הספר", "הקליניקה"]);
     await user.click(within(places).getByRole("button", { name: "הסרת בגן או בבית הספר" }));
 

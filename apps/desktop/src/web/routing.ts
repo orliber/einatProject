@@ -39,7 +39,7 @@ export interface Suggestion {
 export interface Reading {
   passageCount: number;
   text: string;
-  record?: { kind: string; by: string; setting: "institute" | "community" | "unknown"; findings: string; recommendations: string };
+  record?: { kind: string; by: string; setting: "institute" | "community" | "unknown"; referral: string; findings: string; strengths: string; summary: string; recommendations: string };
 }
 
 export interface Routing {

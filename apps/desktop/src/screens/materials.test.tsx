@@ -43,6 +43,28 @@ describe("materials", () => {
     expect(await a11yViolations(view.container)).toEqual([]);
   });
 
+  it("records of the clinic's sessions that are not in the case yet are brought from here", async () => {
+    const { user, calls } = await openCase();
+    const list = await toMaterials(user);
+    const rows = () => screen.getByRole("region", { name: "רשימת החומרים" }).querySelectorAll(".material-title").length;
+    const before = rows();
+    expect(list).toBeInTheDocument();
+    const line = await screen.findByText(/^בכרטיס בקליניקה יש \d+ רשומות של פגישות שעוד לא הועברו לחומרי התיק\.$/);
+    const waiting = Number(/\d+/.exec(line.textContent ?? "")?.[0]);
+    await user.click(screen.getByRole("button", { name: "להביא מהקליניקה" }));
+    const dialog = await screen.findByRole("dialog", { name: "להעביר רשומות לתיק האבחון" });
+    expect(dialog).toHaveTextContent("רק הרשומה מועתקת");
+    expect(within(dialog).getAllByRole("checkbox")).toHaveLength(waiting);
+    expect(await a11yViolations(dialog)).toEqual([]);
+    await user.click(within(dialog).getByRole("button", { name: `להעביר ${waiting} רשומות` }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(calls.filter((c) => c.cmd === "clinic" && (c.args.request as { op: string }).op === "note_to_case")).toHaveLength(waiting);
+    // The records are materials of the case now, and the line has nothing left to say.
+    await waitFor(() => expect(rows()).toBe(before + waiting));
+    expect(screen.getByRole("region", { name: "רשימת החומרים" })).toHaveTextContent(/סיכום .* · \d\d\.\d\d\.\d{4}/);
+    await waitFor(() => expect(screen.queryByRole("button", { name: "להביא מהקליניקה" })).toBeNull());
+  });
+
   it("the page says what the report can be written from, and what is still missing", async () => {
     const { user } = await openCase();
     await toMaterials(user);

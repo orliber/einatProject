@@ -3,6 +3,7 @@
 // notes, the money and the follow-ups; and, quietly at the bottom, erasing the card.
 // Everything shown is plain text. Every name goes through `PatientName` / `useShownName`, so
 // discreet mode holds; in discreet mode phone numbers and personal notes are not shown at all.
+import { searchForm } from "../../searchForm";
 import { Fragment, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useApp } from "../../App";
@@ -18,7 +19,6 @@ import type { Charge } from "../../ipc/generated/Charge";
 import type { ClinicTask } from "../../ipc/generated/ClinicTask";
 import type { Patient } from "../../ipc/generated/Patient";
 import type { PatientCard } from "../../ipc/generated/PatientCard";
-import type { PayMethod } from "../../ipc/generated/PayMethod";
 import type { Payment } from "../../ipc/generated/Payment";
 import type { ProcessStep } from "../../ipc/generated/ProcessStep";
 import type { SessionNote } from "../../ipc/generated/SessionNote";
@@ -30,18 +30,21 @@ import type { VisitStatus } from "../../ipc/generated/VisitStatus";
 import type { VisitView } from "../../ipc/generated/VisitView";
 import {
   clinicKeys, useCaseChoices, useCreateCase, useLinkCase, useOptimistic, usePatientCard, useReloadClinic, useSaveCharge, useSavePatient,
-  useSavePayment, useSaveTask, useStarterTasks, useToday, useVoidCharge, useVoidPayment,
+  useSaveTask, useStarterTasks, useToday, useVoidCharge, useVoidPayment,
 } from "./clinicData";
 import {
-  CONTACT_ROLE_LABEL, formatDate, optionsWith, parseMoney, PATIENT_STATUS_LABEL, PAY_METHOD_LABEL, PAY_METHODS, TASK_KIND_LABEL, TASK_KINDS,
+  CONTACT_ROLE_LABEL, formatDate, optionsWith, parseMoney, PATIENT_STATUS_LABEL, PAY_METHOD_LABEL, TASK_KIND_LABEL, TASK_KINDS,
   VISIT_KIND_LABEL, VISIT_STATUS_LABEL,
 } from "./format";
+import { FoldedText } from "./FoldedText";
 import { NoteDialog } from "./NoteDialog";
 import {
-  AlertList, ConfirmDialog, EmptyState, Field, Money, MoneyField, moneyText, Pager, PatientName, ReadError, RecordHistory, Section, SelectField,
+  AlertList, ConfirmDialog, EmptyState, Field, Money, MoneyField, Pager, PatientName, ReadError, RecordHistory, Section, SelectField,
   TextAreaField, TextField, useDiscreet, usePaged, useShownName, VisitRow,
 } from "./parts";
 import { PathwayDialog } from "./PathwayDialog";
+import { NotesToCase } from "./NotesToCase";
+import { lastMethod, PaymentDialog, visitCharge } from "./PaymentDialog";
 import { PatientDialog } from "./PatientDialog";
 import { VisitDialog } from "./VisitDialog";
 import { SendMenu } from "./SendMenu";
@@ -54,7 +57,7 @@ const PAST_PAGE = 8;
 /** What is open over the card: one dialog at a time. */
 type Open =
   | { kind: "visit"; view?: VisitView }
-  | { kind: "note"; visit?: Visit; noteId?: string }
+  | { kind: "note"; visit?: Visit; noteId?: string; record?: boolean | undefined }
   | { kind: "edit" }
   | { kind: "close" }
   | { kind: "erase" }
@@ -230,13 +233,13 @@ function CardBody({ card, today, now, back, onBack }: { card: PatientCard; today
       <VisitActions view={view} patientId={p.id} now={now} reminders={false} onCard follow={marked === v.id}
         onHold={(x) => markVisit(x, "held")}
         onNoShow={(x) => markVisit(x, "no_show")}
-        onNote={(x) => setOpen({ kind: "note", visit: x })}
+        onNote={(x, record) => setOpen({ kind: "note", visit: x, record })}
         onOpen={() => setOpen({ kind: "visit", view })} />
     );
   };
   const rows = (views: VisitView[]) => (
     <ul className="clinic-list clinic-visits">
-      {views.map((view) => <VisitRow key={view.visit.id} view={view} showDate actions={actionsOf(view)} onOpen={() => setOpen({ kind: "visit", view })} />)}
+      {views.map((view) => <VisitRow key={view.visit.id} view={view} showDate onCard actions={actionsOf(view)} onOpen={() => setOpen({ kind: "visit", view })} />)}
     </ul>
   );
 
@@ -365,7 +368,7 @@ function CardBody({ card, today, now, back, onBack }: { card: PatientCard; today
         open.view ? <VisitDialog view={open.view} onClose={() => setOpen(null)} /> : <VisitDialog start={{ patientId: p.id }} onClose={() => setOpen(null)} />
       )}
       {open?.kind === "note" && (
-        open.visit ? <NoteDialog patientId={p.id} visit={open.visit} onClose={() => setOpen(null)} />
+        open.visit ? <NoteDialog patientId={p.id} visit={open.visit} record={open.record} onClose={() => setOpen(null)} />
           : open.noteId !== undefined ? <NoteDialog patientId={p.id} noteId={open.noteId} onClose={() => setOpen(null)} />
           : <NoteDialog patientId={p.id} onClose={() => setOpen(null)} />
       )}
@@ -563,38 +566,54 @@ function CasePicker({ patientId, onClose }: { patientId: string; onClose: () => 
 
 // ------------------------------------------------------------------ session notes
 
-/** From how much text a record is folded to a few lines. */
-const LONG_RECORD = 260;
+/** From how many notes the box offers a search (fewer fit on one page, in front of her). */
+const SEARCH_FROM = 6;
 
-/** Plain text that folds to four lines when it is long, with the link that opens it whole. */
-function FoldedText({ text, more, less }: { text: string; more: string; less: string }) {
-  const [whole, setWhole] = useState(false);
-  const id = useId();
-  const long = text.length > LONG_RECORD || text.split("\n").length > 4;
-  return (
-    <>
-      <p id={id} className={long && !whole ? "pcard-note-text pcard-note-folded" : "pcard-note-text"}>{text}</p>
-      {long && (
-        <button type="button" className="link-btn" aria-expanded={whole} aria-controls={id} onClick={() => setWhole((w) => !w)}>
-          {whole ? less : more}
-        </button>
-      )}
-    </>
-  );
+/** A session note answers a search by its record, its date as it is shown ("08.11.2026"), the
+ *  kind of its visit, and its personal note, which is not read in discreet mode. */
+export function noteMatches(note: SessionNote, visit: Visit | null, query: string, discreet: boolean): boolean {
+  const q = searchForm(query.trim());
+  if (q === "") return true;
+  const hay = [note.record, formatDate(note.date), visit ? VISIT_KIND_LABEL[visit.kind] : "שיחה", discreet ? "" : note.personal].map(searchForm).join("\n");
+  return q.split(/\s+/).every((word) => hay.includes(word));
 }
 
 function NotesBox({ card, onNew, onEdit }: { card: PatientCard; onNew: () => void; onEdit: (noteId: string) => void }) {
-  const paged = usePaged(card.notes, 5);
+  const discreet = useDiscreet();
+  const [query, setQuery] = useState("");
   const visits = useMemo(() => new Map(card.visits.map((v) => [v.visit.id, v.visit])), [card.visits]);
+  const found = useMemo(
+    () => card.notes.filter((n) => noteMatches(n, n.visit_id === null ? null : (visits.get(n.visit_id) ?? null), query, discreet)),
+    [card.notes, visits, query, discreet],
+  );
+  const paged = usePaged(found, 5, query.trim());
+  const searching = query.trim() !== "";
   return (
     <Section title="סיכומי פגישות" aside={<button type="button" className="btn btn-small" onClick={onNew}><PlusIcon /> סיכום שיחה</button>}>
+      {card.notes.length >= SEARCH_FROM && (
+        <div className="field pcard-notes-search">
+          <label htmlFor="pcard-notes-search">חיפוש בסיכומים</label>
+          <input id="pcard-notes-search" type="search" className="input fit-l" value={query} autoComplete="off" placeholder="מילה מהסיכום, או תאריך"
+            onChange={(e) => setQuery(e.target.value)} />
+          <span className="muted small" role="status">
+            {searching ? (found.length === 0 ? "" : found.length === 1 ? "סיכום אחד מתאים" : `${found.length} סיכומים מתאימים`) : ""}
+          </span>
+        </div>
+      )}
+      <NotesToCase card={card} />
       {card.notes.length === 0
         ? <p className="muted clinic-quiet">עוד אין סיכומים. סיכום של פגישה נכתב מהשורה שלה, בלחיצה על "לכתוב סיכום".</p>
-        : (
-          <ul className="clinic-list pcard-notes">
-            {paged.shown.map((n) => <NoteItem key={n.id} note={n} visit={n.visit_id === null ? null : (visits.get(n.visit_id) ?? null)} caseCode={card.case?.code ?? null} onEdit={() => onEdit(n.id)} />)}
-          </ul>
-        )}
+        : found.length === 0
+          ? (
+            <p className="muted clinic-quiet" role="status">
+              אין סיכום שמתאים לחיפוש. <button type="button" className="link-btn" onClick={() => setQuery("")}>לנקות את החיפוש</button>
+            </p>
+          )
+          : (
+            <ul className="clinic-list pcard-notes">
+              {paged.shown.map((n) => <NoteItem key={n.id} note={n} visit={n.visit_id === null ? null : (visits.get(n.visit_id) ?? null)} caseCode={card.case?.code ?? null} onEdit={() => onEdit(n.id)} />)}
+            </ul>
+          )}
       <Pager page={paged.page} pages={paged.pages} onPage={paged.setPage} label="עמודי הסיכומים" />
     </Section>
   );
@@ -615,6 +634,8 @@ function NoteItem({ note, visit, caseCode, onEdit }: { note: SessionNote; visit:
         <span className="num pcard-note-date" dir="ltr">{when}</span>
         <span className="chip chip-sand">{visit ? VISIT_KIND_LABEL[visit.kind] : "שיחה, לא צמודה לפגישה"}</span>
         {note.case_input_id !== null && <span className="chip chip-ok">{caseCode ? `הועבר לתיק ${caseCode}` : "הועבר לתיק"}</span>}
+        {/* Hers alone, as the personal note: only how many, and they are heard in the note (D-208). */}
+        {note.recordings.length > 0 && <span className="chip">{note.recordings.length === 1 ? "הקלטה אחת" : `${note.recordings.length} הקלטות`}</span>}
         <span className="grow" />
         <button type="button" className="btn btn-small" aria-label={`עריכה של הסיכום מיום ${when}`} onClick={onEdit}>עריכה</button>
       </div>
@@ -660,12 +681,6 @@ type Line =
   | { type: "visit"; id: string; date: string; visit: Visit; amount: number }
   | { type: "charge"; id: string; date: string; charge: Charge }
   | { type: "payment"; id: string; date: string; payment: Payment };
-
-/** What a visit charges (the core's rule): its fee when held, or when missed and charged anyway. */
-function visitCharge(v: Visit): number {
-  if (v.status === "held") return v.fee;
-  return (v.status === "cancelled" || v.status === "no_show") && v.charge_missed ? v.fee : 0;
-}
 
 type MoneyOpen =
   | { kind: "charge" }
@@ -717,7 +732,7 @@ function MoneyBox({ card, today }: { card: PatientCard; today: string }) {
       <Pager page={paged.page} pages={paged.pages} onPage={paged.setPage} label="עמודי החיובים והתקבולים" />
 
       {open?.kind === "charge" && <ChargeDialog patientId={card.patient.id} today={today} onClose={() => setOpen(null)} />}
-      {open?.kind === "payment" && <PaymentDialog patientId={card.patient.id} today={today} due={b.due} onClose={() => setOpen(null)} />}
+      {open?.kind === "payment" && <PaymentDialog patientId={card.patient.id} today={today} due={b.due} method={lastMethod(card.payments)} onClose={() => setOpen(null)} />}
       {open?.kind === "void" && <VoidDialog line={open.line} onClose={() => setOpen(null)} />}
     </Section>
   );
@@ -798,58 +813,6 @@ function ChargeDialog({ patientId, today, onClose }: { patientId: string; today:
           <MoneyField id="charge-amount" label="סכום" value={amount} onChange={setAmount} />
           <Field id="charge-date" label="תאריך"><DateField id="charge-date" value={date} onChange={setDate} /></Field>
         </div>
-        <ErrorLine error={error} />
-      </div>
-    </Dialog>
-  );
-}
-
-/** "תקבול חדש": money that was received. The amount starts from what is still owed. */
-function PaymentDialog({ patientId, today, due, onClose }: { patientId: string; today: string; due: number; onClose: () => void }) {
-  const { notify } = useApp();
-  const save = useSavePayment();
-  const [first] = useState({ amount: moneyText(due > 0 ? due : null), method: "transfer" as PayMethod, receipt: "", payer: "", date: today, note: "" });
-  const [form, setForm] = useState(first);
-  const [error, setError] = useState<string | null>(null);
-  const set = (patch: Partial<typeof first>) => setForm((f) => ({ ...f, ...patch }));
-
-  async function submit() {
-    const agorot = parseMoney(form.amount);
-    if (agorot === null || agorot === 0) return setError("צריך לכתוב סכום גדול מאפס, בשקלים. למשל 450.");
-    if (form.date === "") return setError("צריך לכתוב את תאריך התקבול: יום.חודש.שנה.");
-    setError(null);
-    try {
-      await save.mutateAsync({
-        id: "", patient_id: patientId, date: form.date, amount: agorot, method: form.method, receipt: form.receipt, payer: form.payer, note: form.note,
-        voided: false, void_reason: "",
-      });
-      notify("התקבול נרשם");
-      onClose();
-    } catch (e) {
-      setError(messageOf(e, "התקבול לא נרשם. אפשר לנסות שוב."));
-    }
-  }
-  return (
-    <Dialog help="payment" narrow title="תקבול חדש" dirty={JSON.stringify(form) !== JSON.stringify(first)} onClose={onClose}
-      footer={(close) => <>
-        <span className="grow" />
-        <button type="button" className="btn" onClick={close}>ביטול</button>
-        <button type="button" className="btn btn-primary" disabled={save.isPending} onClick={() => void submit()}>רישום התקבול</button>
-      </>}>
-      <div className="stack clinic-form">
-        <div className="clinic-form-row">
-          <MoneyField id="payment-amount" label="סכום" value={form.amount} onChange={(amount) => set({ amount })} />
-          <SelectField<PayMethod> id="payment-method" label="אמצעי תשלום" value={form.method} onChange={(method) => set({ method })}
-            options={PAY_METHODS.map((m) => ({ value: m, label: PAY_METHOD_LABEL[m] }))} />
-          <Field id="payment-date" label="תאריך"><DateField id="payment-date" value={form.date} onChange={(date) => set({ date })} /></Field>
-        </div>
-        <div className="clinic-form-row">
-          <TextField id="payment-receipt" label="מספר קבלה" value={form.receipt} maxLength={200} dir="ltr" className="grow fit-s"
-            hint="המספר של הקבלה שהופקה בתוכנת החשבוניות. אפשר להשלים אחר כך." onChange={(receipt) => set({ receipt })} />
-          <TextField id="payment-payer" label="מי שילם (לא חובה)" value={form.payer} maxLength={200} className="grow"
-            hint="כשלא ההורים שילמו: קופה, מוסד." onChange={(payer) => set({ payer })} />
-        </div>
-        <TextAreaField id="payment-note" label="הערה (לא חובה)" value={form.note} rows={2} maxLength={4000} onChange={(note) => set({ note })} />
         <ErrorLine error={error} />
       </div>
     </Dialog>

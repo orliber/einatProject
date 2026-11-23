@@ -4,6 +4,7 @@
 import { useMemo, useState } from "react";
 import { useApp } from "../../App";
 import { ageOf } from "../../components/AgeField";
+import { ActionsMenu } from "../../components/Menu";
 import { PlusIcon, Skeleton } from "../../components/ui";
 import { clinicApi } from "../../ipc/clinic";
 import type { Patient } from "../../ipc/generated/Patient";
@@ -136,14 +137,16 @@ export function WaitingTab() {
                     </span>
                   )}
                 </div>
+                {/* One step in front (D-204): the first meeting. The whole pathway beside it, and the
+                    rest of what can be done with the family behind "⋯". */}
                 <div className="waiting-actions" role="group" aria-label={`פעולות עבור ${who}`}>
                   <button type="button" className="btn btn-small btn-primary" onClick={() => setOpen({ kind: "schedule", patient: p })}>לקבוע פגישת היכרות</button>
                   <button type="button" className="btn btn-small" onClick={() => setOpen({ kind: "pathway", patient: p })}>לקבוע את כל המסלול</button>
-                  <button type="button" className="btn btn-small" aria-pressed={p.urgent} onClick={() => void mark({ patient: p, urgent: !p.urgent })}>
-                    {p.urgent ? "להסיר את הסימון דחוף" : "לסמן כדחוף"}
-                  </button>
-                  <button type="button" className="btn btn-small" onClick={() => setOpen({ kind: "edit", patient: p })}>עריכת הפרטים</button>
-                  <button type="button" className="btn btn-small" onClick={() => setOpen({ kind: "remove", patient: p })}>להסיר מהרשימה</button>
+                  <ActionsMenu label={`עוד פעולות עבור ${who}`} items={[
+                    { label: p.urgent ? "להסיר את הסימון דחוף" : "לסמן כדחוף", run: () => void mark({ patient: p, urgent: !p.urgent }) },
+                    { label: "עריכת הפרטים", run: () => setOpen({ kind: "edit", patient: p }) },
+                    { label: "להסיר מהרשימה", run: () => setOpen({ kind: "remove", patient: p }) },
+                  ]} />
                 </div>
               </li>
             );

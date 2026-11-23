@@ -11,6 +11,7 @@
 // core does by its own clock (the day a record was written, the retention period of an erase,
 // the latest birth date, the time of a history line) goes by `options.clock`, read as the
 // core reads it (UTC). A test gives a clock and nothing depends on the moment it runs.
+import { searchForm, searchLetter } from "../searchForm";
 import type { Age } from "../ipc/generated/Age";
 import type { Alert } from "../ipc/generated/Alert";
 import type { Balance } from "../ipc/generated/Balance";
@@ -36,6 +37,8 @@ import type { IncomeYear } from "../ipc/generated/IncomeYear";
 import type { InputKind } from "../ipc/generated/InputKind";
 import type { KindCount } from "../ipc/generated/KindCount";
 import type { MessageKind } from "../ipc/generated/MessageKind";
+import type { NoteHit } from "../ipc/generated/NoteHit";
+import type { NoteSearch } from "../ipc/generated/NoteSearch";
 import type { Overview } from "../ipc/generated/Overview";
 import type { Patient } from "../ipc/generated/Patient";
 import type { PatientCard } from "../ipc/generated/PatientCard";
@@ -48,6 +51,7 @@ import type { Role } from "../ipc/generated/Role";
 import type { SavedVisits } from "../ipc/generated/SavedVisits";
 import type { Scope } from "../ipc/generated/Scope";
 import type { SessionNote } from "../ipc/generated/SessionNote";
+import type { RecordingSound } from "../ipc/generated/RecordingSound";
 import type { Slot } from "../ipc/generated/Slot";
 import type { TaskView } from "../ipc/generated/TaskView";
 import type { Today } from "../ipc/generated/Today";
@@ -57,7 +61,7 @@ import type { VisitKind } from "../ipc/generated/VisitKind";
 import type { VisitStatus } from "../ipc/generated/VisitStatus";
 import type { VisitView } from "../ipc/generated/VisitView";
 import {
-  addDays, CONTACT_ROLES, dayName, daysBetween, formatDate, formatMonth, formatTime, isIsoDate, MAX_AGOROT, moneyNumber, monthOf, monthRange,
+  addDays, CONTACT_ROLES, dayName, ownTime, ownVisit, daysBetween, formatDate, formatMonth, formatTime, isIsoDate, MAX_AGOROT, moneyNumber, monthOf, monthRange,
   PATIENT_STATUSES, PAY_METHOD_LABEL, PAY_METHODS, TASK_KINDS, today as localToday, VISIT_KIND_LABEL, VISIT_KINDS, VISIT_STATUS_LABEL,
   VISIT_STATUSES, weekday, weekRange,
 } from "../screens/clinic/format";
@@ -136,6 +140,23 @@ export function standInHost(): ClinicHost & { inputs: { id: string; caseId: stri
 function refuse(message: string, code = "refused"): never {
   const e: UiError = { code, message, details: [], action: { kind: "dismiss" } };
   throw e;
+}
+
+/** As the core's `snippet`: a few words of the record around the first place the word is. */
+function snippetOf(record: string, word: string): string {
+  const flat = Array.from(record.split(/\s+/).filter(Boolean).join(" "));
+  const lower = flat.map(searchLetter);
+  const needle = Array.from(word);
+  let at = 0;
+  for (let i = 0; i + needle.length <= lower.length; i += 1) {
+    if (needle.every((c, j) => lower[i + j] === c)) {
+      at = i;
+      break;
+    }
+  }
+  const from = Math.max(0, at - 40);
+  const to = Math.min(flat.length, at + needle.length + 100);
+  return `${from > 0 ? "…" : ""}${flat.slice(from, to).join("")}${to < flat.length ? "…" : ""}`;
 }
 
 function need(ok: boolean, message: string): asserts ok {
@@ -225,7 +246,7 @@ export const PLACEHOLDERS = ["{הורה}", "{ילד}", "{יום}", "{תאריך}
 /** The settings of a clinic nobody touched yet (as `ClinicSettings::default` in the core). */
 export function defaultClinicSettings(): ClinicSettings {
   // "unknown" is only here because the table is by kind: it is never one of `VISIT_KINDS`.
-  const minutes: Record<VisitKind, number> = { intake: 60, assessment: 90, observation: 60, feedback: 60, therapy: 50, guidance: 50, meeting: 30, other: 50, block: 60, unknown: 60 };
+  const minutes: Record<VisitKind, number> = { intake: 60, assessment: 90, observation: 60, feedback: 60, therapy: 50, guidance: 50, meeting: 30, other: 50, block: 60, supervision: 60, unknown: 60 };
   return {
     day_start: 8 * 60,
     day_end: 20 * 60,
@@ -326,6 +347,8 @@ export class FakeClinic {
   private patients: Patient[] = [];
   private visits: Visit[] = [];
   private notes: SessionNote[] = [];
+  /** The sound of each recording, by its id (D-208): never in a list, read only to play it. */
+  private sounds = new Map<string, RecordingSound>();
   private payments: Payment[] = [];
   private charges: Charge[] = [];
   private tasks: ClinicTask[] = [];
@@ -401,6 +424,21 @@ export class FakeClinic {
         return { kind: "done" };
       case "note_to_case":
         return { kind: "note", data: this.noteToCase(r.id) };
+      case "save_recording":
+        return { kind: "note", data: this.saveRecording(r) };
+      case "recording": {
+        const sound = this.sounds.get(r.id) ?? refuse("ההקלטה לא נמצאה.", "not_found");
+        return { kind: "sound", data: sound };
+      }
+      case "delete_recording": {
+        const n = this.note(r.note_id);
+        need(n.recordings.some((x) => x.id === r.id), "ההקלטה לא נמצאה.");
+        const before = { ...n };
+        n.recordings = n.recordings.filter((x) => x.id !== r.id);
+        this.sounds.delete(r.id);
+        this.keep(n.id, "changed", this.noteLines(n, before), n.patient_id);
+        return { kind: "note", data: n };
+      }
       case "save_payment":
         return { kind: "payment", data: this.savePayment(r.payment) };
       case "void_payment":
@@ -451,6 +489,8 @@ export class FakeClinic {
         return { kind: "saved", data: this.savePathway(r.patient_id, r.visits, r.package, this.today(r.today)) };
       case "starter_tasks":
         return { kind: "tasks", data: this.starterTasks(r.patient_id, this.today(r.today)) };
+      case "search_notes":
+        return { kind: "found", data: this.searchNotes(r.text, r.personal) };
       case "insights": {
         const today = this.today(r.today);
         const data = fakeInsights(
@@ -460,6 +500,38 @@ export class FakeClinic {
         return { kind: "insights", data };
       }
     }
+  }
+
+  // ---------------------------------------------------------------- the search over the notes (D-216)
+
+  /** As the core's `search_notes`: every word in the record or (with `personal`) in the
+   *  personal note; newest first, at most 50; the personal note's words never come back. */
+  private searchNotes(text: string, personal: boolean): NoteSearch {
+    const trimmed = text.trim();
+    need(chars(trimmed.replace(/\s/g, "")) >= 2, "כדי לחפש בסיכומים צריך לכתוב לפחות שתי אותיות.");
+    need(chars(trimmed) <= 200, "הטקסט לחיפוש ארוך מדי. אפשר לחפש מילה או שתיים.");
+    const words = trimmed.split(/\s+/).map(searchForm);
+    const names = new Map(this.patients.map((p) => [p.id, p.name]));
+    const kinds = new Map(this.visits.map((v) => [v.id, v.kind]));
+    const found = this.notes
+      .filter((n) => names.has(n.patient_id))
+      .filter((n) => {
+        const record = searchForm(n.record);
+        const own = personal ? searchForm(n.personal) : "";
+        return words.every((w) => record.includes(w) || own.includes(w));
+      })
+      .sort((a, b) => (a.date === b.date ? (a.id < b.id ? 1 : -1) : a.date < b.date ? 1 : -1));
+    const hits = found.slice(0, 50).map((n): NoteHit => {
+      const record = searchForm(n.record);
+      const inRecord = words.find((w) => record.includes(w));
+      return {
+        note_id: n.id, patient_id: n.patient_id, patient_name: names.get(n.patient_id) ?? "", date: n.date,
+        visit_kind: n.visit_id === null ? null : (kinds.get(n.visit_id) ?? null),
+        snippet: inRecord === undefined ? "" : snippetOf(n.record, inRecord),
+        in_personal: inRecord === undefined || words.some((w) => !record.includes(w)),
+      };
+    });
+    return { hits, more: found.length > 50 };
   }
 
   // ---------------------------------------------------------------- free times, the pathway, the starter kit (D-197..D-199)
@@ -510,7 +582,7 @@ export class FakeClinic {
       if (!slot) refuse("לא נמצאה שעה פנויה לכל שלבי המסלול בחודשים הקרובים. אפשר להתחיל מתאריך אחר, או לקבוע את הפגישות אחת אחת.");
       out.push({
         id: "", patient_id: p.id, kind: step.kind, title: "", date: slot.date, start: slot.start, minutes, place: s.places[0] ?? "",
-        status: "planned", status_note: "", fee: p.session_fee ?? d?.fee ?? 0, charge_missed: false, series_id: null, note: "",
+        status: "planned", status_note: "", fee: p.session_fee ?? d?.fee ?? 0, charge_missed: false, series_id: null, note: "", remember: [],
       });
       const next = s.pathway[i + 1];
       earliest = addDays(slot.date, Math.max(1, next?.gap_days ?? 0));
@@ -688,10 +760,11 @@ export class FakeClinic {
       ...field("מקום", v.place),
       ...field("מצב", VISIT_STATUS_LABEL[v.status]),
       ...field("מה קרה", v.status_note),
-      ...(v.kind === "block" ? [] : [v.fee === 0 ? "מחיר: ללא חיוב" : `מחיר: ${plainMoney(v.fee)} ₪`]),
+      ...(ownVisit(v) ? [] : [v.fee === 0 ? "מחיר: ללא חיוב" : `מחיר: ${plainMoney(v.fee)} ₪`]),
       ...(v.charge_missed ? ["חיוב גם אם לא התקיימה: כן"] : []),
       ...(v.series_id !== null ? ["פגישה חוזרת: כן"] : []),
       ...field("הערה", v.note),
+      ...v.remember.map((i) => `לא לשכוח: ${i.done ? "✓" : "○"} ${i.text}`),
     ];
   }
 
@@ -734,6 +807,7 @@ export class FakeClinic {
       ...field("תאריך", formatDate(n.date)),
       ...(record.length === 0 ? ["רשומה: ריקה"] : ["רשומה:", ...record]),
       `תרשומת אישית: ${aboutPersonal}`,
+      ...(n.recordings.length > 0 ? [`הקלטות לעצמך: ${n.recordings.length}`] : []),
       ...(n.case_input_id !== null ? ["הועבר לחומרי התיק: כן"] : []),
     ];
   }
@@ -1060,6 +1134,8 @@ export class FakeClinic {
       }
     }
     for (const record of gone) this.marked.delete(record);
+    // The recordings go with the patient (D-208).
+    for (const n of this.notes) if (n.patient_id === id) for (const rec of n.recordings) this.sounds.delete(rec.id);
     this.visits = this.visits.filter((v) => v.patient_id !== id);
     this.notes = this.notes.filter((n) => n.patient_id !== id);
     this.payments = this.payments.filter((x) => x.patient_id !== id);
@@ -1156,6 +1232,7 @@ export class FakeClinic {
     return {
       ...input, patient_id: blankToNull(input.patient_id), title: cleanLine(input.title), date: input.date.trim(), place: cleanLine(input.place),
       status_note: cleanLine(input.status_note), series_id: blankToNull(input.series_id), note: input.note.trim(),
+      remember: (input.remember ?? []).map((i) => ({ text: cleanLine(i.text), done: i.done })).filter((i) => i.text !== ""),
     };
   }
 
@@ -1163,9 +1240,9 @@ export class FakeClinic {
    *  exists is asked right after it, as the service does. */
   private checkVisit(v: Visit) {
     visitKnown(v);
-    if (v.kind === "block") {
-      need(v.patient_id === null, "זמן שמור הוא בלי מטופל. כדי לקבוע פגישה עם מטופל צריך לבחור סוג פגישה אחר.");
-      need(v.fee === 0, "לזמן שמור אין מחיר.");
+    need(v.kind !== "block" || v.patient_id === null, "בזמן שמור אין מטופל. כדי לקבוע פגישה עם מטופל צריך לבחור סוג פגישה אחר.");
+    if (ownVisit(v)) {
+      need(v.fee === 0, v.kind === "supervision" ? "להדרכה בלי מטופל אין מחיר. כדי לחייב, בוחרים את הילד שעליו ההדרכה." : "לזמן שמור אין מחיר.");
     } else {
       need(v.patient_id !== null, "צריך לבחור מטופל לפגישה.");
     }
@@ -1177,6 +1254,8 @@ export class FakeClinic {
     short(v.place, "מקום");
     short(v.status_note, "מה קרה");
     long(v.note, "הערה");
+    need(v.remember.length <= 20, "אפשר לרשום עד 20 דברים שלא לשכוח לפגישה אחת.");
+    v.remember.forEach((i) => short(i.text, "לא לשכוח"));
     need(v.patient_id === null || this.patients.some((p) => p.id === v.patient_id), NO_PATIENT);
   }
 
@@ -1219,7 +1298,8 @@ export class FakeClinic {
         series = this.newId("series");
       }
       this.canActivate(v.patient_id);
-      const written = dates.map((date): Visit => ({ ...v, id: this.newId("visit"), date, series_id: series }));
+      // What not to forget belongs to the first visit only (D-207).
+      const written = dates.map((date, i): Visit => ({ ...v, id: this.newId("visit"), date, series_id: series, remember: i === 0 ? v.remember : [] }));
       for (const w of written) {
         this.visits.push(w);
         this.keepVisit(w, "created");
@@ -1313,7 +1393,8 @@ export class FakeClinic {
     const p = this.patient(input.patient_id);
     const note = { ...input, visit_id: blankToNull(input.visit_id), date: input.date.trim(), record: input.record.trim(), personal: input.personal.trim() };
     realDate(note.date, "תאריך");
-    need(note.record !== "" || note.personal !== "", "הסיכום ריק. צריך לכתוב משהו ברשומה או בתרשומת האישית.");
+    const old0 = note.id === "" ? null : this.note(note.id);
+    need(note.record !== "" || note.personal !== "" || (old0?.recordings.length ?? 0) > 0, "הסיכום ריק. צריך לכתוב משהו ברשומה או בתרשומת האישית.");
     atMost(note.record, RECORD, "רשומה");
     atMost(note.personal, RECORD, "תרשומת אישית");
     if (note.visit_id !== null) {
@@ -1333,6 +1414,8 @@ export class FakeClinic {
       personal: note.personal,
       // Set only by "להעביר לחומרי התיק".
       case_input_id: old ? old.case_input_id : null,
+      // Only their own requests change the recordings (D-208).
+      recordings: old ? old.recordings : [],
     };
     const before = old ? { ...old } : null;
     // Saved again with nothing changed: nothing is written, and the history gets no line.
@@ -1345,11 +1428,43 @@ export class FakeClinic {
     return old ?? saved;
   }
 
+  /** Keeps a recording with a note (D-208), as the core's `clinic_save_recording`. */
+  private saveRecording(r: Extract<ClinicRequest, { op: "save_recording" }>): SessionNote {
+    const main = (r.mime.split(";")[0] ?? "").trim().toLowerCase();
+    const mime = ({ "audio/x-wav": "audio/wav", "audio/wave": "audio/wav", "audio/mp3": "audio/mpeg", "audio/m4a": "audio/x-m4a" } as Record<string, string>)[main] ?? main;
+    need(["audio/webm", "audio/ogg", "audio/mp4", "audio/mpeg", "audio/wav", "audio/x-m4a", "audio/aac"].includes(mime),
+      "אפשר לשמור רק קובץ שמע: הקלטה מהתוכנה, או קובץ מהטלפון (m4a,‏ mp3,‏ wav,‏ ogg,‏ webm).");
+    need(r.data !== "", "ההקלטה ריקה.");
+    need(r.data.length % 4 === 0 && /^[A-Za-z0-9+/]+={0,2}$/.test(r.data), "ההקלטה לא הגיעה בשלמותה. אפשר לנסות שוב.");
+    const bytes = (r.data.length / 4) * 3 - (r.data.match(/=*$/)?.[0].length ?? 0);
+    need(bytes <= 40 * 1024 * 1024, "ההקלטה גדולה מדי. אפשר לשמור הקלטה של עד 40 מגה-בייט.");
+    const p = this.patient(r.patient_id);
+    const visitId = blankToNull(r.visit_id);
+    if (visitId === null && r.note_id === "") realDate(r.date.trim(), "תאריך");
+    const kept = this.notes.reduce((sum, n) => sum + n.recordings.reduce((a, x) => a + x.bytes, 0), 0);
+    need(kept + bytes <= 600 * 1024 * 1024, "בכספת כבר שמורות הקלטות בהיקף של כ-600 מגה-בייט, וזה המקסימום, כדי שהגיבוי יישאר קטן מספיק לשחזור. אפשר למחוק הקלטות ישנות שכבר לא צריך.");
+    let note: SessionNote | null = r.note_id === "" ? (visitId === null ? null : this.notes.find((n) => n.visit_id === visitId) ?? null) : this.note(r.note_id);
+    if (visitId !== null) need(this.visit(visitId).patient_id === p.id, "הפגישה שנבחרה שייכת למטופל אחר.");
+    need(note === null || note.patient_id === p.id, "ההקלטה שייכת לסיכום של מטופל אחר.");
+    need((note?.recordings.length ?? 0) < 10, "לסיכום אחד אפשר לשמור עד 10 הקלטות.");
+    const before = note ? { ...note } : null;
+    if (note === null) {
+      note = { id: this.newId("note"), patient_id: p.id, visit_id: visitId, date: visitId === null ? r.date.trim() : this.visit(visitId).date, record: "", personal: "", case_input_id: null, recordings: [] };
+      this.notes.push(note);
+    }
+    const id = this.newId("recording");
+    this.sounds.set(id, { mime, data: r.data });
+    note.recordings = [...note.recordings, { id, mime, seconds: Math.min(r.seconds, 4 * 3600), bytes, date: localToday(this.clock()).date, name: cleanLine(r.name).slice(0, 200) }];
+    this.keep(note.id, before ? "changed" : "created", this.noteLines(note, before), p.id);
+    this.wrote(p.id);
+    return note;
+  }
+
   /** A note that has text is part of the record and stays (she can correct it; every state is
    *  kept). Only one that holds nothing can be removed. */
   private deleteNote(id: string) {
     const n = this.note(id);
-    need(n.record.trim() === "" && n.personal.trim() === "", "סיכום פגישה הוא חלק מהרשומה, ולכן לא מוחקים אותו. אפשר לערוך אותו, וכל שינוי נשמר בהיסטוריה.");
+    need(n.record.trim() === "" && n.personal.trim() === "" && n.recordings.length === 0, "סיכום פגישה הוא חלק מהרשומה, ולכן לא מוחקים אותו. אפשר לערוך אותו, וכל שינוי נשמר בהיסטוריה.");
     this.keep(n.id, "deleted", this.noteLines(n, n), n.patient_id);
     this.notes = this.notes.filter((x) => x.id !== id);
   }
@@ -1596,7 +1711,7 @@ export class FakeClinic {
 
       for (const v of mine) {
         const when = `${formatDate(v.date)} בשעה ${formatTime(v.start)}`;
-        if (v.status === "planned" && v.kind !== "block") {
+        if (v.status === "planned" && !ownVisit(v)) {
           if (v.date < today.date || (v.date === today.date && v.start + v.minutes <= today.minute)) {
             add("unmarked", p, `הפגישה מיום ${when} עדיין מסומנת כמתוכננת. אפשר לסמן אם התקיימה.`, v.date, { visit: v.id });
           }
@@ -1676,7 +1791,7 @@ export class FakeClinic {
     const on = (date: string) => this.visits.filter((v) => v.date === date).sort(byDateTime);
     const todays = on(today.date);
     // A visit with a patient that was not cancelled; time she kept for herself is not one.
-    const counts = (v: Visit) => v.kind !== "block" && v.status !== "cancelled";
+    const counts = (v: Visit) => !ownVisit(v) && v.status !== "cancelled";
     // Today has nothing left once every visit of it has ended.
     const left = todays.some((v) => counts(v) && v.start + v.minutes > today.minute);
     const nextDay = left ? null : (this.visits.filter((v) => counts(v) && v.date > today.date).map((v) => v.date).sort()[0] ?? null);
@@ -1864,14 +1979,14 @@ export class FakeClinic {
     const visit = (p: Patient | null, kind: VisitKind, at: number, start: number, status: VisitStatus, over: Partial<Visit> = {}): Visit => {
       const v: Visit = {
         id: this.newId("visit"), patient_id: p?.id ?? null, kind, title: "", date: day(at), start, minutes: minutes(kind), place: "הקליניקה", status,
-        status_note: "", fee: kind === "block" ? 0 : (p?.session_fee ?? fees[kind] ?? 0), charge_missed: false, series_id: null, note: "", ...over,
+        status_note: "", fee: ownTime(kind, p?.id) ? 0 : (p?.session_fee ?? fees[kind] ?? 0), charge_missed: false, series_id: null, note: "", remember: [], ...over,
       };
       this.visits.push(v);
       this.keepVisit(v, "created");
       return v;
     };
     const note = (v: Visit, record: string, personal = "") => {
-      const n: SessionNote = { id: this.newId("note"), patient_id: v.patient_id ?? "", visit_id: v.id, date: v.date, record, personal, case_input_id: null };
+      const n: SessionNote = { id: this.newId("note"), patient_id: v.patient_id ?? "", visit_id: v.id, date: v.date, record, personal, case_input_id: null, recordings: [] };
       this.notes.push(n);
       this.keep(n.id, "created", this.noteLines(n, null), n.patient_id);
     };

@@ -1,5 +1,6 @@
 // U7: search inside the open case, in its materials and its paragraphs. On this computer, in
 // what the case screen already holds; nothing is sent. Results are shown as text.
+import { regularFinals } from "../../searchForm";
 import { useEffect, useMemo, useState } from "react";
 import type { CaseDetail } from "../../ipc/client";
 import { kindLabel } from "../../i18n/he";
@@ -24,10 +25,11 @@ const MARKS = /[\u0591-\u05C7]/g;
 const MARK = /[\u0591-\u05C7]/;
 
 function fold(s: string): string {
-  return s.replace(MARKS, "").toLowerCase();
+  return regularFinals(s.replace(MARKS, "").toLowerCase());
 }
 
-/** A text without niqqud and in lower case, with the place of each of its characters in the original. */
+/** A text without niqqud, in lower case and with regular letters for final ones ("גן" finds
+ *  "גנים"), with the place of each of its characters in the original. */
 interface Folded {
   folded: string;
   /** `null` when nothing was dropped and no character changed length: positions are the same. */
@@ -44,7 +46,7 @@ function foldText(text: string): Folded {
   let made: Folded;
   const lower = text.toLowerCase();
   if (!MARK.test(text) && lower.length === text.length) {
-    made = { folded: lower, keep: null };
+    made = { folded: regularFinals(lower), keep: null };
   } else {
     // Index on a copy without niqqud, then map the position back to the original text.
     const keep: number[] = [];
@@ -53,7 +55,7 @@ function foldText(text: string): Folded {
       const c = text[i] ?? "";
       if (MARK.test(c)) continue;
       const l = c.toLowerCase();
-      parts.push(l);
+      parts.push(regularFinals(l));
       // A letter whose lower case is longer keeps one place per character of it.
       for (let k = 0; k < l.length; k++) keep.push(i);
     }

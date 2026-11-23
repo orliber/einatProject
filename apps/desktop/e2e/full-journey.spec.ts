@@ -255,7 +255,7 @@ test("two sections are written and approved, a paragraph is edited by hand, and 
   await expect(contents).toContainText(/1 \/ \d+ מאושרים/);
 
   // The second: another section with material, out of focus, from its one line.
-  const gap = report.locator(".a4-gap-line").getByRole("button", { name: "✦ לנסח" }).first();
+  const gap = report.locator(".a4-gap-line").getByRole("button", { name: "✦ לנסח", exact: true }).first();
   const secondId = await gap.evaluate((b) => b.closest(".a4-section")?.id ?? "");
   expect(secondId).not.toBe(firstId);
   // Out of focus, "✦ לנסח" brings the section into focus (D-140); its "✦ לנסח את הסעיף" sends.

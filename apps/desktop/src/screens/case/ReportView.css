@@ -222,6 +222,12 @@
   white-space: pre-wrap;
   text-align: justify;
 }
+/* D-214: a sub-heading inside a section, as the file prints it. */
+.a4-subhead {
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
 .a4-pending {
   border-inline-start: 3px solid var(--warn-line);
   background: var(--warn-paper);
@@ -677,6 +683,9 @@
 }
 .a4-mark {
   background: var(--mark);
+  /* The text keeps the colour of where it stands: a browser's own black for a mark is
+     unreadable on the dark theme's mark, outside the white page (WCAG 1.4.3). */
+  color: inherit;
   border-radius: 3px;
   padding: 0 2px;
 }
@@ -985,4 +994,14 @@
   .a4-fold {
     display: none;
   }
+}
+.a4-source-open {
+  border: 0;
+  font: inherit;
+  cursor: pointer;
+}
+.a4-source-open:hover,
+.a4-source-open:focus-visible {
+  color: var(--primary);
+  text-decoration: underline;
 }

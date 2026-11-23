@@ -219,7 +219,7 @@ export type VisitStep = "hold" | "note" | "remind" | null;
 /** The one step that fits the time: begun and planned → "hold"; held without a note → "note";
  *  still ahead and planned → "remind"; otherwise none. Time she kept for herself has none. */
 export function visitStep(v: Visit, hasNote: boolean, now: Today): VisitStep {
-  if (v.kind === "block" || v.patient_id === null) return null;
+  if (ownVisit(v) || v.patient_id === null) return null;
   if (v.status === "planned") return visitStarted(v, now) ? "hold" : "remind";
   if (v.status === "held" && !hasNote) return "note";
   return null;
@@ -277,11 +277,23 @@ export const VISIT_KIND_LABEL: Record<VisitKind, string> = {
   meeting: "פגישה מקצועית",
   other: "פגישה אחרת",
   block: "זמן שמור",
+  supervision: "הדרכה",
   unknown: "סוג לא מוכר",
 };
 
+/** Her own time (D-207): a block, or a supervision with no child's card. No patient, no fee,
+ *  not a visit in the counts. A supervision about a child is a visit like any other. */
+export function ownTime(kind: VisitKind, patientId: string | null | undefined): boolean {
+  return kind === "block" || (kind === "supervision" && (patientId ?? "").trim() === "");
+}
+
+/** The visit is her own time (see `ownTime`). */
+export function ownVisit(v: Visit): boolean {
+  return ownTime(v.kind, v.patient_id);
+}
+
 /** The kinds in the order she meets them in an assessment; the block last. */
-export const VISIT_KINDS: VisitKind[] = ["intake", "assessment", "observation", "feedback", "therapy", "guidance", "meeting", "other", "block"];
+export const VISIT_KINDS: VisitKind[] = ["intake", "assessment", "observation", "feedback", "therapy", "guidance", "meeting", "other", "block", "supervision"];
 
 export const VISIT_STATUS_LABEL: Record<VisitStatus, string> = {
   planned: "מתוכננת",

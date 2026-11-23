@@ -38,7 +38,8 @@ pub use relative::{
     check_critical_values, relative_sets, CriticalValue, RelativeBasis, RelativeSet,
 };
 pub use report::{
-    ReportPart, ReportSection, ReportStructure, SectionMode, DEFAULT_TEMPLATE, INSTITUTE_TEMPLATE,
+    subheading_of, subheadings, with_subheading, ReportPart, ReportSection, ReportStructure,
+    SectionMode, DEFAULT_TEMPLATE, INSTITUTE_TEMPLATE, SUBHEADING_MARK,
 };
 pub use routing::{passage_ranges, passages, Feed, Routing, SectionPassages, Suggestion};
 pub use scores::{

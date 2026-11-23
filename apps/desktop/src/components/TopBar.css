@@ -267,3 +267,7 @@ button.topbar-status:hover {
     padding: 1px 5px;
   }
 }
+/* The landmark around the clinic's tabs: a name for a screen reader, no box on the page. */
+.subbar-landmark {
+  display: contents;
+}

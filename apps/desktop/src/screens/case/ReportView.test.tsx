@@ -475,6 +475,11 @@ describe("the keyboard with the brief folded (D-204)", () => {
     // Not shown by the folded-brief rule: the gap line is the one that says it.
     expect(within(first).queryByRole("button", { name: "✦ לנסח את הסעיף" })).toBeNull();
     expect(page.querySelectorAll(sourcesShown)).toHaveLength(0);
+    // D-210: it is still written with the AI, from her points only; the box opens on request.
+    expect(within(first).queryByText("מה לכתוב בסעיף?")).toBeNull();
+    await user.click(within(first).getByRole("button", { name: "✦ לנסח מנקודות" }));
+    expect(await within(first).findByText("מה לכתוב בסעיף?")).toBeInTheDocument();
+    expect(within(first).getByRole("button", { name: "✦ לנסח מהנקודות" })).toBeInTheDocument();
   });
 
   it("Enter on “✦ לנסח את הסעיף” keeps the keyboard on the section while it is written, and the next Enter approves the draft", async () => {
@@ -1207,5 +1212,21 @@ describe("the keyboard with the brief folded (D-204)", () => {
     const asked = calls.find((c) => c.cmd === "prepare_section")?.args as { instruction: string };
     expect(asked.instruction).toBe(DRAFT_FROM_SOURCES);
     expect(calls.some((c) => c.cmd === "keep_draft_brief")).toBe(false);
+  });
+});
+
+describe("a sub-section inside a section (D-214)", () => {
+  it("shows a first line that is one of the section's sub-headings as a heading, and no other line", async () => {
+    const { page } = await openReport((d) => {
+      const s = d.sections.find((x) => x.paragraphs.some((p) => p.status === "approved"));
+      if (!s) throw new Error("no approved paragraph");
+      s.subheadings = ["שפה ותקשורת"];
+      const [first, second] = s.paragraphs;
+      if (first) first.text = "שפה ותקשורת\nהילד דיבר במשפטים קצרים.";
+      if (second) second.text = "שפה ותקשורת היא תחום חזק.";
+    });
+    const head = await within(page).findByText("שפה ותקשורת", { selector: "strong.a4-subhead" });
+    expect(head.parentElement).toHaveTextContent("הילד דיבר במשפטים קצרים.");
+    expect(page.querySelectorAll("strong.a4-subhead")).toHaveLength(1);
   });
 });

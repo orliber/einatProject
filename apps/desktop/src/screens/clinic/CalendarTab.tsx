@@ -27,10 +27,11 @@ import {
 } from "./calendarLayout";
 import { useCalendar, useClinicSettings, useHolidays, useOptimistic, useReloadClinic, useToday } from "./clinicData";
 import {
-  dayName, formatDateLong, formatDateShort, formatMonth, formatSpan, formatTime, leftAloneWords, monthOf, VISIT_KIND_LABEL, VISIT_STATUS_LABEL,
+  dayName, formatDateLong, formatDateShort, formatMonth, formatSpan, formatTime, leftAloneWords, monthOf, ownVisit, VISIT_KIND_LABEL, VISIT_STATUS_LABEL,
   visitTitle, weekday,
 } from "./format";
 import { NoteDialog } from "./NoteDialog";
+import { VisitPaymentDialog } from "./PaymentDialog";
 import { EmptyState, Pager, PatientName, ReadError, Section, StatusBadge, usePaged, useShownName, VisitRow } from "./parts";
 import { VisitActions } from "./VisitActions";
 import { VisitDialog, type VisitStart } from "./VisitDialog";
@@ -91,7 +92,8 @@ interface Move {
 type Open =
   | { kind: "visit"; view: VisitView }
   | { kind: "new"; start?: VisitStart }
-  | { kind: "note"; patientId: string; visit: Visit }
+  | { kind: "note"; patientId: string; visit: Visit; record?: boolean | undefined }
+  | { kind: "payment"; patientId: string; visit: Visit }
   | { kind: "scope"; view: VisitView; by: MoveBy | null; refocus: boolean }
   | null;
 
@@ -325,7 +327,8 @@ export function CalendarTab() {
         {stage}
         <DaySide bar={bar}>
           <Agenda key={anchor} date={anchor} now={now} visits={days.get(anchor) ?? NO_VISITS} onOpen={grid.open} onNew={() => newOn(anchor)}
-            onHold={(v) => void hold(v)} onNote={(patientId, visit) => setOpen({ kind: "note", patientId, visit })} />
+            onHold={(v) => void hold(v)} onNote={(patientId, visit, record) => setOpen({ kind: "note", patientId, visit, record })}
+            onPay={(patientId, visit) => setOpen({ kind: "payment", patientId, visit })} />
         </DaySide>
       </div>
     );
@@ -361,7 +364,8 @@ export function CalendarTab() {
 
       {open?.kind === "visit" && <VisitDialog view={open.view} onClose={() => setOpen(null)} />}
       {open?.kind === "new" && (open.start ? <VisitDialog start={open.start} onClose={() => setOpen(null)} /> : <VisitDialog onClose={() => setOpen(null)} />)}
-      {open?.kind === "note" && <NoteDialog patientId={open.patientId} visit={open.visit} onClose={() => setOpen(null)} />}
+      {open?.kind === "note" && <NoteDialog patientId={open.patientId} visit={open.visit} record={open.record} onClose={() => setOpen(null)} />}
+      {open?.kind === "payment" && <VisitPaymentDialog patientId={open.patientId} visit={open.visit} today={now.date} onClose={() => setOpen(null)} />}
       {open?.kind === "scope" && (
         <Dialog narrow title="פגישה מסדרה חוזרת" onClose={() => setOpen(null)}
           footer={<>
@@ -401,7 +405,7 @@ function MoveBar({ picked, scope, onStep, onScope, onOpen, onDone }: {
   return (
     <div ref={self} className="cal-move cal-move-on" role="group" aria-label="הזזת הפגישה שנבחרה">
       <span className="cal-move-what" role="status">
-        {v.kind === "block" ? <span className="clinic-name clinic-name-strong">{visitTitle(v)}</span> : <PatientName name={picked.patient_name} strong />}
+        {ownVisit(v) ? <span className="clinic-name clinic-name-strong">{visitTitle(v)}</span> : <PatientName name={picked.patient_name} strong />}
         <span>{formatDateLong(v.date)}</span>
         <span className="num" dir="ltr">{formatSpan(v.start, v.minutes)}</span>
         {picked.overlaps && <span className="chip chip-warn">חופפת לפגישה אחרת</span>}
@@ -558,7 +562,7 @@ function GridVisit({ view, chosen, short, style, actions }: {
 }) {
   const v = view.visit;
   const shownName = useShownName();
-  const block = v.kind === "block";
+  const block = ownVisit(v);
   const who = block ? visitTitle(v) : shownName(view.patient_name);
   function onKey(e: KeyboardEvent<HTMLButtonElement>) {
     if (e.key === "Escape") {
@@ -587,7 +591,7 @@ function GridVisit({ view, chosen, short, style, actions }: {
         <span className="cal-visit-who">{block ? who : <PatientName name={view.patient_name} strong />}</span>
         <span className="visually-hidden">,</span>
         {" "}
-        {block ? <span className="visually-hidden">{VISIT_KIND_LABEL.block}</span> : <span className="cal-visit-kind">{visitTitle(v)}</span>}
+        {block ? <span className="visually-hidden">{VISIT_KIND_LABEL[v.kind]}</span> : <span className="cal-visit-kind">{visitTitle(v)}</span>}
         {!block && <span className="visually-hidden">,</span>}
         {" "}
         {!block && (v.status === "planned" ? <span className="visually-hidden">{VISIT_STATUS_LABEL.planned}</span> : <StatusBadge status={v.status} />)}
@@ -700,9 +704,9 @@ function DaySide({ bar, children }: { bar: ReactNode; children: ReactNode }) {
 
 /** The day as a list beside its grid. Each visit offers one step by the time and the rest under
  *  "⋯", as on the front page (`VisitActions`, D-204); her own time has neither. */
-function Agenda({ date, now, visits, onOpen, onNew, onHold, onNote }: {
+function Agenda({ date, now, visits, onOpen, onNew, onHold, onNote, onPay }: {
   date: string; now: Today; visits: VisitView[]; onOpen: (view: VisitView) => void; onNew: () => void;
-  onHold: (visit: Visit) => void; onNote: (patientId: string, visit: Visit) => void;
+  onHold: (visit: Visit) => void; onNote: (patientId: string, visit: Visit, record?: boolean) => void; onPay: (patientId: string, visit: Visit) => void;
 }) {
   const { shown, page, pages, setPage } = usePaged(visits, 12);
   return (
@@ -718,11 +722,12 @@ function Agenda({ date, now, visits, onOpen, onNew, onHold, onNote }: {
               const v = view.visit;
               // The key is the visit's and the step keeps its place: after "התקיימה" the focus
               // stays on the same button, now "לכתוב סיכום".
-              const pid = v.kind !== "block" ? v.patient_id : null;
+              const pid = !ownVisit(v) ? v.patient_id : null;
               return (
                 <VisitRow key={v.id} view={view} onOpen={() => onOpen(view)}
                   actions={pid !== null
-                    ? <VisitActions view={view} patientId={pid} now={now} onHold={onHold} onNote={(x) => onNote(pid, x)} onOpen={() => onOpen(view)} />
+                    ? <VisitActions view={view} patientId={pid} now={now} onHold={onHold} onNote={(x, record) => onNote(pid, x, record)} onOpen={() => onOpen(view)}
+                        onPay={(x) => onPay(pid, x)} />
                     : undefined} />
               );
             })}
@@ -786,10 +791,10 @@ function MonthDay({ date, visits, today, outside, onDay }: { date: string; visit
           {visits.slice(0, MONTH_ROWS).map((view) => {
             const v = view.visit;
             return (
-              <li key={v.id} className={`cal-month-visit cal-visit-${v.status} cal-kind-${v.kind}${v.kind === "block" ? " cal-visit-block" : ""}`} data-status={v.status}>
+              <li key={v.id} className={`cal-month-visit cal-visit-${v.status} cal-kind-${v.kind}${ownVisit(v) ? " cal-visit-block" : ""}`} data-status={v.status}>
                 <span className="num cal-visit-time" dir="ltr">{formatTime(v.start)}</span>
-                <span className="cal-visit-who">{v.kind === "block" ? visitTitle(v) : <PatientName name={view.patient_name} />}</span>
-                {v.kind !== "block" && v.status !== "planned" && <span className="visually-hidden">, {VISIT_STATUS_LABEL[v.status]}</span>}
+                <span className="cal-visit-who">{ownVisit(v) ? visitTitle(v) : <PatientName name={view.patient_name} />}</span>
+                {!ownVisit(v) && v.status !== "planned" && <span className="visually-hidden">, {VISIT_STATUS_LABEL[v.status]}</span>}
               </li>
             );
           })}

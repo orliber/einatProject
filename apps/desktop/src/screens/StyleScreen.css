@@ -778,3 +778,7 @@
     justify-self: stretch;
   }
 }
+.style-source-open {
+  text-align: start;
+  color: inherit;
+}

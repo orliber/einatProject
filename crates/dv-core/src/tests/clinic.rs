@@ -1033,6 +1033,61 @@ fn only_a_planned_visit_without_a_note_can_be_removed() {
     assert_eq!(calendar(&mut core, "2027-01-01", "2027-02-28").len(), 2);
 }
 
+// ------------------------------------------------------------------ the search over the notes (D-216)
+
+#[test]
+fn a_search_reads_the_notes_of_every_card_and_leaves_no_trace() {
+    let (_dir, mut core) = open_clinic();
+    let noam = new_patient(&mut core, "נועם");
+    let tamar = new_patient(&mut core, "תמר");
+    save_note(
+        &mut core,
+        SessionNote {
+            personal: "מחשבה-פרטית-בדויה".to_owned(),
+            ..a_note(&noam, None, "שיחה עם הגננת על המעברים.")
+        },
+    );
+    save_note(&mut core, a_note(&tamar, None, "המעברים קשים גם בבית."));
+    let search = |core: &mut Core, text: &str, personal: bool| match ask(
+        core,
+        ClinicRequest::SearchNotes {
+            text: text.to_owned(),
+            personal,
+        },
+    ) {
+        ClinicReply::Found(found) => found,
+        other => panic!("{other:?}"),
+    };
+    let events = |core: &mut Core| core.activity(None).unwrap().entries.len();
+    let before = events(&mut core);
+
+    let both = search(&mut core, "המעברים", false);
+    let mut names: Vec<&str> = both.hits.iter().map(|h| h.patient_name.as_str()).collect();
+    names.sort_unstable();
+    assert_eq!(names, ["נועם", "תמר"]);
+    assert_eq!(
+        search(&mut core, "הגננת", false).hits[0].patient_id,
+        noam.id
+    );
+    // The personal note only when she asks, and never its words.
+    assert!(search(&mut core, "מחשבה-פרטית-בדויה", false)
+        .hits
+        .is_empty());
+    let own = search(&mut core, "מחשבה-פרטית-בדויה", true);
+    assert!(own.hits[0].in_personal && own.hits[0].snippet.is_empty());
+    // A search is a read: the event log does not know one was made.
+    assert_eq!(events(&mut core), before);
+
+    // One letter is refused in her words.
+    assert!(matches!(
+        core.clinic(ClinicRequest::SearchNotes {
+            text: "א".to_owned(),
+            personal: false
+        }),
+        Err(CoreError::Refused(_))
+    ));
+}
+
 // ------------------------------------------------------------------ session notes
 
 #[test]
@@ -1618,7 +1673,7 @@ fn the_settings_start_from_the_defaults_and_are_checked() {
     };
     refused(&mut core, ClinicRequest::SaveSettings { settings: bad });
     let mut bad = ClinicSettings::default();
-    bad.defaults.pop();
+    bad.defaults.remove(0);
     refused(&mut core, ClinicRequest::SaveSettings { settings: bad });
     assert_eq!(read(&mut core), saved);
     // The settings are not a record with a history, and cannot be reached as one.
@@ -4604,4 +4659,282 @@ fn a_message_opens_the_chat_with_the_number_only() {
     // The contact she picked must have what the channel needs.
     refused(&mut core, compose(rules::Channel::Sms, Some(0)));
     refused(&mut core, compose(rules::Channel::Unknown, None));
+}
+
+// ------------------------------------------------------------------ D-207, D-208
+
+#[test]
+fn a_supervision_is_her_own_time_without_a_child_and_a_visit_with_one() {
+    let (_dir, mut core) = open_clinic();
+    let noam = new_patient(&mut core, "נועם לביא");
+    let own = Visit {
+        kind: VisitKind::Supervision,
+        date: "2026-11-18".to_owned(),
+        start: 600,
+        minutes: 60,
+        ..Visit::default()
+    };
+    let kept = save_visit(&mut core, own.clone());
+    assert_eq!(kept.kind, VisitKind::Supervision);
+    // About a child (his kindergarten teacher): a visit on his card, with a fee and a note.
+    let about = save_visit(
+        &mut core,
+        Visit {
+            patient_id: Some(noam.id.clone()),
+            fee: 30_000,
+            date: "2026-11-10".to_owned(),
+            ..own.clone()
+        },
+    );
+    mark(&mut core, &about, VisitStatus::Held);
+    let note = save_note(
+        &mut core,
+        a_note(&noam, Some(&about), "הודרכה הגננת על דרכי ויסות."),
+    );
+    assert_eq!(note.visit_id.as_deref(), Some(about.id.as_str()));
+    let c = card(&mut core, &noam.id);
+    assert!(c.visits.iter().any(|v| v.visit.id == about.id));
+    assert_eq!(c.balance.charged, 30_000);
+    refused(
+        &mut core,
+        ClinicRequest::SaveVisit {
+            visit: Visit { fee: 10_000, ..own },
+            repeat: None,
+            scope: Scope::One,
+        },
+    );
+    // Settings saved before supervision existed are read with its usual length.
+    match ask(&mut core, ClinicRequest::Settings) {
+        ClinicReply::Settings(s) => {
+            assert!(s.defaults.iter().any(|d| d.kind == VisitKind::Supervision));
+            assert!(rules::validate_settings(&s).is_ok());
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn what_not_to_forget_stays_with_its_visit_only() {
+    let (_dir, mut core) = open_clinic();
+    let noam = new_patient(&mut core, "נועם לביא");
+    let first = Visit {
+        remember: vec![rules::RememberItem {
+            text: " לדבר עם הגננת ".to_owned(),
+            done: false,
+        }],
+        ..a_visit(&noam, VisitKind::Therapy, "2026-11-18", 600)
+    };
+    let saved = save_visits(
+        &mut core,
+        first,
+        Some(Repeat {
+            every_weeks: 1,
+            count: 3,
+        }),
+        Scope::One,
+    );
+    assert_eq!(saved.visits.len(), 3);
+    let with: Vec<_> = saved
+        .visits
+        .iter()
+        .filter(|v| !v.visit.remember.is_empty())
+        .collect();
+    assert_eq!(with.len(), 1);
+    assert_eq!(with[0].visit.date, "2026-11-18");
+    assert_eq!(with[0].visit.remember[0].text, "לדבר עם הגננת");
+
+    // Ticked, then "this and the following": the later ones still have nothing to remember.
+    let mut ticked = with[0].visit.clone();
+    ticked.remember[0].done = true;
+    ticked.start = 660;
+    save_visits(&mut core, ticked, None, Scope::Following);
+    let views = calendar(&mut core, "2026-11-18", "2026-12-02");
+    assert_eq!(views.len(), 3);
+    assert!(views[0].visit.remember[0].done);
+    assert!(views[1..].iter().all(|v| v.visit.remember.is_empty()));
+}
+
+fn sound(core: &mut Core, id: &str) -> rules::RecordingSound {
+    match ask(core, ClinicRequest::Recording { id: id.to_owned() }) {
+        ClinicReply::Sound(s) => s,
+        other => panic!("{other:?}"),
+    }
+}
+
+fn record(
+    core: &mut Core,
+    patient: &Patient,
+    note_id: &str,
+    visit: Option<&Visit>,
+    data: &str,
+) -> SessionNote {
+    match ask(
+        core,
+        ClinicRequest::SaveRecording {
+            patient_id: patient.id.clone(),
+            note_id: note_id.to_owned(),
+            visit_id: visit.map(|v| v.id.clone()),
+            date: TODAY.to_owned(),
+            mime: "audio/webm;codecs=opus".to_owned(),
+            seconds: 12,
+            name: String::new(),
+            data: data.to_owned(),
+        },
+    ) {
+        ClinicReply::Note(n) => n,
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn a_recording_is_kept_with_its_note_played_and_removed() {
+    let (_dir, mut core) = open_clinic();
+    let noam = new_patient(&mut core, "נועם לביא");
+    let held = save_visit(
+        &mut core,
+        a_visit(&noam, VisitKind::Therapy, "2026-11-12", 600),
+    );
+
+    // The first recording of a visit makes its note.
+    let note = record(&mut core, &noam, "", Some(&held), "AAECAwQF");
+    assert!(!note.id.is_empty());
+    assert_eq!(note.visit_id.as_deref(), Some(held.id.as_str()));
+    assert_eq!(note.date, "2026-11-12");
+    assert!(note.record.is_empty() && note.personal.is_empty());
+    assert_eq!(note.recordings.len(), 1);
+    let first = note.recordings[0].clone();
+    assert_eq!(first.mime, "audio/webm");
+    assert_eq!(first.bytes, 6);
+    assert_eq!(first.seconds, 12);
+
+    // A second one for the same visit goes to the same note.
+    let note = record(&mut core, &noam, "", Some(&held), "BwgJ");
+    assert_eq!(note.recordings.len(), 2);
+    let s = sound(&mut core, &first.id);
+    assert_eq!(s.mime, "audio/webm");
+    assert_eq!(s.data, "AAECAwQF");
+
+    // A save of the note's texts never changes its recordings, whatever the window sends.
+    let saved = save_note(
+        &mut core,
+        SessionNote {
+            personal: "לבדוק שוב בפגישה הבאה".to_owned(),
+            recordings: Vec::new(),
+            ..note.clone()
+        },
+    );
+    assert_eq!(saved.recordings, note.recordings);
+    let forged = save_note(
+        &mut core,
+        SessionNote {
+            recordings: vec![rules::RecordingInfo {
+                id: "made-up".to_owned(),
+                ..rules::RecordingInfo::default()
+            }],
+            ..saved.clone()
+        },
+    );
+    assert_eq!(forged.recordings, note.recordings);
+
+    // The card lists the note, and the sound is not among the patient's records.
+    let c = card(&mut core, &noam.id);
+    assert_eq!(c.notes.len(), 1);
+    assert_eq!(c.notes[0].recordings.len(), 2);
+
+    // Removed: its sound is gone and the note lists the other one.
+    let after = match ask(
+        &mut core,
+        ClinicRequest::DeleteRecording {
+            note_id: note.id.clone(),
+            id: first.id.clone(),
+        },
+    ) {
+        ClinicReply::Note(n) => n,
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(after.recordings.len(), 1);
+    not_found(
+        &mut core,
+        ClinicRequest::Recording {
+            id: first.id.clone(),
+        },
+    );
+    // The history of the note never holds the sound itself.
+    for entry in history(&mut core, &note.id) {
+        assert!(!format!("{entry:?}").contains("AAECAwQF"));
+    }
+    // A recording is played only as a recording: a note's id is not one.
+    not_found(
+        &mut core,
+        ClinicRequest::Recording {
+            id: note.id.clone(),
+        },
+    );
+}
+
+#[test]
+fn a_recording_is_refused_when_it_is_not_sound_or_not_whole() {
+    let (_dir, mut core) = open_clinic();
+    let noam = new_patient(&mut core, "נועם לביא");
+    let ask_with = |mime: &str, data: &str| ClinicRequest::SaveRecording {
+        patient_id: noam.id.clone(),
+        note_id: String::new(),
+        visit_id: None,
+        date: TODAY.to_owned(),
+        mime: mime.to_owned(),
+        seconds: 1,
+        name: "הקלטה.m4a".to_owned(),
+        data: data.to_owned(),
+    };
+    refused(&mut core, ask_with("text/html", "AAAA"));
+    refused(&mut core, ask_with("audio/mp4", "AAA"));
+    refused(&mut core, ask_with("audio/mp4", ""));
+    // Nothing was kept for a refused one.
+    assert!(card(&mut core, &noam.id).notes.is_empty());
+    // A note on its own, with only a recording, keeps the file's name.
+    let note = match ask(&mut core, ask_with("audio/x-m4a", "AAAA")) {
+        ClinicReply::Note(n) => n,
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(note.visit_id, None);
+    assert_eq!(note.date, TODAY);
+    assert_eq!(note.recordings[0].name, "הקלטה.m4a");
+    // Another patient's note is never given a recording.
+    let tamar = new_patient(&mut core, "תמר");
+    refused(
+        &mut core,
+        ClinicRequest::SaveRecording {
+            patient_id: tamar.id.clone(),
+            note_id: note.id.clone(),
+            visit_id: None,
+            date: TODAY.to_owned(),
+            mime: "audio/webm".to_owned(),
+            seconds: 1,
+            name: String::new(),
+            data: "AAAA".to_owned(),
+        },
+    );
+    // A note that keeps a recording is not empty, so it is not removed.
+    refused(
+        &mut core,
+        ClinicRequest::DeleteNote {
+            id: note.id.clone(),
+        },
+    );
+}
+
+#[test]
+fn a_recording_never_goes_to_the_case() {
+    let (_dir, mut core) = open_clinic();
+    let noam = new_patient(&mut core, "נועם לביא");
+    create_case(&mut core, &noam);
+    let note = save_note(&mut core, a_note(&noam, None, "הילד שיתף פעולה."));
+    let note = record(&mut core, &noam, &note.id, None, "QUJDRA==");
+    let sent = note_to_case(&mut core, &note);
+    assert_eq!(sent.recordings.len(), 1);
+    let case_id = core.list_cases().unwrap()[0].id.clone();
+    let inputs = core.case_detail(&case_id).unwrap().inputs;
+    assert_eq!(inputs.len(), 1);
+    let text = format!("{inputs:?}");
+    assert!(!text.contains("QUJDRA") && !text.contains("audio/"));
 }

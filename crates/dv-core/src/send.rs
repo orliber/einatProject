@@ -321,6 +321,7 @@ impl Core {
             approved,
             replaces,
             guide,
+            subheads,
             from_points,
         } = kind
         else {
@@ -338,6 +339,19 @@ impl Core {
         } else {
             dv_ai::parse_section(&response, &refs)?
         };
+        // D-214: the paragraph that answers a sub-section's line of the guide opens with that
+        // heading on a line of its own, written here and never left to the model.
+        // Only the first paragraph of a line the model answered in two.
+        let mut headed: Vec<u32> = Vec::new();
+        for p in &mut reply.paragraphs {
+            if headed.contains(&p.guide) {
+                continue;
+            }
+            if let Some((n, h)) = subheads.iter().find(|(n, _)| *n == p.guide) {
+                p.text = dv_domain::with_subheading(&p.text, h);
+                headed.push(*n);
+            }
+        }
         let v = self.vault_mut()?;
         let identities = v.identities(&case_id)?;
         let masks = v.masks(&case_id)?;
@@ -509,7 +523,11 @@ impl Core {
             questions: reply.questions.iter().map(|q| show(q)).collect(),
             missing: unanswered
                 .iter()
-                .map(|l| format!("חסרה פסקה לפי ההנחיה: {}", show(l)))
+                .map(|l| match dv_domain::subheading_of(l) {
+                    // D-214: a sub-section is named by its heading alone.
+                    Some(h) => format!("חסרה פסקה לפי ההנחיה: תת הסעיף \"{}\"", show(h)),
+                    None => format!("חסרה פסקה לפי ההנחיה: {}", show(l)),
+                })
                 .chain(reply.missing.iter().map(|q| show(q)))
                 .chain(left_out.then(|| LEFT_OUT_NOTE.to_owned()))
                 .collect(),

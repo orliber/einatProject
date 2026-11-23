@@ -1,3 +1,4 @@
+import { ClinicRecords } from "./ClinicRecords";
 import { useEffect, useRef, useState, type DragEvent } from "react";
 import { flushSync } from "react-dom";
 import { useApp } from "../../App";
@@ -14,6 +15,7 @@ import { sizeBucket, timed, WaitLine } from "../../components/Progress";
 import type { CaseApi } from "../CaseScreen";
 import "./MaterialsView.css";
 import { useAi } from "../../ai";
+import { draftRequest } from "./ReportView";
 
 const ACCEPT = ".docx,.doc,.odt,.rtf,.pdf,.txt,.jpg,.jpeg,.png,.tif,.tiff,.heic,application/vnd.oasis.opendocument.text,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword,application/rtf,text/plain,image/jpeg,image/png,image/tiff";
 
@@ -58,6 +60,9 @@ export function MaterialsView({ api, onWrite }: { api: CaseApi; onWrite?: () => 
   /** A clean import saved without the review window, with a way back (F7). */
   const [autoSaved, setAutoSaved] = useState<{ id: string; title: string } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  /** D-211: the area (intake, the framework's report) she asks the AI to word now. */
+  const [asking, setAsking] = useState<Need | null>(null);
+  const [wording, setWording] = useState(false);
 
   const input = detail.inputs.find((i) => i.id === selected) ?? null;
   const routeOf = (id: string) => detail.routing.find((r) => r.input_id === id);
@@ -235,6 +240,31 @@ export function MaterialsView({ api, onWrite }: { api: CaseApi; onWrite?: () => 
     }
   }
 
+  /** D-211: the sections an area's materials are written into that can be worded now: fed by
+   *  a material, the AI's to write, and with nothing she approved (that stays as it is). */
+  const wordable = (n: Need) =>
+    detail.sections.filter((x) => n.drafts?.includes(x.key) && x.mode !== "self" && x.source_count > 0 && !x.paragraphs.some((p) => p.status === "approved"));
+
+  /** One section after another, each through the same road as on the report page (the
+   *  filter, "what leaves the computer", the gate). The drafts wait on the report page. */
+  async function wordNow(keys: string[], wish: string) {
+    setAsking(null);
+    setError(null);
+    setWording(true);
+    let done = 0;
+    try {
+      for (const key of keys) {
+        if (!(await api.draft(key, draftRequest(key, wish)))) break;
+        done += 1;
+      }
+    } catch (e) {
+      setError(fail(e as never));
+    } finally {
+      setWording(false);
+    }
+    if (done > 0) notify(done === 1 ? "הטיוטה מחכה לך בכתיבת הדוח, לאישור או לעריכה." : `${done} טיוטות מחכות לך בכתיבת הדוח, לאישור או לעריכה.`);
+  }
+
   const sorted = [...detail.inputs].sort((a, b) => b.created_at - a.created_at);
   // Round 49 (D-088): what the report can be written from, in one sentence.
   const sortable = detail.sections.filter((s) => s.sortable);
@@ -318,6 +348,17 @@ export function MaterialsView({ api, onWrite }: { api: CaseApi; onWrite?: () => 
             );
           })}
         </ul>
+
+        {detail.meta.consent && NEEDS.some((n) => has(n) && wordable(n).length > 0) && (
+          <div className="materials-ai row wrap-row small" role="group" aria-label={`בקשה ל-${ai} כבר עכשיו`}>
+            <span className="muted">✦ אפשר לבקש מ-{ai} לנסח כבר עכשיו:</span>
+            {NEEDS.filter((n) => has(n) && wordable(n).length > 0).map((n) => (
+              <button key={n.label} type="button" className="btn btn-small" disabled={wording} onClick={() => setAsking(n)}>{n.ask}</button>
+            ))}
+          </div>
+        )}
+
+        <ClinicRecords caseId={caseId} onCopied={() => void reload()} />
 
         <div className={`dropzone wide${dropOn === "any" ? " over" : ""}`} {...dropProps("any")}>
           <UploadIcon />
@@ -405,6 +446,12 @@ export function MaterialsView({ api, onWrite }: { api: CaseApi; onWrite?: () => 
           onClose={() => setChoosing(null)}
           onSaved={async () => { setChoosing(null); await reload(); notify("הסעיפים של החומר עודכנו."); }} />
       )}
+      {asking && (
+        <AskDialog need={asking} ai={ai} titles={wordable(asking).map((x) => x.title)}
+          kept={detail.sections.filter((x) => asking.drafts?.includes(x.key) && x.paragraphs.some((p) => p.status === "approved")).map((x) => x.title)}
+          onClose={() => setAsking(null)}
+          onSend={(wish) => void wordNow(wordable(asking).map((x) => x.key), wish)} />
+      )}
       {writing && (
         <WriteDialog caseId={caseId} kind={writing.kind} input={writing.input} onClose={() => setWriting(null)}
           onSaved={async () => { setWriting(null); await reload(); notify("נשמר בתיק."); }} />
@@ -432,7 +479,10 @@ function RecordLine({ record }: { record: PriorRecordView }) {
   return (
     <div className="stack prior-record">
       <b className="small">{head}</b>
-      {record.findings && <span className="small"><b>ממצאים: </b>{record.findings}</span>}
+      {record.referral && <span className="small"><b>סיבת ההפניה: </b>{record.referral}</span>}
+      {record.findings && <span className="small"><b>ממצאי הבדיקה: </b>{record.findings}</span>}
+      {record.strengths && <span className="small"><b>חוזקות וחולשות: </b>{record.strengths}</span>}
+      {record.summary && <span className="small"><b>סיכום: </b>{record.summary}</span>}
       {record.recommendations && <span className="small"><b>המלצות: </b>{record.recommendations}</span>}
     </div>
   );
@@ -463,6 +513,7 @@ function PriorOrder({ api, titleOf, open }: { api: CaseApi; titleOf: (id: string
   return (
     <section className="prior-order stack" aria-label="אבחונים קודמים, בסדר הדוח">
       <b className="small">אבחונים וטיפולים קודמים, בסדר שבו הם נכתבים בדוח</b>
+      <span className="small muted">כל סיכום כבר מחכה כטיוטה בסעיף הזה בכתיבת הדוח, ואפשר לערוך אותו שם.</span>
       <ol className="prior-list">
         {records.map(({ id, record }) => (
           <li key={id}>
@@ -615,6 +666,32 @@ function WriteDialog(props: { caseId: string; kind: InputKind; input?: CaseInput
   );
 }
 
+/** D-211: a request to the AI while the materials are collected: the sections of one area
+ *  (the intake, the framework's report) are worded now, in the style learned from her
+ *  reports, and wait on the report page. Her words are optional. */
+function AskDialog(props: { need: Need; ai: string; titles: string[]; kept: string[]; onClose: () => void; onSend: (wish: string) => void }) {
+  const [wish, setWish] = useState("");
+  const { need, ai, titles, kept } = props;
+  return (
+    <Dialog narrow title={`בקשה ל-${ai}: ${need.label}`} subtitle="הטיוטות יחכו לך בכתיבת הדוח, לאישור או לעריכה." onClose={props.onClose} dirty={wish.trim() !== ""}
+      footer={(close) => <>
+        <button type="button" className="btn" onClick={close}>ביטול</button>
+        <button type="button" className="btn btn-primary" onClick={() => props.onSend(wish)}>✦ לנסח</button>
+      </>}>
+      <div className="stack">
+        <p className="small"><b>{titles.length === 1 ? "ינוסח הסעיף: " : "ינוסחו הסעיפים: "}</b>{titles.join(" · ")}</p>
+        {kept.length > 0 && <p className="small muted">מה שכבר אישרת ב{kept.length === 1 ? "סעיף" : "סעיפים"} {kept.join(" · ")} נשאר כמו שהוא.</p>}
+        <div className="field fit-full">
+          <label htmlFor="ask-wish">מה חשוב לך שייכתב? (לא חובה)</label>
+          <textarea id="ask-wish" className="textarea" rows={3} value={wish} autoFocus onChange={(e) => setWish(e.target.value)}
+            placeholder="למשל: בקצרה, ולהתחיל ממה שההורים מספרים על הקשר עם ילדים" />
+        </div>
+        <p className="small muted">הניסוח בסגנון שנלמד מהדוחות שלך. שמות ופרטים מזהים מוסתרים לפני השליחה, כמו בכל בקשה.</p>
+      </div>
+    </Dialog>
+  );
+}
+
 type Need = {
   label: string;
   kinds: InputKind[];
@@ -623,12 +700,16 @@ type Need = {
   required: boolean;
   add: InputKind | "upload" | null;
   addLabel: string;
+  /** D-211: the sections she can ask the AI to word from this area while collecting, and
+   *  the words of the button that asks. */
+  drafts?: string[];
+  ask?: string;
 };
 
 /** What an assessment usually rests on (docs/REPORT_STRUCTURE.md), deterministic. */
 const NEEDS: Need[] = [
-  { label: "אינטייק עם ההורים", kinds: ["intake"], feeds: "רקע, התפתחות ותיאור ההורים", required: true, add: "intake", addLabel: "רישום אינטייק" },
-  { label: "דיווח מהמסגרת", kinds: ["kindergarten"], feeds: "סעיף המסגרת החינוכית", required: true, add: "kindergarten", addLabel: "רישום שיחה עם הגננת" },
+  { label: "אינטייק עם ההורים", kinds: ["intake"], feeds: "רקע, התפתחות ותיאור ההורים", required: true, add: "intake", addLabel: "רישום אינטייק", drafts: ["referral", "background", "parents_view"], ask: "מהאינטייק" },
+  { label: "דיווח מהמסגרת", kinds: ["kindergarten"], feeds: "סעיף המסגרת החינוכית", required: true, add: "kindergarten", addLabel: "רישום שיחה עם הגננת", drafts: ["kindergarten"], ask: "מהדיווח של המסגרת" },
   { label: "תצפית ומפגשים", kinds: ["session_note", "observation"], feeds: "הופעה והתרשמות, משחק ומישור רגשי", required: true, add: "session_note", addLabel: "רישום מפגש" },
   { label: "ציוני מבחנים", kinds: ["test_scores"], feeds: "כלי האבחון והפרופיל הקוגניטיבי", required: true, add: "test_scores", addLabel: "הזנת ציונים" },
   { label: "אבחונים קודמים", kinds: ["prior_report", "professional"], feeds: "אבחונים וטיפולים (אם יש)", required: false, add: "upload", addLabel: "העלאת מסמך" },

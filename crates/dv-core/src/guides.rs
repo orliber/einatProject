@@ -58,7 +58,8 @@ pub(crate) fn guide_with(
         .filter(|t| !t.trim().is_empty());
     // Until she writes her own, the order she writes the section in, when it was learned
     // from her reports (K3, by the child's age band, K13); else the institute's text.
-    let learned = if stored.is_none() {
+    // Not where the template's order is the one she asked for in so many words (D-214).
+    let learned = if stored.is_none() && !section.pinned_guide {
         match style {
             Some(st) => st.skeleton(&section.key, meta.age),
             None => crate::style::style_skeleton(v, &section.key, meta.age)?,

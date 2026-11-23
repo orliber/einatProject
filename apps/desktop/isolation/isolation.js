@@ -193,6 +193,7 @@ const ALLOWED = new Set([
   "set_style_enabled",
   "set_verify_stage",
   "style_overview",
+  "style_source_text",
   "take_unsaved",
   "touch",
   "unlock",

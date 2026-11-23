@@ -365,7 +365,7 @@ describe("visits on the card", () => {
     // Under way, not over yet: the step is there, not yet the main one.
     expect(within(actions).getByRole("button", { name: "התקיימה" })).not.toHaveClass("btn-primary");
     await user.click(within(actions).getByRole("button", { name: "עוד פעולות לפגישה מיום 15.11.2026, 09:00" }));
-    expect((await screen.findAllByRole("menuitem")).map((m) => m.textContent)).toEqual(["לא הגיעו", "לכתוב סיכום", "לפתוח את הפגישה"]);
+    expect((await screen.findAllByRole("menuitem")).map((m) => m.textContent)).toEqual(["לא הגיעו", "לכתוב סיכום", "להקליט לעצמך", "לפתוח את הפגישה"]);
     await user.keyboard("{Escape}");
     // Held, it offers its note as the one step; no reminder anywhere on the card.
     await user.click(within(actions).getByRole("button", { name: "התקיימה" }));
@@ -414,7 +414,7 @@ describe("visits on the card", () => {
       const { user } = await openCard("תמר", undefined, async (served, id) => {
         const visit = (await cardOf(served, id)).visits.find((v) => v.visit.date === "2026-11-15")?.visit;
         if (!visit) throw new Error("no visit today in the demo core");
-        await ask(served, { op: "save_note", note: { id: "", patient_id: id, visit_id: visit.id, date: visit.date, record: "הכנה למפגש", personal: "", case_input_id: null } }, "note");
+        await ask(served, { op: "save_note", note: { id: "", patient_id: id, visit_id: visit.id, date: visit.date, record: "הכנה למפגש", personal: "", case_input_id: null, recordings: [] } }, "note");
       });
       within(await visitOn("15.11.2026")).getByRole("button", { name: "התקיימה" }).focus();
       await user.keyboard("{Enter}");
@@ -446,7 +446,7 @@ describe("visits on the card", () => {
             op: "save_visit", repeat: null, scope: "one",
             visit: {
               id: "", patient_id: id, kind: "assessment", title: "", date: `2026-09-0${day}`, start: 600, minutes: 50, place: "", status: "held",
-              status_note: "", fee: 0, charge_missed: false, series_id: null, note: "",
+              status_note: "", fee: 0, charge_missed: false, series_id: null, note: "", remember: [],
             },
           }, "saved");
         }

@@ -19,6 +19,17 @@ describe("searchCase", () => {
   });
 });
 
+describe("a Hebrew final letter", () => {
+  it("does not hide a longer form of the word, and the match is shown as it was written", () => {
+    // "גן" ends in a final nun; "בגנים" holds the same word with a regular one.
+    const d = { inputs: [{ id: "i1", case_id: "c", kind: "observation", title: "תצפית", content: "ביקרה בשני גנים השנה.", created_at: 0 }], sections: [] } as unknown as CaseDetail;
+    const hits = searchCase(d, "גן");
+    expect(hits).toHaveLength(1);
+    expect(hits[0]?.match).toBe("גנ");
+    expect(`${hits[0]?.before}${hits[0]?.match}${hits[0]?.after}`).toContain("בשני גנים השנה");
+  });
+});
+
 describe("CaseSearch", () => {
   it("shows results as text and opens the section of a paragraph", async () => {
     const onOpen = vi.fn();

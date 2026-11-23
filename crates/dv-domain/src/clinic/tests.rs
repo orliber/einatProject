@@ -51,7 +51,7 @@ fn patient(id: &str, name: &str) -> Patient {
 fn visit(id: &str, kind: VisitKind, date: &str, start: u16, status: VisitStatus) -> Visit {
     Visit {
         id: id.to_owned(),
-        patient_id: (kind != VisitKind::Block).then(|| "p1".to_owned()),
+        patient_id: (!kind.never_patient()).then(|| "p1".to_owned()),
         kind,
         title: String::new(),
         date: date.to_owned(),
@@ -64,6 +64,7 @@ fn visit(id: &str, kind: VisitKind, date: &str, start: u16, status: VisitStatus)
         charge_missed: false,
         series_id: None,
         note: String::new(),
+        remember: Vec::new(),
     }
 }
 
@@ -83,6 +84,7 @@ fn note(id: &str, visit_id: Option<&str>, date: &str) -> SessionNote {
         record: "הילד שיתף פעולה לאורך המפגש.".to_owned(),
         personal: String::new(),
         case_input_id: None,
+        recordings: Vec::new(),
     }
 }
 
@@ -613,7 +615,8 @@ fn a_block_has_no_patient_and_no_fee_and_the_rest_need_a_patient() {
     with_fee.fee = 100;
     refusal(validate_visit(&with_fee));
 
-    for kind in VISIT_KINDS.into_iter().filter(|k| *k != VisitKind::Block) {
+    // A supervision may have a child or not (D-207); every other kind needs one.
+    for kind in VISIT_KINDS.into_iter().filter(|k| !k.may_be_own()) {
         let ok = visit("v1", kind, TODAY, 600, VisitStatus::Planned);
         assert!(validate_visit(&ok).is_ok());
         let mut nobody = ok.clone();
@@ -5120,4 +5123,295 @@ fn settings_of_the_pathway_and_the_kit_are_checked() {
     }));
     assert!(bad(|s| s.starter_tasks[0].title = "  ".to_owned()));
     assert!(bad(|s| s.starter_tasks[0].due_days = 366));
+}
+
+// ------------------------------------------------------------------ D-207, D-208
+
+#[test]
+fn supervision_is_her_own_time_without_a_child_and_a_visit_with_one() {
+    // About a child (the kindergarten teacher, the staff): a visit like any other.
+    let about = visit(
+        "v1",
+        VisitKind::Supervision,
+        TODAY,
+        600,
+        VisitStatus::Planned,
+    );
+    assert!(!about.own_time());
+    assert!(validate_visit(&Visit {
+        fee: 30_000,
+        ..about.clone()
+    })
+    .is_ok());
+    assert!((week_visit_count(std::slice::from_ref(&about), TODAY) == 1));
+    // Professional supervision, no child: her own time, with no fee.
+    let own = Visit {
+        patient_id: None,
+        ..about
+    };
+    assert!(own.own_time());
+    assert!(validate_visit(&own).is_ok());
+    let text = refusal(validate_visit(&Visit {
+        fee: 100,
+        ..own.clone()
+    }));
+    assert!(text.contains("בוחרים את הילד"));
+    assert_eq!(week_visit_count(std::slice::from_ref(&own), TODAY), 0);
+    assert!(VisitKind::Block.own_time_with(true));
+    assert!(!VisitKind::Guidance.own_time_with(false));
+    assert_eq!(kind_label(VisitKind::Supervision), "הדרכה");
+    assert_eq!(kind_label(VisitKind::Guidance), "הדרכת הורים");
+    assert!(VISIT_KINDS.contains(&VisitKind::Supervision));
+    let json = serde_json::to_string(&VisitKind::Supervision).unwrap_or_default();
+    assert_eq!(json, "\"supervision\"");
+    let mut settings = ClinicSettings::default();
+    for d in &mut settings.defaults {
+        if d.kind == VisitKind::Supervision {
+            d.fee = 35_000;
+        }
+    }
+    assert!(validate_settings(&settings).is_ok());
+    assert_eq!(default_fee(None, &settings, VisitKind::Supervision), 0);
+    let child = Patient {
+        id: "p1".to_owned(),
+        ..Patient::default()
+    };
+    assert_eq!(
+        default_fee(Some(&child), &settings, VisitKind::Supervision),
+        35_000
+    );
+}
+
+#[test]
+fn settings_saved_before_supervision_get_its_usual_length() {
+    let mut old = ClinicSettings::default();
+    old.defaults.retain(|d| d.kind != VisitKind::Supervision);
+    assert!(validate_settings(&old).is_err());
+    let filled = normalize_settings(old);
+    assert!(validate_settings(&filled).is_ok());
+    assert_eq!(
+        filled
+            .defaults
+            .iter()
+            .filter(|d| d.kind == VisitKind::Supervision)
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn what_not_to_forget_is_trimmed_bounded_and_printed() {
+    let mut v = visit("v1", VisitKind::Feedback, TODAY, 600, VisitStatus::Planned);
+    v.remember = vec![
+        RememberItem {
+            text: "  לדבר עם הגננת  ".to_owned(),
+            done: false,
+        },
+        RememberItem {
+            text: "   ".to_owned(),
+            done: true,
+        },
+        RememberItem {
+            text: "להביא את השאלונים".to_owned(),
+            done: true,
+        },
+    ];
+    let v = normalize_visit(v);
+    assert_eq!(v.remember.len(), 2);
+    assert_eq!(v.remember[0].text, "לדבר עם הגננת");
+    assert!(validate_visit(&v).is_ok());
+
+    let mut long = v.clone();
+    long.remember[0].text = "א".repeat(SHORT_MAX + 1);
+    refusal(validate_visit(&long));
+    let mut many = v.clone();
+    many.remember = vec![
+        RememberItem {
+            text: "x".to_owned(),
+            done: false
+        };
+        REMEMBER_MAX + 1
+    ];
+    refusal(validate_visit(&many));
+
+    // A visit saved before D-207 reads with nothing to remember.
+    let old: Visit = serde_json::from_str(r#"{"id":"v9","kind":"therapy"}"#).unwrap_or_default();
+    assert!(old.remember.is_empty());
+}
+
+#[test]
+fn a_note_with_only_a_recording_is_not_empty() {
+    let mut n = note("n1", None, TODAY);
+    n.record = String::new();
+    refusal(validate_note(&n));
+    n.recordings.push(RecordingInfo {
+        id: "r1".to_owned(),
+        mime: "audio/webm".to_owned(),
+        ..RecordingInfo::default()
+    });
+    assert!(validate_note(&n).is_ok());
+}
+
+#[test]
+fn a_recording_is_base64_sound_of_a_known_kind_and_size() {
+    assert_eq!(recording_bytes("AAAA").ok(), Some(3));
+    assert_eq!(recording_bytes("AAA=").ok(), Some(2));
+    assert_eq!(recording_bytes("AA==").ok(), Some(1));
+    refusal(recording_bytes(""));
+    refusal(recording_bytes("AAA"));
+    refusal(recording_bytes("A==="));
+    refusal(recording_bytes("AA=A"));
+    refusal(recording_bytes("AA\nA"));
+    refusal(recording_bytes("<scr"));
+    let too_big = "A".repeat((RECORDING_MAX_BYTES / 3 + 1) * 4);
+    refusal(recording_bytes(&too_big));
+
+    assert_eq!(
+        recording_mime("audio/webm;codecs=opus").ok().as_deref(),
+        Some("audio/webm")
+    );
+    assert_eq!(
+        recording_mime(" Audio/MP4 ").ok().as_deref(),
+        Some("audio/mp4")
+    );
+    assert_eq!(
+        recording_mime("audio/x-wav").ok().as_deref(),
+        Some("audio/wav")
+    );
+    assert_eq!(
+        recording_mime("audio/m4a").ok().as_deref(),
+        Some("audio/x-m4a")
+    );
+    refusal(recording_mime("text/html"));
+    refusal(recording_mime("video/webm"));
+    refusal(recording_mime(""));
+}
+
+// ------------------------------------------------------------------ the search over the notes (D-216)
+
+fn found(notes: &[SessionNote], text: &str, personal: bool) -> NoteSearch {
+    let names: HashMap<String, String> = [("p1".to_owned(), "ילד בדוי".to_owned())].into();
+    let visits = [visit(
+        "v1",
+        VisitKind::Observation,
+        "2026-08-09",
+        540,
+        VisitStatus::Held,
+    )];
+    search_notes(notes, &visits, &names, text, personal).unwrap()
+}
+
+#[test]
+fn a_search_finds_the_notes_that_hold_every_word_newest_first() {
+    let notes = [
+        SessionNote {
+            record: "שיחה עם הגננת על המעברים בגן.".to_owned(),
+            ..note("n1", Some("v1"), "2026-08-09")
+        },
+        SessionNote {
+            record: "המעברים בבית קשים יותר בבוקר.".to_owned(),
+            ..note("n2", None, "2026-10-01")
+        },
+        note("n3", None, "2026-11-01"),
+    ];
+    let both = found(&notes, "המעברים", false);
+    assert_eq!(
+        both.hits
+            .iter()
+            .map(|h| h.note_id.as_str())
+            .collect::<Vec<_>>(),
+        ["n2", "n1"]
+    );
+    assert!(!both.more);
+    let one = found(&notes, "  הגננת   המעברים ", false);
+    assert_eq!(one.hits.len(), 1);
+    assert_eq!(one.hits[0].patient_name, "ילד בדוי");
+    assert_eq!(one.hits[0].visit_kind, Some(VisitKind::Observation));
+    assert_eq!(one.hits[0].snippet, "שיחה עם הגננת על המעברים בגן.");
+    assert!(!one.hits[0].in_personal);
+    assert!(found(&notes, "אין-מילה-כזו", false).hits.is_empty());
+}
+
+#[test]
+fn a_hebrew_final_letter_and_a_capital_do_not_hide_a_note() {
+    let notes = [
+        SessionNote {
+            record: "ביקור בשני גנים. ההורים שאלו על ADOS.".to_owned(),
+            ..note("n1", None, "2026-08-09")
+        },
+        SessionNote {
+            record: "המעבר לגן חדש עבר בשלום".to_owned(),
+            ..note("n2", None, "2026-09-09")
+        },
+    ];
+    // "גן" ends in a final letter; "גנים" holds the same word with a regular one.
+    let both = found(&notes, "גן", false);
+    assert_eq!(both.hits.len(), 2);
+    // The words come back as they were written, cut at the right place.
+    assert_eq!(
+        both.hits[1].snippet,
+        "ביקור בשני גנים. ההורים שאלו על ADOS."
+    );
+    assert_eq!(found(&notes, "גנים", false).hits.len(), 1);
+    assert_eq!(found(&notes, "ados", false).hits.len(), 1);
+    // And the other way: a word typed with a regular letter finds its final form.
+    assert_eq!(found(&notes, "שלומ", false).hits.len(), 1);
+}
+
+#[test]
+fn the_personal_note_is_searched_only_when_asked_and_its_words_never_come_back() {
+    let notes = [SessionNote {
+        record: "מפגש שני.".to_owned(),
+        personal: "מחשבה-פרטית-בדויה על השינה".to_owned(),
+        ..note("n1", None, "2026-08-09")
+    }];
+    assert!(found(&notes, "השינה", false).hits.is_empty());
+    let hit = &found(&notes, "השינה", true).hits[0];
+    assert!(hit.in_personal);
+    assert_eq!(hit.snippet, "");
+    // One word in the record and one in the personal note: the record's words only.
+    let mixed = &found(&notes, "מפגש השינה", true).hits[0];
+    assert!(mixed.in_personal);
+    assert_eq!(mixed.snippet, "מפגש שני.");
+    assert!(!serde_json::to_string(&found(&notes, "מפגש השינה", true))
+        .unwrap()
+        .contains("מחשבה-פרטית-בדויה"));
+}
+
+#[test]
+fn a_long_record_comes_back_as_a_few_words_around_what_was_found() {
+    let long = format!(
+        "{} המילה-המבוקשת {}",
+        "פתיחה ".repeat(40),
+        "המשך ".repeat(60)
+    );
+    let notes = [SessionNote {
+        record: long,
+        ..note("n1", None, "2026-08-09")
+    }];
+    let hit = &found(&notes, "המילה-המבוקשת", false).hits[0];
+    assert!(hit.snippet.starts_with('…') && hit.snippet.ends_with('…'));
+    assert!(hit.snippet.contains("המילה-המבוקשת"));
+    assert!(hit.snippet.chars().count() < 200, "{}", hit.snippet);
+}
+
+#[test]
+fn a_search_is_at_least_two_letters_answers_with_fifty_and_skips_a_note_without_a_card() {
+    let names: HashMap<String, String> = [("p1".to_owned(), "ילד בדוי".to_owned())].into();
+    assert!(search_notes(&[], &[], &names, " א ", false).is_err());
+    assert!(search_notes(&[], &[], &names, &"א".repeat(201), false).is_err());
+    let many: Vec<SessionNote> = (0..60)
+        .map(|i| note(&format!("n{i:02}"), None, "2026-08-09"))
+        .collect();
+    let all = search_notes(&many, &[], &names, "שיתף", false).unwrap();
+    assert_eq!(all.hits.len(), NOTE_HITS_MAX);
+    assert!(all.more);
+    let orphan = [SessionNote {
+        patient_id: "p-gone".to_owned(),
+        ..note("n1", None, "2026-08-09")
+    }];
+    assert!(search_notes(&orphan, &[], &names, "שיתף", false)
+        .unwrap()
+        .hits
+        .is_empty());
 }

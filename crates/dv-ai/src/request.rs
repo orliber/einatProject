@@ -255,6 +255,9 @@ pub const DECISION_LINE: &str = "מבין הסעיפים המאושרים, זה 
 /// What the request says about the key scores block (D-162).
 pub const KEY_SCORES_LINE: &str = "הבלוק שמסומן key_scores הוא הציונים המרכזיים עם הטווחים שלהם, כפי שחושבו במחשב מהטבלאות הקבועות. הציונים שנכתבים בסעיף נלקחים משם כפי שהם, עם הטווח שלידם.";
 
+/// What the request says about guide lines that name a sub-section (D-214).
+pub const SUBHEADING_LINE: &str = "שורה בהנחיה שמתחילה במילים \"כותרת משנה\" היא תת סעיף: כל תת סעיף נכתב בפסקה משלו, שמציינת את מספר השורה שלה. הפסקה נכתבת בלי הכותרת, כי הכותרת מתווספת במחשב. תת סעיף שאין עליו מידע במקורות לא נכתב.";
+
 /// The lines of a section's guide, as they are numbered in the request.
 #[must_use]
 pub fn guide_lines(guide: &str) -> Vec<&str> {
@@ -426,7 +429,14 @@ pub fn build_section_request(
         } else {
             "ההנחיה של הפסיכולוגית לסעיף:"
         };
-        parts.push(format!("{heading}\n{}", numbered.join("\n")));
+        // D-214: a sub-section's heading is put on its paragraph in code; the model writes
+        // the paragraph only.
+        let subs = if guide.iter().any(|l| dv_domain::subheading_of(l).is_some()) {
+            format!("\n{SUBHEADING_LINE}")
+        } else {
+            String::new()
+        };
+        parts.push(format!("{heading}\n{}{subs}", numbered.join("\n")));
     }
     if input.points_only {
         parts.push(POINTS_LINE.to_owned());
@@ -764,6 +774,31 @@ mod tests {
         content_text(&body["messages"][0]["content"])
     }
 
+    /// D-214: a guide with sub-sections says so once, after its numbered lines; a guide
+    /// without them says nothing about them.
+    #[test]
+    fn a_guide_with_subsections_says_the_heading_is_added_in_code() {
+        let mut input = section();
+        input.guide_tagged = "כותרת משנה: שפה ותקשורת. מה נצפה.\nכותרת משנה: SRS. מי מילא.".into();
+        let (body, _) = build_section_request(&ModelConfig::default(), &input, "n1");
+        let text = body["messages"][0]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        assert!(
+            text.contains("1. כותרת משנה: שפה ותקשורת. מה נצפה."),
+            "{text}"
+        );
+        assert_eq!(text.matches("הכותרת מתווספת במחשב").count(), 1);
+        input.guide_tagged = "פתיחה על המבחן.\nהתחומים מהגבוה לנמוך.".into();
+        let (body, _) = build_section_request(&ModelConfig::default(), &input, "n1");
+        let text = body["messages"][0]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        assert!(!text.contains("הכותרת מתווספת במחשב"));
+    }
+
     /// D-164: the craft of the section's kind goes in the cached part, before her guide,
     /// under a heading that says the guide wins; the system prompt does not change with the
     /// section.
@@ -812,7 +847,7 @@ mod tests {
     #[test]
     fn a_section_with_no_craft_or_worded_from_her_points_gets_none() {
         let mut input = section();
-        input.section_key = "tools".into();
+        input.section_key = "signature".into();
         assert!(!text_of_request(&input).contains(CRAFT_HEADING));
         input.section_key = "letter_parents".into();
         assert!(!text_of_request(&input).contains(CRAFT_HEADING));
@@ -841,7 +876,7 @@ mod tests {
             assert!(lines.iter().all(|l| l.starts_with("- ")), "{key}");
             assert!(!craft.contains('[') && !craft.contains('<'), "{key}");
         }
-        for key in ["tools", "signature", "letter_parents", "", "Summary"] {
+        for key in ["signature", "letter_parents", "", "Summary"] {
             assert_eq!(section_craft(key), None, "{key}");
         }
     }

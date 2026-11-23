@@ -82,7 +82,8 @@ export const usePatients = (date: string) => useRead(clinicKeys.patients(date), 
 export const usePatientCard = (id: string | null, date: string) =>
   useRead(clinicKeys.card(id ?? "", date), () => clinicApi.patientCard(id ?? "", today()), { enabled: id !== null });
 export const useTasks = (date: string) => useRead(clinicKeys.tasks(date), () => clinicApi.tasks(today()));
-export const useDiary = (month: string) => useRead(clinicKeys.diary(month), () => clinicApi.diary(month));
+/** `enabled` off: nothing is asked (the day's closing reads the month only once the day is over). */
+export const useDiary = (month: string, enabled = true) => useRead(clinicKeys.diary(month), () => clinicApi.diary(month), { enabled });
 export const useIncome = (year: number) => useRead(clinicKeys.income(year), () => clinicApi.income(year));
 
 /** What the cards that were erased counted for in a year (D-179): the anonymous lines of its
@@ -118,6 +119,10 @@ export const useProposedPathway = (patientId: string, from: string, date: string
 /** The picture of the clinic over the months `from` to `to` (D-200). */
 export const useInsights = (from: string, to: string, date: string) =>
   useRead(clinicKeys.insights(from, to, date), () => clinicApi.insights(today(), from, to));
+
+/** The session notes that hold the words of `text` (D-216); nothing is asked under two letters. */
+export const useNoteSearch = (text: string, personal: boolean) =>
+  useRead(["clinic", "note-search", text, personal], () => clinicApi.searchNotes(text, personal), { enabled: text.replace(/\s/g, "").length >= 2 });
 
 /** Reads the clinic's data again: what "לנסות שוב" does after a read that failed. */
 export function useReloadClinic(): () => void {
@@ -155,6 +160,8 @@ export const useErasePatient = () => useWrite((a: { id: string; name: string }) 
 export const useSaveNote = () => useWrite((note: SessionNote) => clinicApi.saveNote(note));
 export const useDeleteNote = () => useWrite((id: string) => clinicApi.deleteNote(id));
 export const useNoteToCase = () => useWrite((id: string) => clinicApi.noteToCase(id), true);
+export const useSaveRecording = () => useWrite((a: Parameters<typeof clinicApi.saveRecording>[0]) => clinicApi.saveRecording(a));
+export const useDeleteRecording = () => useWrite((a: { noteId: string; id: string }) => clinicApi.deleteRecording(a.noteId, a.id));
 export const useSavePayment = () => useWrite((payment: Payment) => clinicApi.savePayment(payment));
 export const useVoidPayment = () => useWrite((a: { id: string; reason: string }) => clinicApi.voidPayment(a.id, a.reason));
 export const useSaveCharge = () => useWrite((charge: Charge) => clinicApi.saveCharge(charge));

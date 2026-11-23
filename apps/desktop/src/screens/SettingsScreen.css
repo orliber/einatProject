@@ -199,7 +199,8 @@
   color: var(--primary);
 }
 .layer.warn .layer-mark {
-  background: var(--warn-dot);
+  /* The dark amber, not the dot's: white on the dot's colour is under 3:1 (WCAG 1.4.3). */
+  background: var(--warn);
   color: var(--on-primary);
 }
 .layer-text {

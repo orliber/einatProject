@@ -2,6 +2,7 @@
 // table with a row for each family. A row opens the card through the route, so "back" and a
 // link from another tab land in the same place. Families that wait have their own tab; here
 // they show only under "כולם", or when a search finds them.
+import { searchForm } from "../../searchForm";
 import { useMemo, useState } from "react";
 import { ageWords } from "../../components/AgeField";
 import { Segmented } from "../../components/Switch";
@@ -10,6 +11,7 @@ import type { PatientRow } from "../../ipc/generated/PatientRow";
 import { useDebounced, usePatients, useReloadClinic, useToday } from "./clinicData";
 import { CONTACT_ROLE_LABEL, formatDate, formatDateShort, formatTime, PATIENT_STATUS_LABEL, VISIT_KIND_LABEL } from "./format";
 import { EmptyState, Money, Pager, PatientName, ReadError, useClinicNav, useDiscreet, usePaged, useShownName } from "./parts";
+import { NotesFound } from "./NotesFound";
 import { PatientDialog } from "./PatientDialog";
 import "./PatientsTab.css";
 
@@ -45,14 +47,14 @@ const digits = (s: string) => s.replace(/\D/g, "");
 function haystack(row: PatientRow): { text: string; phones: string } {
   const p = row.patient;
   return {
-    text: [p.name, ...p.contacts.map((c) => c.name), ...p.contacts.map((c) => c.phone)].join("\n").toLowerCase(),
+    text: [p.name, ...p.contacts.map((c) => c.name), ...p.contacts.map((c) => c.phone)].map(searchForm).join("\n"),
     phones: p.contacts.map((c) => digits(c.phone)).filter(Boolean).join("\n"),
   };
 }
 
 function matches(hay: { text: string; phones: string }, query: string): boolean {
   if (query === "") return true;
-  if (hay.text.includes(query.toLowerCase())) return true;
+  if (hay.text.includes(searchForm(query))) return true;
   const number = digits(query);
   // Only a query that is a number is read as a phone ("יעל 3" is not).
   return number.length >= 3 && /^[\d\s()+-]+$/.test(query) && hay.phones.includes(number);
@@ -134,7 +136,7 @@ export function PatientsTab() {
       <header className="patients-head">
         <div className="field patients-search">
           <label htmlFor="patients-search">חיפוש</label>
-          <input id="patients-search" type="search" className="input" value={text} autoComplete="off" placeholder="שם הילד, שם של הורה או טלפון"
+          <input id="patients-search" type="search" className="input" value={text} autoComplete="off" placeholder="שם, טלפון, או מילה מסיכום פגישה"
             onChange={(e) => { setText(e.target.value); paged.setPage(0); }} />
         </div>
         <div className="field">
@@ -146,7 +148,7 @@ export function PatientsTab() {
       </header>
 
       {all.length === 0 ? (
-        <EmptyState title="עוד אין מטופלים בקליניקה"
+        <EmptyState top title="עוד אין מטופלים בקליניקה"
           actions={<button type="button" className="btn btn-primary" onClick={() => setAdding(true)}>להוסיף מטופל</button>}>
           <p>כל משפחה מקבלת כרטיס: הפרטים, הפגישות, הסיכומים והתשלומים במקום אחד.</p>
         </EmptyState>
@@ -158,7 +160,7 @@ export function PatientsTab() {
           </p>
 
           {list.length === 0 ? (
-            <EmptyState title={query !== "" ? "לא נמצא מטופל כזה" : filter === "closed" ? "אין כרטיסים שהסתיימו" : "אין כרגע מטופלים בתהליך"}
+            <EmptyState top title={query !== "" ? "לא נמצא מטופל כזה" : filter === "closed" ? "אין כרטיסים שהסתיימו" : "אין כרגע מטופלים בתהליך"}
               actions={query !== "" && elsewhere > 0
                 ? <button type="button" className="btn" onClick={() => { setFilter("all"); paged.setPage(0); }}>להציג את כולם</button>
                 : query !== "" ? <button type="button" className="btn" onClick={() => { setText(""); paged.setPage(0); }}>לנקות את החיפוש</button>
@@ -167,7 +169,7 @@ export function PatientsTab() {
               <p>
                 {query !== "" && elsewhere > 0
                   ? (elsewhere === 1 ? "יש כרטיס אחד שמתאים לחיפוש, אבל הוא לא בסינון הזה (ברשימת ההמתנה או בין הכרטיסים שהסתיימו)." : `יש ${elsewhere} כרטיסים שמתאימים לחיפוש, אבל הם לא בסינון הזה.`)
-                  : query !== "" ? "אפשר לחפש לפי שם הילד, שם של אחד ההורים או מספר טלפון."
+                  : query !== "" ? "אפשר לחפש לפי שם הילד, שם של אחד ההורים או מספר טלפון, וגם לפי מילה שנכתבה בסיכום פגישה."
                   : filter === "closed" ? "כרטיס שנסגר נשאר שמור, ומופיע כאן."
                   : "משפחות שעוד ממתינות נמצאות ברשימת ההמתנה."}
               </p>
@@ -236,6 +238,8 @@ export function PatientsTab() {
             </div>
           )}
           <Pager page={paged.page} pages={paged.pages} onPage={paged.setPage} label="עמודי רשימת המטופלים" />
+          {/* The same words, inside the session notes of every card (D-216). */}
+          <NotesFound query={query} />
         </>
       )}
 

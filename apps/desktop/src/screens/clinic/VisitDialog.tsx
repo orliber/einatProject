@@ -13,6 +13,7 @@ import { Segmented } from "../../components/Switch";
 import { Dialog, ErrorLine, Skeleton } from "../../components/ui";
 import type { ClinicSettings } from "../../ipc/generated/ClinicSettings";
 import type { PatientRow } from "../../ipc/generated/PatientRow";
+import type { RememberItem } from "../../ipc/generated/RememberItem";
 import type { SavedVisits } from "../../ipc/generated/SavedVisits";
 import type { Scope } from "../../ipc/generated/Scope";
 import type { Visit } from "../../ipc/generated/Visit";
@@ -20,9 +21,11 @@ import type { VisitKind } from "../../ipc/generated/VisitKind";
 import type { VisitStatus } from "../../ipc/generated/VisitStatus";
 import type { VisitView } from "../../ipc/generated/VisitView";
 import { FreeTimes, HolidayLine } from "./FreeTimes";
+import { RememberList } from "./RememberList";
+import { VisitPrep } from "./VisitPrep";
 import { useClinicSettings, useDeleteVisit, usePatients, useReloadClinic, useSaveVisit, useToday } from "./clinicData";
 import {
-  addDays, formatDate, formatDateLong, formatTime, leftAloneWords, optionsWith, parseMoney, parseTime, VISIT_KIND_LABEL, VISIT_KINDS,
+  addDays, formatDate, formatDateLong, formatTime, leftAloneWords, optionsWith, ownTime, parseMoney, parseTime, VISIT_KIND_LABEL, VISIT_KINDS,
   VISIT_STATUS_LABEL, VISIT_STATUSES,
 } from "./format";
 import {
@@ -53,7 +56,7 @@ const EVERY: { value: string; label: string }[] = [
 /** How long a kind of visit usually is, and what it costs this family. */
 function defaultsFor(settings: ClinicSettings, kind: VisitKind, patient: PatientRow | undefined): { minutes: number; fee: number } {
   const d = settings.defaults.find((x) => x.kind === kind);
-  return { minutes: d?.minutes ?? 60, fee: kind === "block" ? 0 : (patient?.patient.session_fee ?? d?.fee ?? 0) };
+  return { minutes: d?.minutes ?? 60, fee: ownTime(kind, patient?.patient.id) ? 0 : (patient?.patient.session_fee ?? d?.fee ?? 0) };
 }
 
 interface Form {
@@ -66,6 +69,7 @@ interface Form {
   place: string;
   fee: string;
   note: string;
+  remember: RememberItem[];
   status: VisitStatus;
   statusNote: string;
   chargeMissed: boolean;
@@ -81,7 +85,7 @@ function firstForm(props: VisitDialogProps, settings: ClinicSettings, patients: 
   if (existing) {
     return {
       kind: existing.kind, patientId: existing.patient_id, title: existing.title, date: existing.date, start: formatTime(existing.start),
-      minutes: String(existing.minutes), place: existing.place, fee: moneyText(existing.fee), note: existing.note, status: existing.status,
+      minutes: String(existing.minutes), place: existing.place, fee: moneyText(existing.fee), note: existing.note, remember: existing.remember ?? [], status: existing.status,
       statusNote: existing.status_note, chargeMissed: existing.charge_missed, repeat: false, every: "1", count: "8", scope: "one",
     };
   }
@@ -90,7 +94,7 @@ function firstForm(props: VisitDialogProps, settings: ClinicSettings, patients: 
   const d = defaultsFor(settings, kind, patients.find((r) => r.patient.id === patientId));
   return {
     kind, patientId, title: "", date: props.start?.date ?? today, start: formatTime(props.start?.start ?? settings.day_start),
-    minutes: String(d.minutes), place: settings.places[0] ?? "", fee: moneyText(d.fee), note: "", status: "planned", statusNote: "",
+    minutes: String(d.minutes), place: settings.places[0] ?? "", fee: moneyText(d.fee), note: "", remember: [], status: "planned", statusNote: "",
     chargeMissed: false, repeat: false, every: "1", count: "8", scope: "one",
   };
 }
@@ -147,12 +151,20 @@ export function VisitDialog(props: VisitDialogProps) {
 
   /** The usual length and fee follow the kind and the family, for a new visit only. */
   function withDefaults(kind: VisitKind, patientId: string | null): Partial<Form> {
-    if (existing) return {};
     const d = defaultsFor(settings, kind, patientOf(patientId));
-    return { ...(typed.minutes ? {} : { minutes: String(d.minutes) }), ...(typed.fee && kind !== "block" ? {} : { fee: moneyText(d.fee) }) };
+    // Own time has no fee: the field is hidden and the visit is saved with 0, and what she typed
+    // waits there in case she picks the child again.
+    const own = ownTime(kind, patientId);
+    // A supervision kept without a child, given one later, becomes a visit on the child's card:
+    // it takes the usual fee, unless she typed one.
+    if (existing) return existing.patient_id === null && !own && !typed.fee ? { fee: moneyText(d.fee) } : {};
+    return { ...(typed.minutes ? {} : { minutes: String(d.minutes) }), ...(own || typed.fee ? {} : { fee: moneyText(d.fee) }) };
   }
 
-  const block = form.kind === "block";
+  // Reserved time never has a child; supervision may be about one (a kindergarten teacher, the
+  // staff), and is then a visit like any other, with a fee; without one it is her own time (D-207).
+  const noChild = form.kind === "block";
+  const block = ownTime(form.kind, form.patientId);
   const missed = form.status === "cancelled" || form.status === "no_show";
   const inSeries = existing !== undefined && existing.series_id !== null;
   // A visit of a patient stays on that patient's card (D-177): the core moves it to no other
@@ -166,7 +178,7 @@ export function VisitDialog(props: VisitDialogProps) {
 
   /** The visit as it will be saved, or the sentence that says what is missing. */
   function build(): Visit | string {
-    if (!block && form.patientId === null) return "צריך לבחור מטופל לפגישה. לזמן שהוא שלך בלבד בוחרים בסוג \"זמן שמור\".";
+    if (!block && form.patientId === null && form.kind !== "supervision") return "צריך לבחור מטופל לפגישה. לזמן שהוא שלך בלבד בוחרים בסוג \"זמן שמור\".";
     if (form.date === "") return "צריך לכתוב את תאריך הפגישה: יום.חודש.שנה.";
     const start = parseTime(form.start);
     if (start === null) return "צריך לכתוב את שעת ההתחלה, למשל 9:30.";
@@ -178,7 +190,7 @@ export function VisitDialog(props: VisitDialogProps) {
     if (form.repeat && !(Number.isInteger(count) && count >= 2 && count <= 52)) return "סדרה של פגישות חוזרות היא בין 2 ל-52 פגישות.";
     return {
       id: existing?.id ?? "",
-      patient_id: block ? null : form.patientId,
+      patient_id: noChild ? null : form.patientId,
       kind: form.kind,
       title: form.title,
       date: form.date,
@@ -191,6 +203,7 @@ export function VisitDialog(props: VisitDialogProps) {
       charge_missed: missed && !block && form.chargeMissed,
       series_id: existing?.series_id ?? null,
       note: form.note,
+      remember: form.remember,
     };
   }
 
@@ -259,20 +272,30 @@ export function VisitDialog(props: VisitDialogProps) {
           <div className="note-warn" role="status"><span>הפגישה הזו חופפת לפגישה אחרת באותו זמן.</span></div>
         )}
 
+        {/* Opening a visit, she first sees what not to forget for it (D-207). */}
+        {existing && <RememberList id="visit-remember" items={form.remember} onChange={(remember) => set({ remember })} />}
+
+        {/* And, while it is still ahead, what the last session left and what is open for this family. */}
+        {existing && existing.status === "planned" && !block && existing.patient_id !== null && (
+          <VisitPrep patientId={existing.patient_id} visit={existing} today={now.date} />
+        )}
+
         <SelectField id="visit-kind" label="סוג הפגישה" value={form.kind}
           options={optionsWith(kinds, VISIT_KIND_LABEL, form.kind)}
-          hint={block ? "זמן שמור הוא שלך בלבד: כתיבת דוחות, השתלמות, יום חופש. בלי מטופל ובלי מחיר."
+          hint={form.kind === "supervision" ? "הדרכה של צוות, גננת או מטפלת אחרת. על ילד מסוים: בוחרים אותו, והפגישה נכנסת לכרטיס שלו עם מחיר. הדרכה מקצועית כללית: בלי ילד ובלי מחיר. להדרכת הורים בוחרים \"הדרכת הורים\"."
+            : block ? "זמן שמור הוא שלך בלבד: כתיבת דוחות, השתלמות, יום חופש. בלי מטופל ובלי מחיר."
             : form.kind === "unknown" ? "הסוג שנשמר לפגישה הזו לא מוכר לגרסה הזו של התוכנה. כדי לשמור שינוי צריך לבחור סוג מהרשימה, או לעדכן את התוכנה."
             : undefined}
           onChange={(kind) => set({ kind, ...(kind === "block" ? { patientId: null } : {}), ...withDefaults(kind, kind === "block" ? null : form.patientId) })} />
 
-        {!block && (
+        {!noChild && (
           <PatientPicker id="visit-patient" value={form.patientId} autoFocus={!existing && form.patientId === null} locked={onCard}
+            label={form.kind === "supervision" ? "על איזה ילד (לא חובה)" : "מטופל"}
             onChange={(patientId) => set({ patientId, ...withDefaults(form.kind, patientId) })} />
         )}
 
-        <TextField id="visit-title" label={block ? "מה בזמן הזה" : "כותרת (לא חובה)"} value={form.title} maxLength={200}
-          placeholder={block ? "כתיבת דוחות" : undefined} onChange={(title) => set({ title })}
+        <TextField id="visit-title" label={form.kind === "supervision" ? "עם מי או על מה (לא חובה)" : block ? "מה בזמן הזה" : "כותרת (לא חובה)"} value={form.title} maxLength={200}
+          placeholder={form.kind === "supervision" ? "הדרכה קבוצתית" : block ? "כתיבת דוחות" : undefined} onChange={(title) => set({ title })}
           hint={block ? undefined : "היומן יציג את הכותרת במקום שם הסוג."} />
 
         <div className="clinic-form-row">
@@ -302,7 +325,9 @@ export function VisitDialog(props: VisitDialogProps) {
         </div>
 
         <TextAreaField id="visit-note" label="הערה מעשית (לא חובה)" value={form.note} rows={2} maxLength={4000}
-          placeholder="למשל: להביא את השאלונים" onChange={(note) => set({ note })} />
+          placeholder="למשל: חדר 2, החניה מאחור" onChange={(note) => set({ note })} />
+
+        {!existing && <RememberList id="visit-remember" items={form.remember} onChange={(remember) => set({ remember })} />}
 
         {!existing && (
           <fieldset className="clinic-group">
@@ -325,7 +350,7 @@ export function VisitDialog(props: VisitDialogProps) {
               options={[{ value: "one", label: "רק הפגישה הזו" }, { value: "following", label: "זו וכל הבאות" }]} />
             <p className="hint">
               {form.scope === "following"
-                ? "הסוג, השעה, המשך, המקום, המחיר וההערה יעברו גם לפגישות הבאות שעוד מתוכננות, והן יזוזו באותו מספר ימים. פגישה שכבר יש לה סיכום, או שכבר סומנה (התקיימה, בוטלה, לא הגיעו), נשארת בדיוק כמו שהיא."
+                ? "הסוג, השעה, המשך, המקום, המחיר וההערה (בלי רשימת \"לא לשכוח\") יעברו גם לפגישות הבאות שעוד מתוכננות, והן יזוזו באותו מספר ימים. פגישה שכבר יש לה סיכום, או שכבר סומנה (התקיימה, בוטלה, לא הגיעו), נשארת בדיוק כמו שהיא."
                 : "הפגישות האחרות בסדרה לא משתנות."}
             </p>
           </div>

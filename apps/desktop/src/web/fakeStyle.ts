@@ -211,6 +211,10 @@ export class FakeStyle {
       case "delete_style_source":
         this.sources = this.sources.filter((s) => s.id !== a.id);
         return null;
+      case "style_source_text": {
+        const s = this.sources.find((x) => x.id === a.id) ?? fail("not_found", "לא נמצא: הדוח");
+        return { id: s.id, title: s.title, parts: s.parts.map((p) => ({ heading: p.heading, text: p.text })) };
+      }
       case "prepare_style_analysis": {
         const s = this.sources.find((x) => x.id === a.sourceId) ?? fail("not_found", "לא נמצא: הדוח");
         const approval = newId("approval");
