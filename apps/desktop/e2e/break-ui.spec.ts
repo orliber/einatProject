@@ -62,6 +62,13 @@ for (const size of sizes) {
       await stage(page, /חומרים/).click();
       await expect(page.getByRole("heading", { name: "מה יש בתיק" })).toBeVisible();
       await expectNoSidewaysSpill(page, "materials");
+      // In a short window the list of materials keeps its height and the page scrolls: a list
+      // that is squeezed instead hides its last materials with nothing to scroll.
+      const size = page.viewportSize();
+      await page.setViewportSize({ width: size?.width ?? 1280, height: 420 });
+      const squeezed = await page.getByRole("region", { name: "רשימת החומרים" }).evaluate((el) => el.scrollHeight - el.clientHeight);
+      expect(squeezed, "pixels of the materials list that are cut off").toBeLessThanOrEqual(4);
+      if (size) await page.setViewportSize(size);
       // A material with a long file-like name stays in its row (round 49).
       await page.getByRole("button", { name: "אינטייק עם ההורים (רישום אינטייק)" }).click();
       const write = page.getByRole("dialog", { name: "הוספת טקסט" });
