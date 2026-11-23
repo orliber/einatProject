@@ -5,6 +5,12 @@
   gap: 16px;
   overflow: auto;
 }
+/* The page scrolls; its parts keep their height. The list clips its rounded corners
+   (overflow: hidden), and a part that clips may be squeezed by the column: with many
+   materials the list was cut at the window's edge with nothing to scroll. */
+.materials-body > * {
+  flex-shrink: 0;
+}
 .needs {
   list-style: none;
   margin: 0;
