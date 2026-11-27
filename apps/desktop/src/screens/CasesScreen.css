@@ -10,6 +10,11 @@
 }
 .explorer-tree {
   flex: 0 0 220px;
+  /* A long folder name ends in "…" (with its full name in the row's title): it never widens
+     the tree and squeezes the table beside it. */
+  min-width: 0;
+  max-width: 220px;
+  overflow-x: hidden;
   border-inline-end: 1px solid var(--line);
   background: var(--surface);
   padding: 12px 8px;
@@ -41,6 +46,10 @@
   display: flex;
   flex-direction: column;
   gap: 1px;
+  min-width: 0;
+}
+.tree {
+  min-width: 0;
 }
 .tree-wrap {
   display: contents;
@@ -347,7 +356,7 @@ button.crumb:hover:not([aria-current="page"]) {
 .move-tree {
   display: grid;
   gap: 2px;
-  max-height: 50vh;
+  max-height: calc(50vh / var(--zoom, 1));
   overflow-y: auto;
 }
 .move-row {

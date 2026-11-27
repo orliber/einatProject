@@ -1,6 +1,6 @@
 // The export dialog's versions (round 55, D-095): the full report, or a version for the
 // parents with no numbers unless she turns them on. All names and data are invented.
-import { render, screen } from "@testing-library/react";
+import { render, renderHook, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { mockIPC } from "@tauri-apps/api/mocks";
 import { AppContext, type AppApi } from "../App";
@@ -8,6 +8,8 @@ import type { CaseDetail, ExportCheck, ReportSettings } from "../ipc/client";
 import type { CaseApi } from "../screens/CaseScreen";
 import { status } from "../test/fixtures";
 import { ExportDialog, parentsFileName, shownFileName } from "./ExportDialog";
+import { forgetHold, useHoldUnsaved } from "./Unsaved";
+import { clearKept, setKept } from "../kept";
 
 /** The file name as said in the dialog. */
 const fileName = () => document.querySelector(".export-file-name")?.textContent;
@@ -16,11 +18,11 @@ function app(): AppApi {
   return { status: status(), go: vi.fn(), refresh: vi.fn(async () => undefined), notify: vi.fn(), fail: (e) => e.message, lockNow: vi.fn(async () => undefined) };
 }
 
-function caseApi(): CaseApi {
+function caseApi(sections: unknown[] = [{ key: "referral", title: "סיבת הפניה", approved: true }]): CaseApi {
   const detail = {
     meta: { code: "TEST-0002" },
     identities: [{ role: "child", value: "אלון בדוי" }],
-    sections: [{ key: "referral", title: "סיבת הפניה", approved: true }],
+    sections,
   } as unknown as CaseDetail;
   return {
     caseId: "c1", detail, jobs: [],
@@ -120,7 +122,7 @@ describe("ExportDialog", () => {
     const user = userEvent.setup();
     render(<AppContext.Provider value={app()}><ExportDialog api={caseApi()} onClose={vi.fn()} /></AppContext.Provider>);
     expect(await screen.findByText("הקובץ לא נפתח")).toBeInTheDocument();
-    expect(screen.queryByText("בודקת את הדוח")).toBeNull();
+    expect(screen.queryByText("בדיקת הדוח")).toBeNull();
     await user.click(screen.getByRole("button", { name: /לנסות שוב/ }));
     expect(await screen.findByText(/שם הקובץ:/)).toBeInTheDocument();
     expect(calls.filter((c) => c === "check_export")).toHaveLength(2);
@@ -135,5 +137,109 @@ describe("ExportDialog", () => {
   it("names the parents' file as the core does", () => {
     expect(parentsFileName("דוח אבחון TEST-0002.docx")).toBe("דוח אבחון TEST-0002 - להורים.docx");
     expect(parentsFileName("דוח")).toBe("דוח - להורים");
+  });
+
+  it("a paragraph edit left open and unsaved stops the file, and leads back to it", async () => {
+    const hold = renderHook(() => useHoldUnsaved("c1", 'פסקה בסעיף "סיבת הפניה"', "טקסט בדוי עם תיקון שלא נשמר"));
+    try {
+      const go = vi.fn();
+      mockIPC((cmd) => (cmd === "check_export" ? check : cmd === "report_settings" ? settings : null));
+      const user = userEvent.setup();
+      const onClose = vi.fn();
+      render(<AppContext.Provider value={{ ...app(), go }}><ExportDialog api={caseApi()} onClose={onClose} /></AppContext.Provider>);
+      expect(await screen.findByText(/יש עריכה שלא נשמרה בסעיף "סיבת הפניה"/)).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "הפקת הדוח" })).toBeDisabled();
+      expect(screen.queryByText(/ולא נשארו תפקידים/)).toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "חזרה לעריכה" }));
+      expect(onClose).toHaveBeenCalled();
+      // The report page, on that section: where the report's editor is kept and opens again
+      // (the section's key alone would open the section's own page, without it).
+      expect(go).toHaveBeenCalledWith({ name: "case", id: "c1", view: "report", section: "referral" });
+    } finally {
+      hold.unmount();
+      forgetHold();
+    }
+  });
+
+  it("an edit left open on the section's own page leads back to that page", async () => {
+    const hold = renderHook(() => useHoldUnsaved("c1", 'פסקה בסעיף "סיבת הפניה"', "פסקה בדויה משלה שלא נשמרה"));
+    setKept<string | null>("case:c1:section:referral:own", null)("פסקה בדויה משלה שלא נשמרה");
+    try {
+      const go = vi.fn();
+      mockIPC((cmd) => (cmd === "check_export" ? check : cmd === "report_settings" ? settings : null));
+      const user = userEvent.setup();
+      render(<AppContext.Provider value={{ ...app(), go }}><ExportDialog api={caseApi()} onClose={vi.fn()} /></AppContext.Provider>);
+      await user.click(await screen.findByRole("button", { name: "חזרה לעריכה" }));
+      expect(go).toHaveBeenCalledWith({ name: "case", id: "c1", view: "referral" });
+    } finally {
+      hold.unmount();
+      forgetHold();
+      clearKept();
+    }
+  });
+
+  it("UIC-8: while the file is made nothing can be changed or closed, and the title says what was made", async () => {
+    let finish: (p: string) => void = () => undefined;
+    mockIPC((cmd) => {
+      if (cmd === "check_export") return check;
+      if (cmd === "report_settings") return settings;
+      if (cmd === "export_report") return new Promise<string>((r) => { finish = r; });
+      return null;
+    });
+    const user = userEvent.setup();
+    render(<AppContext.Provider value={app()}><ExportDialog api={caseApi()} onClose={vi.fn()} /></AppContext.Provider>);
+    // One group for the file type: the arrows move between Word and PDF.
+    const types = screen.getAllByRole("radio").filter((r) => r.getAttribute("name") === "file-type");
+    expect(types).toHaveLength(2);
+    await user.click(await screen.findByRole("button", { name: "הפקת הדוח" }));
+    expect(screen.getByRole("radio", { name: "גרסה להורים" })).toBeDisabled();
+    expect(screen.getByRole("radio", { name: /PDF/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "ביטול" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "סגירה" })).toBeNull();
+    finish("/בדוי/הורדות/דוח");
+    expect(await screen.findByText("הדוח מוכן")).toBeInTheDocument();
+    expect(screen.queryByText("הגרסה להורים מוכנה")).toBeNull();
+  });
+
+  it("a PDF with [חסר: …] left in asks once before it is made", async () => {
+    const { calls, user } = setup({ to_complete: ["רקע התפתחותי: [חסר: גיל ההליכה]"] });
+    await user.click(await screen.findByRole("radio", { name: /PDF/ }));
+    expect(screen.getByText(/ב-PDF אי אפשר להשלים אחר כך/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "הפקת הדוח" }));
+    expect(calls.some((c) => c.cmd === "export_pdf")).toBe(false);
+    expect(screen.getByRole("alert")).toHaveTextContent("להפיק בכל זאת?");
+    await user.click(screen.getByRole("button", { name: "כן, להפיק PDF עם הסימונים" }));
+    await screen.findByText("הדוח מוכן");
+    expect(calls.filter((c) => c.cmd === "export_pdf")).toHaveLength(1);
+  });
+
+  it("a Word file with [חסר: …] left in goes without the question", async () => {
+    const { calls, user } = setup({ to_complete: ["רקע התפתחותי: [חסר: גיל ההליכה]"] });
+    await user.click(await screen.findByRole("button", { name: "הפקת הדוח" }));
+    await screen.findByText("הדוח מוכן");
+    expect(calls.filter((c) => c.cmd === "export_report")).toHaveLength(1);
+  });
+
+  it("the file name keeps its extension at the end in a right-to-left line", async () => {
+    setup();
+    await screen.findByText(/שם הקובץ:/);
+    const name = document.querySelector(".export-file-name") as HTMLElement;
+    const parts = name.querySelectorAll("bdi");
+    expect(parts).toHaveLength(2);
+    expect(parts[0]).toHaveTextContent("דוח אבחון TEST-0002");
+    expect(parts[1]).toHaveTextContent(".docx");
+    expect(parts[1]).toHaveAttribute("dir", "ltr");
+  });
+
+  it("a number unlike the score table still open is named before the file is made", async () => {
+    mockIPC((cmd) => (cmd === "check_export" ? check : cmd === "report_settings" ? settings : null));
+    const sections = [{
+      key: "cognitive", title: "פרופיל קוגניטיבי", approved: true,
+      paragraphs: [{ id: "p1", status: "approved", text: "טקסט בדוי 115", notes: [{ kind: "score_mismatch", text: "המספר 115 לא תואם" }], warnings: [] }],
+    }];
+    render(<AppContext.Provider value={app()}><ExportDialog api={caseApi(sections)} onClose={vi.fn()} /></AppContext.Provider>);
+    await waitFor(() => expect(screen.getByText(/מספר שלא תואם את טבלת הציונים: פרופיל קוגניטיבי/)).toBeInTheDocument());
+    // Advice: the file can still be made.
+    expect(screen.getByRole("button", { name: "הפקת הדוח" })).toBeEnabled();
   });
 });

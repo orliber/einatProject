@@ -8,7 +8,7 @@ import { App } from "../../App";
 import { FakeCore } from "../../web/fakeCore";
 import type { CaseDetail } from "../../ipc/client";
 import { prepared } from "../../test/fixtures";
-import { closingAnchor, closingRequest, closingSteps, emptyClosing, ownEmptyLine, showClosing } from "./closing";
+import { closingAnchor, closingHold, closingRequest, closingSteps, emptyClosing, ownEmptyLine, showClosing } from "./closing";
 import { DRAFT_FROM_APPROVED } from "./instructions";
 
 configure({ asyncUtilTimeout: 6000 });
@@ -49,6 +49,20 @@ describe("the steps of the closing sections", () => {
 
     const all = [...body("approved"), section("dsm", "approved"), section("summary", "approved"), section("diagnoses", "approved"), section("recommendations", "approved")];
     expect(states(all)).toEqual(["diagnoses:done", "dsm_recommendations:done", "summary:done"]);
+  });
+
+  it("a closing section's own button is held by the same order: what it is written from first", () => {
+    const empty = [...body("approved"), section("dsm"), section("summary"), section("diagnoses"), section("recommendations")];
+    expect(closingHold(empty, "recommendations")).toMatch(/האבחנות שלך עוד לא אושרו/);
+    expect(closingHold(empty, "dsm")).toMatch(/האבחנות שלך עוד לא אושרו/);
+    expect(closingHold(empty, "summary")).toMatch(/האבחנות שלך עוד לא אושרו/);
+    expect(closingHold(empty, "diagnoses")).toBeNull();
+    const chosen = [...body("approved"), section("dsm"), section("summary"), section("diagnoses", "approved"), section("recommendations")];
+    expect(closingHold(chosen, "recommendations")).toBeNull();
+    expect(closingHold(chosen, "summary")).toMatch(/ההמלצות עוד לא אושרו/);
+    const ready = [...body("approved"), section("dsm"), section("summary"), section("diagnoses", "approved"), section("recommendations", "approved")];
+    expect(closingHold(ready, "summary")).toBeNull();
+    expect(closingHold(ready, "referral")).toBeNull();
   });
 
   it("only the empty sections the AI drafts are drafted; a report without a section has no step for it", () => {

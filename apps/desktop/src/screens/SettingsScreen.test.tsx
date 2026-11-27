@@ -6,8 +6,8 @@ import userEvent from "@testing-library/user-event";
 import { a11yViolations } from "../test/a11y";
 import { status } from "../test/fixtures";
 import { appApi, Host, serve, type Override } from "../test/host";
-import { SettingsScreen } from "./SettingsScreen";
-import { groupOf, SETTINGS_PANES, type SettingsPane } from "./settingsPanes";
+import { forgetSettingsDrafts, SEARCH_TARGETS, SettingsScreen } from "./SettingsScreen";
+import { groupOf, searchSettings, SETTINGS_PANES, type SettingsPane } from "./settingsPanes";
 
 configure({ asyncUtilTimeout: 5000 });
 vi.setConfig({ testTimeout: 30_000 });
@@ -15,6 +15,7 @@ vi.setConfig({ testTimeout: 30_000 });
 beforeEach(() => {
   // No daily update check from the top bar while the settings are tested.
   localStorage.setItem("dv.updateAuto", "off");
+  forgetSettingsDrafts();
 });
 afterEach(() => localStorage.removeItem("dv.updateAuto"));
 
@@ -209,5 +210,96 @@ describe("when the core refuses", () => {
     });
     await user.click(within(nav).getByRole("button", { name: "הדוח" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("הגדרות הדוח לא נקראו.");
+  });
+});
+
+describe("the search leads to what is there", () => {
+  it("every name the search knows is a heading or a setting in the part it opens", async () => {
+    const missing: string[] = [];
+    for (const p of SETTINGS_PANES) {
+      const { view } = await openSettings(undefined, p.id);
+      const shown = () => [...document.querySelectorAll<HTMLElement>(SEARCH_TARGETS)]
+        .map((el) => (el.textContent ?? "").replace(/\s+/g, " "));
+      // The part has loaded (the clinic's parts load on first use) once its last heading is there.
+      await waitFor(() => expect(p.finds.some((f) => shown().some((t) => t.includes(f)))).toBe(true));
+      await waitFor(() => expect(document.querySelector(".settings-pane [aria-busy='true']")).toBeNull());
+      await new Promise((r) => setTimeout(r, 50));
+      for (const want of p.finds) if (!shown().some((t) => t.includes(want))) missing.push(`${want} / ${p.label}`);
+      view.unmount();
+    }
+    expect(missing).toEqual([]);
+  });
+
+  it("the lock is found in privacy, and the log in updates and help", () => {
+    expect(searchSettings("נעילה אוטומטית").map((f) => f.pane.id)).toEqual(["privacy"]);
+    expect(searchSettings("יומן פעולות").map((f) => f.pane.id)).toEqual(["about"]);
+  });
+
+  it("“סיסמא” finds the password as “סיסמה”, and a word typed halfway still finds", () => {
+    expect(searchSettings("סיסמא").map((f) => f.pane.id)).toContain("security");
+    expect(searchSettings("החלפת סיסמא").map((f) => f.inside)).toEqual(["החלפת סיסמה"]);
+    expect(searchSettings("חתימ").map((f) => f.inside)).toContain("חתימה");
+  });
+});
+
+describe("what she left unsaved", () => {
+  it("her names and the report's details are kept when she leaves Settings, she is told, and she can drop them", async () => {
+    const first = await openSettings(undefined, "report");
+    const title = await screen.findByLabelText("כותרת");
+    await first.user.clear(title);
+    await first.user.type(title, "כותרת בדויה");
+    expect(within(title.closest("section") as HTMLElement).getByRole("status")).toHaveTextContent("יש שינויים שעוד לא נשמרו.");
+    await first.user.click(within(first.nav).getByRole("button", { name: "כללי" }));
+    const names = screen.getByLabelText("השמות שלך");
+    await first.user.type(names, ", ר. בדויה");
+    first.view.unmount();
+    await waitFor(() => expect(first.app.notify).toHaveBeenCalledWith(
+      "השינויים ב\"השמות שלך\" (כללי) וב\"פרטי הדוח\" (הדוח) עוד לא נשמרו. הם מחכים בהגדרות, ואפשר לשמור או לבטל אותם שם.",
+    ));
+    // Back in Settings: as she left them, with a way to drop them.
+    const again = await openSettings(undefined, "general");
+    expect(screen.getByLabelText("השמות שלך")).toHaveValue("רותם בדויה, ר. בדויה");
+    await again.user.click(within(screen.getByLabelText("השמות שלך").closest(".field") as HTMLElement).getByRole("button", { name: "ביטול השינויים" }));
+    expect(screen.getByLabelText("השמות שלך")).toHaveValue("רותם בדויה");
+    await again.user.click(within(again.nav).getByRole("button", { name: "הדוח" }));
+    expect(await screen.findByLabelText("כותרת")).toHaveValue("כותרת בדויה");
+    // Saved: nothing waits any more, and leaving says nothing.
+    await again.user.click(within(screen.getByLabelText("כותרת").closest("section") as HTMLElement).getByRole("button", { name: "שמירה" }));
+    await waitFor(() => expect(again.app.notify).toHaveBeenCalledWith("הגדרות הדוח נשמרו."));
+    expect(within(screen.getByLabelText("כותרת").closest("section") as HTMLElement).queryByRole("status")).toBeNull();
+    again.view.unmount();
+    await new Promise((r) => setTimeout(r, 10));
+    expect(again.app.notify).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("a refusal is said where the action is", () => {
+  it("a logo that is refused says why inside the logo's section (UIA-6)", async () => {
+    const { user } = await openSettings((cmd) => {
+      if (cmd === "set_report_logo") throw { code: "refused", message: "זו לא תמונת PNG או JPEG.", details: [] };
+      return undefined;
+    }, "report");
+    const logo = await screen.findByRole("region", { name: "לוגו" });
+    await user.upload(within(logo).getByLabelText("בחירת לוגו"), new File(["x"], "logo.png", { type: "image/png" }));
+    expect(await within(logo).findByRole("alert")).toHaveTextContent("זו לא תמונת PNG או JPEG.");
+    expect(within(screen.getByRole("region", { name: "פרטי הדוח" })).queryByRole("alert")).toBeNull();
+  });
+
+  it("the originality check names the file, and a failed check of another file takes the answer before away (UIA-7)", async () => {
+    let refuse = false;
+    const { user } = await openSettings((cmd) => {
+      if (cmd === "check_original") {
+        if (refuse) throw { code: "refused", message: "הקובץ לא נקרא.", details: [] };
+        return 1_790_000_000;
+      }
+      return undefined;
+    }, "report");
+    const box = await screen.findByRole("region", { name: "בדיקת מקוריות של קובץ" });
+    await user.upload(within(box).getByLabelText("בחירת קובץ"), new File(["a"], "דוח-בדוי-א.pdf", { type: "application/pdf" }));
+    expect(await within(box).findByRole("status")).toHaveTextContent("הקובץ \u2068דוח-בדוי-א.pdf\u2069 הוא המקורי");
+    refuse = true;
+    await user.upload(within(box).getByLabelText("בחירת קובץ"), new File(["b"], "דוח-בדוי-ב.pdf", { type: "application/pdf" }));
+    expect(await within(box).findByRole("alert")).toHaveTextContent("הקובץ לא נקרא.");
+    expect(within(box).queryByRole("status")).toBeNull();
   });
 });

@@ -51,6 +51,34 @@ describe("password settings: the printed kit is a folded last resort (D-103)", (
     expect(screen.queryByText(/ערכת השחזור/)).toBeNull();
   });
 
+  it("Enter pressed again while the password is being changed sends nothing more, and empties nothing (UIA-10)", async () => {
+    const calls: string[] = [];
+    let finish: (v: unknown) => void = () => undefined;
+    mockIPC((cmd) => {
+      calls.push(cmd);
+      return cmd === "change_password" ? new Promise((r) => { finish = r; }) : null;
+    });
+    const notify = vi.fn();
+    show(api({ notify }));
+    fireEvent.click(screen.getByRole("button", { name: "החלפת סיסמה…" }));
+    const form = screen.getByLabelText("סיסמה חדשה").closest("form") as HTMLFormElement;
+    // With no current password, Enter sends nothing and says what is missing.
+    fireEvent.submit(form);
+    expect(await screen.findByRole("alert")).toHaveTextContent("צריך להקליד את הסיסמה הנוכחית.");
+    fireEvent.change(screen.getByLabelText("הסיסמה הנוכחית"), { target: { value: "סיסמה ישנה בדויה" } });
+    fireEvent.change(screen.getByLabelText("סיסמה חדשה"), { target: { value: "משפט חדש ובדוי לגמרי" } });
+    fireEvent.change(screen.getByLabelText("שוב, לאימות"), { target: { value: "משפט חדש ובדוי לגמרי" } });
+    fireEvent.submit(form);
+    await vi.waitFor(() => expect(calls.filter((c) => c === "change_password")).toHaveLength(1));
+    fireEvent.submit(form);
+    fireEvent.submit(form);
+    expect(calls.filter((c) => c === "change_password")).toHaveLength(1);
+    expect(screen.getByLabelText("סיסמה חדשה")).toHaveValue("משפט חדש ובדוי לגמרי");
+    expect(screen.queryByRole("alert")).toBeNull();
+    finish(null);
+    await vi.waitFor(() => expect(notify).toHaveBeenCalledWith(expect.stringContaining("הסיסמה הוחלפה")));
+  });
+
   it("the kit cannot be retired while Google is off or there is no fresh backup, and says why", async () => {
     mockIPC((cmd) => {
       if (cmd === "google_status") return { available: true, on: false, needs_setup_here: false };

@@ -38,7 +38,7 @@ describe("StyleHintView", () => {
       ask: "משפטים קצרים יותר, כ-14 מילים במשפט",
       marks: [{ from: "מפגין", to: "מראה" }, { from: "חשוב לציין כי", to: "" }],
     }} />);
-    const chip = screen.getByRole("button", { name: "קרוב לסגנון שלך: 58" });
+    const chip = screen.getByRole("button", { name: "קרוב לסגנון שלך: 58 מתוך 100" });
     expect(chip).toHaveAttribute("aria-expanded", "false");
     await user.click(chip);
     expect(screen.getByText("משפטים ארוכים מהרגיל אצלך")).toBeInTheDocument();
@@ -55,7 +55,7 @@ describe("StyleHintView", () => {
 
   it("a paragraph that reads like her says so, and offers no rewrite", async () => {
     render(<StyleHintView busy={false} onCloser={vi.fn()} onApply={vi.fn()} hint={{ fit: 91, details: [], ask: null, marks: [] }} />);
-    await userEvent.setup().click(screen.getByRole("button", { name: "קרוב לסגנון שלך: 91" }));
+    await userEvent.setup().click(screen.getByRole("button", { name: "קרוב לסגנון שלך: 91 מתוך 100" }));
     expect(screen.getByText("הפסקה נשמעת כמו הכתיבה שלך.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "לקרב לסגנון שלי" })).toBeNull();
   });

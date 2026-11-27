@@ -2,6 +2,7 @@ import { ClinicRecords } from "./ClinicRecords";
 import { useEffect, useRef, useState, type DragEvent } from "react";
 import { flushSync } from "react-dom";
 import { useApp } from "../../App";
+import { ConfirmDialog } from "../library/LibraryDialogs";
 import { kindLabel, kindOrder } from "../../i18n/he";
 import { ipc, type CaseInput, type FollowUpView, type ImportPreview, type InputKind, type MaterialRouting, type PriorRecordView, type ScoreSheet, type Setting } from "../../ipc/client";
 import type { FilterOutcome } from "../../ipc/generated/FilterOutcome";
@@ -37,14 +38,13 @@ export function MaterialsView({ api, onWrite }: { api: CaseApi; onWrite?: () => 
   // A material opens in a window when clicked; the screen itself is only the list.
   const [selected, setSelected] = useState<string | null>(null);
   const [previewed, setPreviewed] = useState<{ id: string; outcome: FilterOutcome } | null>(null);
-  const [importing, setImporting] = useState<{ preview: ImportPreview; kind?: InputKind | undefined } | null>(null);
+  const [importing, setImporting] = useState<{ preview: ImportPreview; kind?: InputKind | undefined; seq: number } | null>(null);
   // The slot a file is being chosen for (the "+" of that slot), so it lands in its place.
   const [uploadFor, setUploadFor] = useState<InputKind | undefined>(undefined);
   const [dropOn, setDropOn] = useState<string | null>(null);
   const [reading, setReading] = useState<{ name: string; size: string; at?: string } | null>(null);
   /** D-147: the files of one choice or drop, a line each, as they are read. */
   const [batch, setBatch] = useState<FileResult[] | null>(null);
-  const batchRunning = useRef(false);
   /** Resolves when the import window of a file in a batch closes (true: it was saved). */
   const dialogDone = useRef<((saved: boolean) => void) | null>(null);
   const [writing, setWriting] = useState<{ kind: InputKind; input?: CaseInput } | null>(null);
@@ -55,6 +55,9 @@ export function MaterialsView({ api, onWrite }: { api: CaseApi; onWrite?: () => 
     return d ? { input: detail.inputs.find((i) => i.id === d.inputId) } : null;
   });
   const [choosing, setChoosing] = useState<CaseInput | null>(null);
+  /** The material she asked to delete, waiting for her yes: the core keeps only the last one
+   *  deleted, and only until the lock, so a delete is never one stray click. */
+  const [deleting, setDeleting] = useState<CaseInput | null>(null);
   const [dragging, setDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
   /** A clean import saved without the review window, with a way back (F7). */
@@ -83,6 +86,24 @@ export function MaterialsView({ api, onWrite }: { api: CaseApi; onWrite?: () => 
   }, [caseId, input]);
   const preview = previewed && input && previewed.id === input.id ? previewed.outcome : null;
 
+  /** UIC-3: one file (or one batch) is read at a time. A file chosen or dropped while another
+   *  is read, or while its import window is open, waits its turn in this line, and the wait
+   *  line says so: never two import windows, and never a file dropped on the floor. */
+  const queue = useRef<{ files: File[]; kind?: InputKind | undefined }[]>([]);
+  const draining = useRef(false);
+  const [queued, setQueued] = useState(0);
+  /** Each import window is new (its own key): a second file never inherits the first one's text. */
+  const importSeq = useRef(0);
+
+  /** The import window of one file, open until she saves or closes it (true: it was saved). */
+  function openImport(preview: ImportPreview, kind?: InputKind) {
+    return new Promise<boolean>((resolve) => {
+      dialogDone.current = resolve;
+      importSeq.current += 1;
+      setImporting({ preview, kind, seq: importSeq.current });
+    });
+  }
+
   async function readFile(file: File, kind?: InputKind) {
     setError(null);
     setBatch(null);
@@ -99,7 +120,9 @@ export function MaterialsView({ api, onWrite }: { api: CaseApi; onWrite?: () => 
         await reload();
       } else {
         setAutoSaved(null);
-        setImporting({ preview, kind });
+        setReading(null);
+        // The next file in line waits for this window.
+        await openImport(preview, kind);
       }
     } catch (e) {
       setError(fail(e as never));
@@ -108,13 +131,32 @@ export function MaterialsView({ api, onWrite }: { api: CaseApi; onWrite?: () => 
     }
   }
 
+  /** Every choice or drop comes here, and waits for the one before it (UIC-3). */
+  async function readFiles(files: File[], kind?: InputKind) {
+    if (files.length === 0) return;
+    queue.current.push({ files, kind });
+    if (draining.current) {
+      setQueued(queue.current.reduce((n, j) => n + j.files.length, 0));
+      return;
+    }
+    draining.current = true;
+    try {
+      for (let job = queue.current.shift(); job; job = queue.current.shift()) {
+        setQueued(queue.current.reduce((n, j) => n + j.files.length, 0));
+        const [one] = job.files;
+        if (job.files.length === 1 && one) await readFile(one, job.kind);
+        else await readBatch(job.files, job.kind);
+      }
+    } finally {
+      draining.current = false;
+      setQueued(0);
+    }
+  }
+
   /** D-147: several files, read one after another through the same road as one file: a file
    *  read in full is saved at once, one that was not opens the import window and the next waits
    *  for it, and one that could not be read says why. Each file gets its own line. */
-  async function readFiles(files: File[], kind?: InputKind) {
-    if (files.length === 1 && files[0]) return readFile(files[0], kind);
-    if (files.length === 0 || batchRunning.current) return;
-    batchRunning.current = true;
+  async function readBatch(files: File[], kind?: InputKind) {
     setError(null);
     setAutoSaved(null);
     const results: FileResult[] = [];
@@ -133,10 +175,7 @@ export function MaterialsView({ api, onWrite }: { api: CaseApi; onWrite?: () => 
             result = { name: file.name, text: `"${title}" נשמר בתיק.`, savedId: saved.id };
           } else {
             setReading(null);
-            const kept = await new Promise<boolean>((resolve) => {
-              dialogDone.current = resolve;
-              setImporting({ preview, kind });
-            });
+            const kept = await openImport(preview, kind);
             result = { name: file.name, text: kept ? `"${title}" נשמר בתיק אחרי הבדיקה בחלון.` : "לא נשמר: החלון נסגר בלי שמירה." };
           }
         } catch (e) {
@@ -147,7 +186,6 @@ export function MaterialsView({ api, onWrite }: { api: CaseApi; onWrite?: () => 
       }
     } finally {
       setReading(null);
-      batchRunning.current = false;
     }
   }
 
@@ -210,6 +248,9 @@ export function MaterialsView({ api, onWrite }: { api: CaseApi; onWrite?: () => 
     try {
       await ipc.deleteInput(caseId, i.id);
       setSelected(null);
+      // What pointed at it goes with it: the "נשמר בתיק" band, and the "ביטול" of its line.
+      setAutoSaved((a) => (a?.id === i.id ? null : a));
+      setBatch((b) => b?.map((x) => (x.savedId === i.id ? { ...x, text: "נמחק מהתיק.", savedId: undefined } : x)) ?? null);
       await reload();
       notify("החומר נמחק מהתיק.", { label: "ביטול", run: () => void restore(i) });
     } catch (e) {
@@ -309,7 +350,7 @@ export function MaterialsView({ api, onWrite }: { api: CaseApi; onWrite?: () => 
         <div className="note-sand row" role="status">
           <span className="grow">"{autoSaved.title}" נשמר בתיק.</span>
           <button type="button" className="btn btn-small" onClick={() => { setSelected(autoSaved.id); setAutoSaved(null); }}>לבדיקה</button>
-          <button type="button" className="btn btn-small" onClick={() => void undoAutoSave()}>ביטול</button>
+          <button type="button" className="btn btn-small" onClick={() => void undoAutoSave()}>ביטול הייבוא</button>
         </div>
       )}
       {batch && batch.length > 0 && (
@@ -353,7 +394,10 @@ export function MaterialsView({ api, onWrite }: { api: CaseApi; onWrite?: () => 
           <div className="materials-ai row wrap-row small" role="group" aria-label={`בקשה ל-${ai} כבר עכשיו`}>
             <span className="muted">✦ אפשר לבקש מ-{ai} לנסח כבר עכשיו:</span>
             {NEEDS.filter((n) => has(n) && wordable(n).length > 0).map((n) => (
-              <button key={n.label} type="button" className="btn btn-small" disabled={wording} onClick={() => setAsking(n)}>{n.ask}</button>
+              <button key={n.label} type="button" className="btn btn-small" disabled={wording}
+                // The second click of a double click on the button that led here lands on this
+                // spot of the new page: only a click of its own asks (a request to the AI).
+                onClick={(e) => { if (e.detail > 1) return; setAsking(n); }}>{n.ask}</button>
             ))}
           </div>
         )}
@@ -365,8 +409,9 @@ export function MaterialsView({ api, onWrite }: { api: CaseApi; onWrite?: () => 
           {reading ? (
             <div className="grow"><WaitLine task="read" speed={reading.size} delay={0} label={`קוראת את ${reading.name}${reading.at ? ` (${reading.at})` : ""} ומסתירה פרטים מזהים`} /></div>
           ) : (
-            <span>גוררים לכאן Word, ‏PDF או ODT, או <button type="button" className="link-btn" onClick={() => chooseFile()}>בוחרים קובץ</button></span>
+            <span>גוררים לכאן קובץ Word, ‏PDF, ‏ODT, טקסט או סריקה, או <button type="button" className="link-btn" onClick={() => chooseFile()}>בוחרים קובץ</button></span>
           )}
+          {queued > 0 && <span className="small muted" role="status">{queued === 1 ? "עוד קובץ אחד מחכה לתורו." : `עוד ${queued} קבצים מחכים לתורם.`}</span>}
           <input ref={fileRef} type="file" accept={ACCEPT} multiple hidden aria-label="העלאת מסמך" onChange={(e) => { const fs = Array.from(e.target.files ?? []); e.target.value = ""; const k = uploadFor; setUploadFor(undefined); void readFiles(fs, k); }} />
         </div>
 
@@ -402,11 +447,11 @@ export function MaterialsView({ api, onWrite }: { api: CaseApi; onWrite?: () => 
         <Dialog title={input.title || kindLabel[input.kind]} subtitle={kindLabel[input.kind]} onClose={() => setSelected(null)}>
           <div className="material-view">
 <>
+              {/* The title and the kind are the window's own title and subtitle. */}
               <div className="material-head">
-                <h2 className="grow">{input.title || kindLabel[input.kind]}</h2>
-                <span className="small muted">{kindLabel[input.kind]}</span>
+                <span className="grow" />
                 <button type="button" className="btn btn-small" onClick={() => void edit(input)}>עריכה</button>
-                <button type="button" className="btn btn-small" onClick={() => void remove(input)}>מחיקה</button>
+                <button type="button" className="btn btn-small" onClick={() => setDeleting(input)}>מחיקה</button>
               </div>
               <ErrorLine error={error} />
               {route?.left_out && (
@@ -419,7 +464,7 @@ export function MaterialsView({ api, onWrite }: { api: CaseApi; onWrite?: () => 
                     {route.feeds.length ? route.feeds.map(titleOf).join(" · ") : "אף סעיף"}
                     <span className="muted">
                       {route.sorted
-                        ? ` (לפי המיון${route.by_ai ? ` של ${ai}` : ""}: ${route.used_passages} מתוך ${route.passages} קטעים)`
+                        ? ` (לפי המיון${route.by_ai ? ` של ${ai}` : ""}: ${passagesLine(route.used_passages, route.passages)})`
                         : route.added.length || route.removed.length ? " (לפי הבחירה שלך)" : " (לפי סוג החומר)"}
                     </span>
                   </span>
@@ -437,8 +482,19 @@ export function MaterialsView({ api, onWrite }: { api: CaseApi; onWrite?: () => 
           </div>
         </Dialog>
       )}
+      {deleting && (
+        <ConfirmDialog danger title="מחיקת החומר" action="מחיקה"
+          text={`"${deleting.title || kindLabel[deleting.kind]}" יימחק מהתיק. אפשר להחזיר אותו רק מיד אחרי המחיקה, ב"ביטול" שבהודעה.`}
+          onClose={() => setDeleting(null)}
+          onConfirm={async () => {
+            const i = deleting;
+            setDeleting(null);
+            // A failure is said in the material's window, which stays open.
+            await remove(i);
+          }} />
+      )}
       {importing && (
-        <ImportDialog caseId={caseId} preview={importing.preview} kind={importing.kind} onClose={() => importClosed(false)}
+        <ImportDialog key={importing.seq} caseId={caseId} preview={importing.preview} kind={importing.kind} onClose={() => importClosed(false)}
           onSaved={async () => { importClosed(true); await reload(); notify("המסמך נשמר בתיק."); }} />
       )}
       {choosing && routeOf(choosing.id) && (
@@ -460,7 +516,15 @@ export function MaterialsView({ api, onWrite }: { api: CaseApi; onWrite?: () => 
   );
 }
 
-/** The first sentence of a summary, for the row. */
+/** How much of a material the sorting uses, in words: "2 מתוך 3 הקטעים נכנסים לדוח". */
+export function passagesLine(used: number, total: number): string {
+  if (total === 1) return used > 0 ? "הקטע היחיד בחומר נכנס לדוח" : "הקטע היחיד בחומר לא נכנס לדוח";
+  if (used === 0) return `אף אחד מ-${total} הקטעים לא נכנס לדוח`;
+  if (used === 1) return `קטע אחד מתוך ${total} נכנס לדוח`;
+  if (used >= total) return `כל ${total} הקטעים נכנסים לדוח`;
+  return `${used} מתוך ${total} הקטעים נכנסים לדוח`;
+}
+
 /** The summary's first sentence; with no sentence mark, its first line, cut at about 160
  *  letters at a space (the review of stage 3). */
 function firstSentence(text: string): string {
@@ -471,7 +535,8 @@ function firstSentence(text: string): string {
   return `${first.slice(0, cut > 80 ? cut : 160)}…`;
 }
 
-const SETTING: Record<Setting, string> = { institute: "במכון", community: "בקהילה", unknown: "לא צוין איפה" };
+// Where it was done is said only when the report says it (no "לא צוין איפה" in the line).
+const SETTING: Record<Setting, string> = { institute: "במכון", community: "בקהילה", unknown: "" };
 
 /** One previous assessment, as the reading recorded it. Plain text only. */
 function RecordLine({ record }: { record: PriorRecordView }) {
@@ -596,11 +661,19 @@ function SectionsDialog(props: { api: CaseApi; input: CaseInput; route: Material
   );
 }
 
+/** The window's title, by what it was opened for (the slot's words, "רישום אינטייק"). */
+const WRITE_TITLE: Partial<Record<InputKind, string>> = {
+  intake: "רישום אינטייק", kindergarten: "רישום שיחה עם הגננת", session_note: "רישום מפגש", observation: "רישום תצפית",
+};
+
 /** Typing a session note, pasting text, or editing a saved material. */
 function WriteDialog(props: { caseId: string; kind: InputKind; input?: CaseInput | undefined; onClose: () => void; onSaved: (id: string | null) => Promise<void> }) {
   const { fail } = useApp();
   const [kind, setKind] = useState<InputKind>(props.input?.kind ?? props.kind);
   const [title, setTitle] = useState(props.input?.title ?? (props.kind === "session_note" ? `מפגש ${new Date().toLocaleDateString("he-IL")}` : ""));
+  // UIC-11: a title or a kind changed alone is also work that closing would lose.
+  const [initial] = useState(() => ({ title, kind }));
+  const retitled = title !== initial.title || kind !== initial.kind;
   // The text being typed lives in its box (F1a): `content` is its debounced copy (for the lock),
   // and `changed` / `empty` follow the box only when they flip (for "closing would lose it").
   const [content, setContent] = useState(props.input?.content ?? "");
@@ -638,9 +711,9 @@ function WriteDialog(props: { caseId: string; kind: InputKind; input?: CaseInput
   }
 
   return (
-    <Dialog help="material" title={props.input ? "עריכת חומר" : kind === "session_note" ? "רישום מפגש" : "הוספת טקסט"}
+    <Dialog help="material" title={props.input ? "עריכת חומר" : WRITE_TITLE[kind] ?? "הוספת טקסט"}
       subtitle="אפשר לכתוב עם שמות. הם מוסתרים לפני כל שליחה."
-      onClose={() => { letGo(); props.onClose(); }} dirty={!saving && changed && !empty}
+      onClose={() => { letGo(); props.onClose(); }} dirty={!saving && ((changed && !empty) || retitled)}
       footer={<><span className="grow" /><button type="button" className="btn" onClick={props.onClose}>ביטול</button><button type="button" className="btn btn-primary" disabled={saving} onClick={() => void save()}>שמירה בתיק</button></>}>
       <div className="stack">
         {!props.input && (

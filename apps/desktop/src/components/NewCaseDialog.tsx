@@ -51,7 +51,7 @@ export function withIds(rows: PersonRow[], saved: Identity[]): PersonRow[] {
 }
 
 /** Rows of people whose names are hidden: role, name, other spellings or nicknames. */
-export function PeopleEditor({ rows, onChange }: { rows: PersonRow[]; onChange: (rows: PersonRow[]) => void }) {
+export function PeopleEditor({ rows, onChange, childMissing = false }: { rows: PersonRow[]; onChange: (rows: PersonRow[]) => void; childMissing?: boolean }) {
   const set = (i: number, patch: Partial<PersonRow>) => onChange(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
   return (
     <div className="people">
@@ -69,7 +69,8 @@ export function PeopleEditor({ rows, onChange }: { rows: PersonRow[]; onChange: 
             ))}
           </select>
           <label className="visually-hidden" htmlFor={`name-${i}`}>שם</label>
-          <input id={`name-${i}`} className="input" placeholder={r.role === "child" ? "למשל: נועם" : "שם"} value={r.value} onChange={(e) => set(i, { value: e.target.value })} />
+          <input id={`name-${i}`} className={r.role === "child" && childMissing ? "input bad" : "input"} placeholder={r.role === "child" ? "למשל: נועם" : "שם"} value={r.value}
+            aria-invalid={r.role === "child" && childMissing ? true : undefined} onChange={(e) => set(i, { value: e.target.value })} />
           <label className="visually-hidden" htmlFor={`alias-${i}`}>כינויים</label>
           <input id={`alias-${i}`} className="input" placeholder={r.role === "child" ? "למשל: נועמי, נעמי" : "בפסיקים, לא חובה"} value={r.aliases}
             onChange={(e) => set(i, { aliases: e.target.value })} />
@@ -110,6 +111,11 @@ export function useNameMatches(caseId: string | null, rows: PersonRow[]): NameMa
   return found;
 }
 
+/** "בתיק 1024", and "בתיק-1024" for a code that already says "תיק" (no "בתיק תיק-1024"). */
+export function inCase(code: string): string {
+  return code.startsWith("תיק") ? `ב${code}` : `בתיק ${code}`;
+}
+
 export function NameMatches({ found }: { found: NameMatch[] }) {
   // Another case's child is named by initials in discreet mode (D-192); what she typed stays.
   const shown = useShownName();
@@ -120,7 +126,7 @@ export function NameMatches({ found }: { found: NameMatch[] }) {
       <ul>
         {found.slice(0, 6).map((m) => (
           <li key={`${m.case_id}-${m.typed}-${m.value}`}>
-            "{m.typed}": {roleLabel[m.role]} בתיק {m.case_code}{m.child_name ? ` (${shown(m.child_name)})` : ""}{m.trashed ? ", בסל המחזור" : ""}
+            "{m.typed}": {roleLabel[m.role]} {inCase(m.case_code)}{m.child_name ? ` (${shown(m.child_name)})` : ""}{m.trashed ? ", בסל המחזור" : ""}
           </li>
         ))}
       </ul>
@@ -149,12 +155,18 @@ export function NewCaseDialog({ onClose, onCreated, folderId = null }: { onClose
   /** D-155: opening without consent is asked once more; a case left without one waits for it. */
   const [askConsent, setAskConsent] = useState(false);
   const consentBox = useRef<HTMLInputElement>(null);
+  const [childMissing, setChildMissing] = useState(false);
   const matches = useNameMatches(null, rows);
 
   async function submit(e: { preventDefault: () => void }, withoutConsent = false) {
     e.preventDefault();
     setError(null);
-    if (!rows[0]?.value.trim()) return setError("צריך את שם הילד/ה, כדי שיוסתר בכל מקום.");
+    if (!rows[0]?.value.trim()) {
+      // The field itself is marked, and the keyboard goes to it: the line is beside the button.
+      setChildMissing(true);
+      document.getElementById("name-0")?.focus();
+      return setError("צריך את שם הילד/ה, כדי שיוסתר בכל מקום.");
+    }
     const badAge = ageProblem(years, months);
     if (badAge) return setError(ageError(badAge));
     if (consent && !consentDate) return setError("צריך את תאריך החתימה על ההסכמה (יום.חודש.שנה).");
@@ -186,7 +198,19 @@ export function NewCaseDialog({ onClose, onCreated, folderId = null }: { onClose
       dirty={!busy && (years !== "" || months !== "" || rows.some((r) => r.value.trim() !== ""))}
       footer={
         <>
-          <span className="grow" />
+          {/* What stops the case from opening is said here, beside the button she pressed, and
+              never below the fold of a long form. */}
+          <div className="grow new-case-say">
+            {askConsent && !consent ? (
+              <div className="stack consent-ask" role="alert" style={{ gap: 8 }}>
+                <span className="warn-text">עוד לא סומנה הסכמת ההורים. בלי הסכמה שום דבר לא נשלח ל-{ai}. לפתוח את התיק בכל זאת?</span>
+                <div className="row wrap-row">
+                  <button type="button" className="btn btn-small" onClick={() => { setAskConsent(false); consentBox.current?.focus(); }}>לסמן הסכמה</button>
+                  <button type="button" className="btn btn-small" disabled={busy} onClick={(e) => { setAskConsent(false); void submit(e, true); }}>לפתוח בלי הסכמה</button>
+                </div>
+              </div>
+            ) : <ErrorLine error={error} />}
+          </div>
           <button type="button" className="btn" onClick={onClose}>ביטול</button>
           <button type="submit" form="new-case" className="btn btn-primary" disabled={busy}>פתיחת התיק</button>
         </>
@@ -210,7 +234,7 @@ export function NewCaseDialog({ onClose, onCreated, folderId = null }: { onClose
         <div className="stack" style={{ gap: 8 }}>
           <span className="label">שמות שיוסתרו</span>
           <p className="hint">כל מי שמופיע בחומרים. גם כינויים וכתיב נוסף מוסתרים.</p>
-          <PeopleEditor rows={rows} onChange={setRows} />
+          <PeopleEditor rows={rows} childMissing={childMissing && !rows[0]?.value.trim()} onChange={setRows} />
           <NameMatches found={matches} />
         </div>
 
@@ -230,17 +254,7 @@ export function NewCaseDialog({ onClose, onCreated, folderId = null }: { onClose
               </div>
             </div>
           )}
-          {askConsent && !consent && (
-            <div className="stack consent-ask" role="alert" style={{ gap: 8 }}>
-              <span className="warn-text">עוד לא סומנה הסכמת ההורים. בלי הסכמה שום דבר לא נשלח ל-{ai}. לפתוח את התיק בכל זאת?</span>
-              <div className="row wrap-row">
-                <button type="button" className="btn btn-small" onClick={() => { setAskConsent(false); consentBox.current?.focus(); }}>לסמן הסכמה</button>
-                <button type="button" className="btn btn-small" disabled={busy} onClick={(e) => { setAskConsent(false); void submit(e, true); }}>לפתוח בלי הסכמה</button>
-              </div>
-            </div>
-          )}
         </div>
-        <ErrorLine error={error} />
       </form>
     </Dialog>
   );

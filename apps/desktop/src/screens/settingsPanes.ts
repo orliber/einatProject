@@ -18,8 +18,11 @@ export interface PaneEntry {
   icon: SettingsIconName;
   /** One calm line under the part's title: what is here, in her words. */
   intro: string;
-  /** The names of what is inside, for the search: the headings of the part and its settings. */
+  /** The names of what is inside, for the search: the headings of the part, its settings and
+   *  its buttons, each written as on the page, where the search marks it (a test holds this). */
   finds: string[];
+  /** Other words she may look for: they open the part, with nothing on the page to mark. */
+  words?: string[];
 }
 
 /** A part that holds parts of its own: entering it lists them in the side. */
@@ -35,23 +38,23 @@ export type NavEntry = PaneEntry | GroupEntry;
 export const isGroup = (e: NavEntry): e is GroupEntry => "panes" in e;
 
 export const CLINIC_PANES: PaneEntry[] = [
-  { id: "clinic-calendar", label: "יומן ושעות", intro: "מתי את עובדת, ואיך היומן מציע שעות פנויות.", icon: "calendar", finds: ["שעות וימי עבודה", "ימי עבודה", "שעות היומן", "דקות פנויות לפני ואחרי כל פגישה", "חגי ישראל", "סנכרון עם יומן גוגל"] },
-  { id: "clinic-visits", label: "פגישות ומחירים", intro: "כמה זמן נמשכת כל פגישה, כמה היא עולה, ואיפה היא מתקיימת.", icon: "money", finds: ["סוגי הפגישות", "משך פגישה", "מחיר פגישה", "מקומות"] },
-  { id: "clinic-pathway", label: "מסלול ומשפחה חדשה", intro: "השלבים של אבחון, והמעקבים שנפתחים לבד למשפחה חדשה.", icon: "path", finds: ["מסלול האבחון", "חבילת אבחון", "מחיר חבילה", "ערכת פתיחה למשפחה חדשה"] },
-  { id: "clinic-messages", label: "הודעות ותזכורות", intro: "הנוסחים להורים, התבניות לסיכום, ומתי התוכנה מזכירה לך דברים.", icon: "message", finds: ["הודעות להורים", "נוסח התזכורת לפגישה", "נוסח הודעת התשלום", "וואטסאפ", "תבניות לסיכום פגישה", "מתי להסב את תשומת הלב", "דוח מתעכב", "חוב פתוח", "המתנה ארוכה"] },
+  { id: "clinic-calendar", label: "יומן ושעות", intro: "מתי את עובדת, ואיך היומן מציע שעות פנויות.", icon: "calendar", finds: ["שעות וימי עבודה", "ימי עבודה", "דקות פנויות לפני ואחרי כל פגישה", "חגי ישראל", "סנכרון עם יומן גוגל"], words: ["שעות היומן"] },
+  { id: "clinic-visits", label: "פגישות ומחירים", intro: "כמה זמן נמשכת כל פגישה, כמה היא עולה, ואיפה היא מתקיימת.", icon: "money", finds: ["סוגי הפגישות", "מקומות"], words: ["משך פגישה", "מחיר פגישה"] },
+  { id: "clinic-pathway", label: "מסלול ומשפחה חדשה", intro: "השלבים של אבחון, והמעקבים שנפתחים לבד למשפחה חדשה.", icon: "path", finds: ["מסלול האבחון", "חבילת אבחון", "מחיר חבילת אבחון", "ערכת פתיחה למשפחה חדשה"] },
+  { id: "clinic-messages", label: "הודעות ותזכורות", intro: "הנוסחים להורים, התבניות לסיכום, ומתי התוכנה מזכירה לך דברים.", icon: "message", finds: ["הודעות להורים", "נוסח התזכורת לפגישה", "נוסח הודעת התשלום", "תבניות לסיכום פגישה", "מתי להסב את תשומת הלב"], words: ["וואטסאפ", "דוח מתעכב", "חוב פתוח", "המתנה ארוכה"] },
 ];
 
 /** The side, in order. */
 export const SETTINGS_NAV: NavEntry[] = [
-  { id: "general", label: "כללי", intro: "איך התוכנה נראית, והשם שלך בדוחות.", icon: "general", finds: ["מוכנה לתיקים אמיתיים?", "תצוגה ופרטים", "גודל הטקסט", "מראה", "מצב כהה", "השמות שלך"] },
-  { id: "ai", label: "חיבור ל-AI", intro: "החיבור לשירות שמנסח איתך. שמות ופרטים מזהים מוסתרים תמיד לפני שליחה.", icon: "ai", finds: ["חיבור", "ספק", "מפתח API", "דגם", "מהירות התשובות", "שימוש ועלות", "בדיקה מול המקורות", "בדיקת הדוח כולו", "ZDR"] },
-  { id: "privacy", label: "פרטיות", intro: "מה יוצא מהמחשב, ומה נשאר רק אצלך.", icon: "privacy", finds: ["לפני כל שליחה", "להציג לי כל בקשה לפני שליחה", "זיהוי שמות", "יומן פעולות", "צילומי מסך"] },
+  { id: "general", label: "כללי", intro: "איך התוכנה נראית, והשם שלך בדוחות.", icon: "general", finds: ["מוכנה לתיקים אמיתיים?", "תצוגה ופרטים", "גודל הטקסט", "מראה", "השמות שלך"], words: ["מצב כהה", "לילה"] },
+  { id: "ai", label: "חיבור ל-AI", intro: "החיבור לשירות שמנסח איתך. שמות ופרטים מזהים מוסתרים תמיד לפני שליחה.", icon: "ai", finds: ["חיבור", "ספק", "מפתח API", "דגם", "מהירות התשובות", "שימוש ועלות", "בדיקה מול המקורות", "בדיקת הדוח כולו"], words: ["ZDR"] },
+  { id: "privacy", label: "פרטיות", intro: "מה יוצא מהמחשב, ומה נשאר רק אצלך.", icon: "privacy", finds: ["לפני כל שליחה", "להציג לי כל בקשה לפני שליחה", "זיהוי שמות", "נעילה", "נעילה אוטומטית אחרי"] },
   { id: "report", label: "הדוח", intro: "איך הדוח נראה כשמוציאים אותו: כותרת, חתימה, תבנית ולוגו.", icon: "report", finds: ["פרטי הדוח", "כותרת", "גופן", "חתימה", "חתימת המדריכה", "גרסה להורים", "סעיפים שאת כותבת בעצמך", "התבנית שלי (Word)", "לוגו", "בדיקת מקוריות של קובץ"] },
-  { id: "tests", label: "המבחנים", intro: "הטבלאות שהתוכנה מחשבת לפיהן. כאן מאשרים כל מבחן פעם אחת.", icon: "tests", finds: ["טבלאות המבחנים", "חוזקות וחולשות יחסיות", "ערך קריטי"] },
+  { id: "tests", label: "המבחנים", intro: "הטבלאות שהתוכנה מחשבת לפיהן. כאן מאשרים כל מבחן פעם אחת.", icon: "tests", finds: ["טבלאות המבחנים", "חוזקות וחולשות יחסיות"], words: ["ערך קריטי"] },
   { id: "clinic", label: "הקליניקה", icon: "clinic", panes: CLINIC_PANES },
-  { id: "backup", label: "גיבוי", intro: "עותק מוצפן של כל התיקים, כדי ששום דבר לא יאבד.", icon: "backup", finds: ["גיבוי", "עותק מוצפן בגוגל דרייב", "שחזור"] },
-  { id: "security", label: "סיסמה ואבטחה", intro: "הסיסמה, הנעילה, ומה עושים אם שוכחים אותה.", icon: "security", finds: ["רשת הביטחון", "סיסמה", "החלפת סיסמה", "כניסה עם גוגל כששוכחים סיסמה", "נעילה", "נעילה אוטומטית אחרי", "עצירת חירום", "ערכת שחזור"] },
-  { id: "about", label: "עדכונים ועזרה", intro: "גרסה חדשה, בדיקה שהכל עובד, ודיווח כשמשהו לא בסדר.", icon: "about", finds: ["עדכונים", "בדיקת מערכת", "משהו לא עובד?"] },
+  { id: "backup", label: "גיבוי", intro: "עותק מוצפן של כל התיקים, כדי ששום דבר לא יאבד.", icon: "backup", finds: ["גיבוי", "עותק מוצפן בגוגל דרייב"], words: ["שחזור"] },
+  { id: "security", label: "סיסמה ואבטחה", intro: "הסיסמה, עצירת החירום, ומה עושים אם שוכחים את הסיסמה.", icon: "security", finds: ["רשת הביטחון", "סיסמה", "החלפת סיסמה", "כניסה עם גוגל כששוכחים סיסמה", "עצירת חירום", "ערכת שחזור"] },
+  { id: "about", label: "עדכונים ועזרה", intro: "גרסה חדשה, בדיקה שהכל עובד, ודיווח כשמשהו לא בסדר.", icon: "about", finds: ["עדכונים", "יומן פעולות", "בדיקת מערכת", "משהו לא עובד?"] },
 ];
 
 /** Every part that is a page, the clinic's four too, in the order of the side. */
@@ -79,6 +82,8 @@ export interface Found {
   group: string | null;
   /** What matched inside the part; null when the part's own name matched. */
   inside: string | null;
+  /** `inside` is written on the page, where it is brought into view and marked. */
+  mark: boolean;
 }
 
 /** Spaces and letter case do not count; final letters count as their usual form. */
@@ -89,19 +94,33 @@ function fold(text: string): string {
     .replace(/[\s"'״׳()?\-–]+/g, "");
 }
 
+/** A word she ends with "א" where the settings write "ה" ("סיסמא", "דוגמא"): also looked
+ *  for as written here. Only the end of a word, and only as a second try, so a word typed
+ *  halfway ("מלא" on the way to "מלאי") still finds what it found. */
+function alefAsHe(text: string): string {
+  return text.replace(/א(?=[\s"'״׳()?\-–]|$)/g, "ה");
+}
+
 /** The parts whose name, or a heading or setting inside them, holds what she typed: names
  *  first, then the inside of a part, one answer per part. */
 export function searchSettings(query: string): Found[] {
-  const q = fold(query);
-  if (q === "") return [];
+  const plain = fold(query);
+  if (plain === "") return [];
+  const other = fold(alefAsHe(query));
+  const has = (text: string) => fold(text).includes(plain) || fold(text).includes(other);
   const out: Found[] = [];
   const add = (pane: PaneEntry, group: string | null) => {
-    if (fold(pane.label).includes(q) || (group !== null && fold(group).includes(q))) {
-      out.push({ pane, group, inside: null });
+    if (has(pane.label) || (group !== null && has(group))) {
+      out.push({ pane, group, inside: null, mark: false });
       return;
     }
-    const inside = pane.finds.find((f) => fold(f).includes(q));
-    if (inside !== undefined) out.push({ pane, group, inside });
+    const inside = pane.finds.find((f) => has(f));
+    if (inside !== undefined) {
+      out.push({ pane, group, inside, mark: true });
+      return;
+    }
+    const word = pane.words?.find((w) => has(w));
+    if (word !== undefined) out.push({ pane, group, inside: word, mark: false });
   };
   for (const e of SETTINGS_NAV) {
     if (isGroup(e)) e.panes.forEach((p) => add(p, e.label));

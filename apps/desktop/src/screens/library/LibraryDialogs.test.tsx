@@ -1,6 +1,6 @@
 // The small dialogs of the case library: naming a folder, moving, confirming and erasing for
 // good. What she sees when the core refuses, and the keyboard. Every name is invented.
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Folder } from "../../ipc/client";
 import { a11yViolations } from "../../test/a11y";
@@ -20,6 +20,14 @@ describe("naming a folder", () => {
     expect(await a11yViolations(view.container)).toEqual([]);
     await user.type(box, "  גני ילדים  {Enter}");
     expect(onSave).toHaveBeenCalledWith("גני ילדים");
+  });
+
+  it("says how long a name can be, and says so when a name reaches the limit (never cut without a word)", () => {
+    render(<FolderNameDialog title="תיקייה חדשה" onClose={vi.fn()} onSave={vi.fn(async () => undefined)} />);
+    const box = screen.getByLabelText("שם התיקייה");
+    expect(box).toHaveAccessibleDescription("0 מתוך 60 תווים");
+    fireEvent.change(box, { target: { value: "א".repeat(60) } });
+    expect(box).toHaveAccessibleDescription("הגעת ל-60 תווים, האורך המרבי לשם.");
   });
 
   it("an empty name is refused before anything is saved", async () => {
@@ -65,7 +73,7 @@ describe("moving", () => {
     const view = render(<MoveDialog what="התיק" folders={FOLDERS} current="f2" onClose={vi.fn()} onMove={vi.fn(async () => undefined)} />);
     const group = screen.getByRole("radiogroup", { name: "תיקיית היעד" });
     expect(within(group).getAllByRole("radio").map((r) => r.closest("label")?.textContent?.trim())).toEqual([
-      "תיקים (הרמה העליונה)", "בתי ספר", "כיתה א", "גני ילדים", "גן הדקל",
+      "תיקים (לא בתוך תיקייה)", "בתי ספר", "כיתה א", "גני ילדים", "גן הדקל",
     ]);
     expect(within(group).getByRole("radio", { name: "גן הדקל" })).toBeChecked();
     // Moving to where it already is does nothing.

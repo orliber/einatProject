@@ -196,4 +196,40 @@ describe("the consultation screen", () => {
     expect(await screen.findByRole("heading", { name: "שאלה על נועם" })).toBeInTheDocument();
     expect(within(screen.getByRole("radiogroup", { name: "על מה השאלה?" })).getByRole("radio", { name: /על תיק/ })).toHaveAttribute("aria-checked", "true");
   });
+
+  it("opened from a case, one click leads back to it", async () => {
+    const { caseId } = await serve();
+    const app = appApi();
+    const user = userEvent.setup();
+    render(<Host app={app}><ConsultScreen caseId={caseId} /></Host>);
+    await user.click(await screen.findByRole("button", { name: "→ חזרה לתיק של נועם" }));
+    expect(app.go).toHaveBeenCalledWith({ name: "case", id: caseId, view: "report" });
+  });
+
+  it("opened on its own, there is no way back to a case", async () => {
+    await openConsult();
+    expect(screen.queryByRole("button", { name: /חזרה לתיק/ })).toBeNull();
+  });
+
+  it("UID-12: while waiting, what a screen reader hears of the status does not change every second", async () => {
+    const sent = held<ReturnType<typeof answer>>();
+    const { user, box } = await openConsult((cmd) => (cmd === "send_consult" ? sent.promise : undefined));
+    await user.type(box, "מה בודקים בתצפית בגן?{Enter}");
+    await within(chat()).findByText(/Claude כותב/);
+    const spoken = () => {
+      const status = chat().querySelector(".chat-row-ai[role=status]") as HTMLElement;
+      const copy = status.cloneNode(true) as HTMLElement;
+      copy.querySelectorAll("[aria-hidden=true]").forEach((n) => n.remove());
+      return copy.textContent?.replace(/\s+/g, " ").trim();
+    };
+    const first = spoken();
+    expect(first).toBe("Claude כותב");
+    await new Promise((r) => setTimeout(r, 2300));
+    // The clock moved on the screen…
+    expect(within(chat()).getByText(/0:0\d/)).toBeInTheDocument();
+    // …and not in what is read.
+    expect(spoken()).toBe(first);
+    sent.release(answer());
+    await within(chat()).findByText("תשובה בדויה.");
+  });
 });

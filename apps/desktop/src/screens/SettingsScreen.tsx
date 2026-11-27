@@ -30,15 +30,47 @@ import { SectionModesSettings } from "../components/SectionModes";
 import { SettingsIcon } from "../components/SettingsIcon";
 import {
   clinicGroupOf, groupOf, isClinicPane, isGroup, lastSettingsPane, rememberSettingsPane, searchSettings, SETTINGS_NAV, SETTINGS_PANES, toTop,
-  type GroupEntry, type PaneEntry, type SettingsPane,
+  type Found, type GroupEntry, type SettingsPane,
 } from "./settingsPanes";
 import "./SettingsScreen.css";
+
+/** Where a setting found by the search is looked for on its page: headings, names, buttons. */
+export const SEARCH_TARGETS = [".settings-pane h2", ".settings-pane h3", ".settings-pane legend", ".settings-pane label", ".settings-pane .set-row-label", ".settings-pane button", ".settings-pane summary"].join(", ");
 
 /** The clinic's settings (D-205): a part of these settings, loaded with the clinic's code only when opened. */
 const ClinicSettingsTab = lazy(() => import("./clinic/ClinicSettingsTab").then((m) => ({ default: m.ClinicSettingsTab })));
 
 /** The screen-capture switch is hidden while that protection is off (D-039). */
 const SCREEN_PROTECTION_SETTING = false;
+
+// What she changed in "השמות שלך" or in the report's details and did not save, kept while the
+// program is open, as the clinic's settings keep theirs: in memory, never in storage. Locking
+// the vault reloads the page, so nothing of it outlives the session.
+let keptNames: string | null = null;
+let keptReport: ReportSettings | null = null;
+let leaving: number | undefined;
+
+/** For the tests: each starts with nothing kept. */
+export function forgetSettingsDrafts() {
+  keptNames = null;
+  keptReport = null;
+  window.clearTimeout(leaving);
+}
+
+/** The report's details as they are saved: no empty signature lines. */
+const tidyReport = (r: ReportSettings): ReportSettings => ({ ...r, signature: r.signature.filter((l) => l.trim()), supervisor: r.supervisor.filter((l) => l.trim()) });
+const sameReport = (a: ReportSettings, b: ReportSettings) => JSON.stringify(tidyReport(a)) === JSON.stringify(tidyReport(b));
+const splitNames = (text: string) => text.split(",").map((n) => n.trim()).filter(Boolean);
+
+/** "יש שינויים שעוד לא נשמרו", with a way to drop them, beside the "שמירה" they wait for. */
+function UnsavedLine({ onDiscard }: { onDiscard: () => void }) {
+  return (
+    <span className="row settings-unsaved">
+      <span className="muted small" role="status">יש שינויים שעוד לא נשמרו.</span>
+      <button type="button" className="link-btn small" onClick={onDiscard}>ביטול השינויים</button>
+    </span>
+  );
+}
 
 /** One setting: its name and a short line on the start side, the control on the end side. */
 function Row({ label, htmlFor, hint, children }: { label: string; htmlFor?: string; hint?: ReactNode; children: ReactNode }) {
@@ -95,7 +127,7 @@ export function SettingsScreen({ pane: initial }: { pane?: SettingsPane | undefi
     let tries = 0;
     let timer: number | undefined;
     const look = () => {
-      const all = document.querySelectorAll<HTMLElement>(".settings-pane h2, .settings-pane h3, .settings-pane legend, .settings-pane label, .settings-pane .set-row-label");
+      const all = document.querySelectorAll<HTMLElement>(SEARCH_TARGETS);
       const hit = [...all].find((el) => (el.textContent ?? "").replace(/\s+/g, " ").includes(want));
       if (hit) {
         hit.scrollIntoView({ block: "center" });
@@ -112,10 +144,10 @@ export function SettingsScreen({ pane: initial }: { pane?: SettingsPane | undefi
     return () => window.clearTimeout(timer);
   }, [target, pane]);
 
-  function choose(p: PaneEntry, inside: string | null) {
+  function choose(f: Found) {
     setQuery("");
-    setPane(p.id);
-    setTarget(inside);
+    setPane(f.pane.id);
+    setTarget(f.mark ? f.inside : null);
   }
   // F1 and "?" explain the pane she is in (D-206); the clinic's four parts share one topic.
   useHelpTopic(isClinicPane(pane) ? "settings-clinic" : `settings-${pane}`);
@@ -124,31 +156,67 @@ export function SettingsScreen({ pane: initial }: { pane?: SettingsPane | undefi
   const provider = providerOf(status.model);
   const ai = provider.name;
   const hasKey = status.keys.includes(provider.id);
-  const [names, setNames] = useState(status.practitioner.join(", "));
+  /** Her names as saved, and as in the field (what she left unsaved comes back). */
+  const [namesBase, setNamesBase] = useState(() => status.practitioner.join(", "));
+  const [names, setNames] = useState(() => keptNames ?? status.practitioner.join(", "));
+  const namesDirty = names.trim() !== namesBase.trim();
+  /** The report's details as saved, and as in the form. */
+  const [reportBase, setReportBase] = useState<ReportSettings | null>(null);
   const [report, setReport] = useState<ReportSettings | null>(null);
+  const reportDirty = report !== null && reportBase !== null && !sameReport(report, reportBase);
   const [template, setTemplate] = useState<TemplateView | null>(null);
   const [logo, setLogo] = useState<LogoView | null>(null);
   const [original, setOriginal] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  /** A refusal, shown where the action is (`at`: the section's key), not at the top of a long
+   *  pane she may have scrolled far down (UIA-6). */
+  const [error, setErrorState] = useState<{ text: string; at: string } | null>(null);
+  const setError = (text: string | null, at = "top") => setErrorState(text === null ? null : { text, at });
+  const errorAt = (at: string) => (error?.at === at ? error.text : null);
   /** The report's details could not be read: said in the report part, which is empty without them. */
   const [reportError, setReportError] = useState<string | null>(null);
   const [textSize, setTextSize] = useState(readTextSize);
   const [theme, setTheme] = useState(readTheme);
 
   useEffect(() => {
-    ipc.reportSettings().then(setReport).catch((e) => setReportError(fail(e as never)));
+    ipc.reportSettings().then((r) => {
+      setReportBase(r);
+      setReport(keptReport ?? r);
+    }).catch((e) => setReportError(fail(e as never)));
     ipc.reportTemplate().then(setTemplate).catch(() => setTemplate(null));
     ipc.reportLogo().then(setLogo).catch(() => setLogo(null));
   }, [fail]);
 
-  async function run(fn: () => Promise<void>, done: string) {
+  // What is left unsaved is kept for her return, and leaving Settings says where it waits.
+  useEffect(() => {
+    keptNames = namesDirty ? names : null;
+  }, [names, namesDirty]);
+  useEffect(() => {
+    // Not before the details are read: what was kept waits for them.
+    if (report !== null && reportBase !== null) keptReport = reportDirty ? report : null;
+  }, [report, reportBase, reportDirty]);
+  // (The timer lets a remount in development pass without a word.)
+  const say = useRef(notify);
+  useEffect(() => {
+    say.current = notify;
+  });
+  useEffect(() => {
+    window.clearTimeout(leaving);
+    return () => {
+      leaving = window.setTimeout(() => {
+        const parts = [keptNames !== null ? "\"השמות שלך\" (כללי)" : null, keptReport !== null ? "\"פרטי הדוח\" (הדוח)" : null].filter(Boolean);
+        if (parts.length > 0) say.current(`השינויים ב${parts.join(" וב")} עוד לא נשמרו. הם מחכים בהגדרות, ואפשר לשמור או לבטל אותם שם.`);
+      }, 0);
+    };
+  }, []);
+
+  async function run(fn: () => Promise<void>, done: string, at = "top") {
     setError(null);
     try {
       await fn();
       await refresh();
       notify(done);
     } catch (e) {
-      setError(fail(e as never));
+      setError(fail(e as never), at);
     }
   }
 
@@ -165,7 +233,7 @@ export function SettingsScreen({ pane: initial }: { pane?: SettingsPane | undefi
               onKeyDown={(e) => {
                 if (e.key === "Escape" && query !== "") { e.preventDefault(); setQuery(""); }
                 const first = found[0];
-                if (e.key === "Enter" && first) { e.preventDefault(); choose(first.pane, first.inside); }
+                if (e.key === "Enter" && first) { e.preventDefault(); choose(first); }
               }} />
           </div>
 
@@ -176,7 +244,7 @@ export function SettingsScreen({ pane: initial }: { pane?: SettingsPane | undefi
               <ul className="settings-found" aria-label="מה שנמצא">
                 {found.map((f) => (
                   <li key={`${f.pane.id}:${f.inside ?? ""}`}>
-                    <button type="button" className="settings-nav-btn settings-found-btn" onClick={() => choose(f.pane, f.inside)}>
+                    <button type="button" className="settings-nav-btn settings-found-btn" onClick={() => choose(f)}>
                       <SettingsIcon name={f.pane.icon} />
                       <span className="settings-found-text">
                         <span>{f.inside ?? f.pane.label}</span>
@@ -223,7 +291,7 @@ export function SettingsScreen({ pane: initial }: { pane?: SettingsPane | undefi
           )}
           <h2 className="settings-pane-title">{current?.label}</h2>
           {current && <p className="settings-pane-intro">{current.intro}</p>}
-          <ErrorLine error={error} />
+          <ErrorLine error={errorAt("top")} />
 
           {pane === "general" && (
             <>
@@ -244,8 +312,15 @@ export function SettingsScreen({ pane: initial }: { pane?: SettingsPane | undefi
                   <span className="hint">בדוח ובמה שנשלח הם מוחלפים ב"המאבחנת". מפרידים בפסיק.</span>
                   <div className="row">
                     <input id="names" className="input grow" value={names} onChange={(e) => setNames(e.target.value)} />
-                    <button type="button" className="btn" onClick={() => void run(() => ipc.setPractitioner(names.split(",").map((n) => n.trim()).filter(Boolean)), "השמות נשמרו.")}>שמירה</button>
+                    <button type="button" className="btn" onClick={() => void run(async () => {
+                      const list = splitNames(names);
+                      await ipc.setPractitioner(list);
+                      setNames(list.join(", "));
+                      setNamesBase(list.join(", "));
+                    }, "השמות נשמרו.", "names")}>שמירה</button>
                   </div>
+                  {namesDirty && <UnsavedLine onDiscard={() => { setNames(namesBase); setError(null); }} />}
+                  <ErrorLine error={errorAt("names")} />
                 </div>
               </section>
               {/* The everyday settings first; the list before real cases after them (D-205).
@@ -344,8 +419,9 @@ export function SettingsScreen({ pane: initial }: { pane?: SettingsPane | undefi
                 <Row label="נעילה אוטומטית אחרי" hint="דקות בלי פעילות. Ctrl+L נועל מיד.">
                   <Segmented label="נעילה אוטומטית אחרי" value={status.lock_minutes}
                     options={Array.from(new Set([5, 10, 15, 30, status.lock_minutes])).sort((a, b) => a - b).map((m) => ({ value: m, label: String(m) }))}
-                    onChange={(m) => void run(() => ipc.setLockMinutes(m), `הכספת תינעל אחרי ${m} דקות בלי פעילות.`)} />
+                    onChange={(m) => void run(() => ipc.setLockMinutes(m), `הכספת תינעל אחרי ${m} דקות בלי פעילות.`, "lock")} />
                 </Row>
+                <ErrorLine error={errorAt("lock")} />
                 <span className="hint">כל הגדרה נשמרת מיד. מה שלא כתוב כאן, התוכנה בוחרת את האפשרות המחמירה.</span>
               </section>
             </>
@@ -387,8 +463,17 @@ export function SettingsScreen({ pane: initial }: { pane?: SettingsPane | undefi
                   <textarea id="r-parents" className="textarea" rows={2} value={report.parents_opening}
                     onChange={(e) => setReport({ ...report, parents_opening: e.target.value })} />
                 </div>
-                <button type="button" className="btn btn-primary align-start"
-                  onClick={() => void run(() => ipc.setReportSettings({ ...report, signature: report.signature.filter((l) => l.trim()), supervisor: report.supervisor.filter((l) => l.trim()) }), "הגדרות הדוח נשמרו.")}>שמירה</button>
+                <ErrorLine error={errorAt("report")} />
+                <div className="row">
+                  <button type="button" className="btn btn-primary"
+                    onClick={() => void run(async () => {
+                      const tidy = tidyReport(report);
+                      await ipc.setReportSettings(tidy);
+                      setReport(tidy);
+                      setReportBase(tidy);
+                    }, "הגדרות הדוח נשמרו.", "report")}>שמירה</button>
+                  {reportDirty && reportBase && <UnsavedLine onDiscard={() => { setReport(reportBase); setError(null); }} />}
+                </div>
               </section>
               <SectionModesSettings />
               <section className="card setting" aria-labelledby="s-template">
@@ -405,14 +490,15 @@ export function SettingsScreen({ pane: initial }: { pane?: SettingsPane | undefi
                       onChange={(e) => {
                         const f = e.target.files?.[0];
                         e.target.value = "";
-                        if (f) void run(async () => setTemplate(await ipc.setReportTemplate(f)), "התבנית נשמרה. הדוח הבא ייכתב לתוכה.");
+                        if (f) void run(async () => setTemplate(await ipc.setReportTemplate(f)), "התבנית נשמרה. הדוח הבא ייכתב לתוכה.", "template");
                       }} />
                   </label>
                   {template && (
                     <button type="button" className="btn btn-small"
-                      onClick={() => void run(async () => { await ipc.clearReportTemplate(); setTemplate(null); }, "חזרה לעיצוב הרגיל של הדוח.")}>בלי תבנית</button>
+                      onClick={() => void run(async () => { await ipc.clearReportTemplate(); setTemplate(null); }, "חזרה לעיצוב הרגיל של הדוח.", "template")}>בלי תבנית</button>
                   )}
                 </div>
+                <ErrorLine error={errorAt("template")} />
               </section>
               <section className="card setting" aria-labelledby="s-logo">
                 <h2 id="s-logo">לוגו</h2>
@@ -428,14 +514,15 @@ export function SettingsScreen({ pane: initial }: { pane?: SettingsPane | undefi
                       onChange={(e) => {
                         const f = e.target.files?.[0];
                         e.target.value = "";
-                        if (f) void run(async () => setLogo(await ipc.setReportLogo(f)), "הלוגו נשמר. הוא יודפס בדוח הבא.");
+                        if (f) void run(async () => setLogo(await ipc.setReportLogo(f)), "הלוגו נשמר. הוא יודפס בדוח הבא.", "logo");
                       }} />
                   </label>
                   {logo && (
                     <button type="button" className="btn btn-small"
-                      onClick={() => void run(async () => { await ipc.clearReportLogo(); setLogo(null); }, "הלוגו הוסר מהדוחות.")}>בלי לוגו</button>
+                      onClick={() => void run(async () => { await ipc.clearReportLogo(); setLogo(null); }, "הלוגו הוסר מהדוחות.", "logo")}>בלי לוגו</button>
                   )}
                 </div>
+                <ErrorLine error={errorAt("logo")} />
               </section>
               <section className="card setting" aria-labelledby="s-original">
                 <h2 id="s-original">בדיקת מקוריות של קובץ</h2>
@@ -446,14 +533,19 @@ export function SettingsScreen({ pane: initial }: { pane?: SettingsPane | undefi
                       onChange={(e) => {
                         const f = e.target.files?.[0];
                         e.target.value = "";
+                        // The answer about the file before goes at once: it must never read as this one's (UIA-7).
+                        setOriginal(null);
+                        // The file's name is set apart, so its letters do not mix with the Hebrew around it.
+                        const name = `\u2068${f?.name ?? ""}\u2069`;
                         if (f) void run(async () => {
                           const at = await ipc.checkOriginal(f);
-                          setOriginal(at === null ? "הקובץ הזה לא הופק בכספת הזו, או ששונה אחרי שהופק." : `זה הקובץ המקורי: הופק ב-${new Date(at * 1000).toLocaleString("he-IL")}, ולא שונה מאז.`);
-                        }, "הבדיקה הסתיימה.");
+                          setOriginal(at === null ? `הקובץ ${name} לא הופק בכספת הזו, או ששונה אחרי שהופק.` : `הקובץ ${name} הוא המקורי: הופק ב-${new Date(at * 1000).toLocaleString("he-IL")}, ולא שונה מאז.`);
+                        }, "הבדיקה הסתיימה.", "original");
                       }} />
                   </label>
                 </Row>
                 {original && <span className="hint" role="status">{original}</span>}
+                <ErrorLine error={errorAt("original")} />
               </section>
             </>
           )}

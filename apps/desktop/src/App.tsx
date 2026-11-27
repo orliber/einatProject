@@ -82,6 +82,21 @@ export interface ToastNotice {
   action?: ToastAction | undefined;
 }
 
+// The first-run steps after the password (Google, the backup, "הפרטים שלך") run only while
+// the page remembers them: a lock on the way (the idle lock while she signs in to Google in the
+// browser, the computer going to sleep) reloads the page. A yes or no on this computer, nothing
+// about a case, says they were not finished, and the next opening says where they wait (UIA-12).
+const SETUP_KEY = "dv.setupUnfinished";
+function setupUnfinished(on?: boolean): boolean {
+  try {
+    if (on === true) localStorage.setItem(SETUP_KEY, "1");
+    else if (on === false) localStorage.removeItem(SETUP_KEY);
+    return localStorage.getItem(SETUP_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
 let toastSeq = 0;
 
 /** The next notice: "נשמר" twice in a row is two notices, not one cut short. */
@@ -234,7 +249,8 @@ export function App() {
     if (unlocked) warmRarePages();
   }, [unlocked]);
   useEffect(() => {
-    if (!unlocked) return;
+    // Not during the first-run steps: a lock there would cut them short (UIA-12).
+    if (!unlocked || inSetup) return;
     const onKey = (e: KeyboardEvent) => {
       // By the physical key: with the Hebrew layout on, Ctrl+L is "ך" (UX-5).
       if (isCombo(e, KEYS.lock)) {
@@ -244,7 +260,7 @@ export function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [unlocked, lockNow]);
+  }, [unlocked, inSetup, lockNow]);
 
   // Typing a long paragraph never calls the core, so the window reports activity itself
   // (at most every 30 seconds): the idle lock must not throw away work in progress.
@@ -303,14 +319,24 @@ export function App() {
     return (
       <Suspense fallback={<PageLoading />}>
         <SetupScreen status={status}
-          onCreated={() => { setInSetup(true); void refresh(); }}
-          onDone={async () => { setInSetup(false); await refresh(); }}
-          onRestored={(s) => { setInSetup(false); setStatus(s); setRoute(homeOf(lastArea())); }} />
+          onCreated={() => { setupUnfinished(true); setInSetup(true); void refresh(); }}
+          onDone={async () => { setupUnfinished(false); setInSetup(false); await refresh(); }}
+          onRestored={(s) => { setupUnfinished(false); setInSetup(false); setStatus(s); setRoute(homeOf(lastArea())); }} />
       </Suspense>
     );
   }
   if (!status.unlocked) {
-    return <LockScreen status={status} onUnlocked={(s) => { setStatus(s); setRoute(homeOf(lastArea())); }} />;
+    return <LockScreen status={status} onUnlocked={(s) => {
+      setStatus(s);
+      if (setupUnfinished()) {
+        // Said once, where the steps that were cut short are done now.
+        setupUnfinished(false);
+        setRoute({ name: "settings", pane: "general" });
+        setToast(toastOf("ההגדרה הראשונה נקטעה לפני הסוף. כאן משלימים את \"השמות שלך\", ובהגדרות גם את הגיבוי ואת הכניסה עם גוגל."));
+      } else {
+        setRoute(homeOf(lastArea()));
+      }
+    }} />;
   }
 
   return (

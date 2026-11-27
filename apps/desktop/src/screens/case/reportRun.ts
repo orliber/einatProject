@@ -50,6 +50,11 @@ export interface RunState {
   error: string | null;
   /** "לעצור" was pressed: what is being written finishes, nothing new is sent. */
   stopping: boolean;
+  /** The materials were sorted first, in this run: the count of sections may change by it. */
+  sorted?: boolean;
+  /** Sections that showed material before the sorting and have none after it: not written,
+   *  and named, so none drops out without a word. */
+  noMaterial?: string[];
 }
 
 const runs = new Map<string, RunState>();
@@ -129,11 +134,17 @@ export async function runWholeReport(api: CaseApi, opts: { verify: boolean; ai: 
   let locked = false;
   const title = (key: string) => api.detail.sections.find((s) => s.key === key)?.title ?? key;
   const stopping = () => runs.get(caseId)?.stopping === true || active.get(caseId) !== token;
+  // The sections she was offered to write before the sorting: empty, with material, and written
+  // from the materials (as "לכתוב את N הריקים" counts them). The summary and the like come after
+  // approval, from the approved sections: never said to have lost their material.
+  const before = api.detail.sections.filter((s) => s.key !== "signature" && s.sortable && (s.paragraphs?.length ?? 0) === 0 && (s.source_count ?? 0) > 0).map((s) => s.key);
+  let sorted = false;
   try {
     // 1. Sorting first, so each section gets only its passages.
     if (api.detail.routing.some((r) => r.needs_sorting)) {
       // D-134: one request per material, side by side.
       await sortInParts(api, { title: "מיון החומרים לסעיפים", label: `${opts.ai} קורא את החומרים ומשייך קטעים לסעיפים` });
+      sorted = true;
     }
     if (stopping()) return;
 
@@ -148,7 +159,9 @@ export async function runWholeReport(api: CaseApi, opts: { verify: boolean; ai: 
     const wishes: Record<string, string | undefined> = await ipc.draftBriefs().then((b) => b?.sections ?? {}).catch(() => ({}));
     const busy = new Set(api.jobs.map((j) => j.section));
     const queue = list.filter(([k]) => !busy.has(k));
-    set({ phase: "write", total: queue.length });
+    // After the sorting a section may turn out to have no material: it is named, not dropped.
+    const noMaterial = sorted ? before.filter((k) => !busy.has(k) && !list.some(([l]) => l === k)).map(title) : [];
+    set({ phase: "write", total: queue.length, sorted, noMaterial });
     const written: string[] = [];
     let checked = 0;
     let unchecked = 0;
@@ -255,6 +268,17 @@ export async function runWholeReport(api: CaseApi, opts: { verify: boolean; ai: 
 
 /** The line in her words. */
 export function runLine(r: RunState): string {
+  const line = phaseLine(r);
+  if (r.phase === "sort" || (r.phase === "done" && r.error)) return line;
+  // After the sorting: a section that has no material now is said by name.
+  const none = r.noMaterial ?? [];
+  const lost = none.length === 0 ? "" : none.length === 1
+    ? `. אחרי המיון לא נמצא חומר לסעיף "${none[0] ?? ""}", ולכן הוא לא נכתב`
+    : `. אחרי המיון לא נמצא חומר ל-${none.length} סעיפים, ולכן הם לא נכתבו: ${none.join(", ")}`;
+  return r.phase === "write" && r.sorted ? `החומרים מוינו. ${line}${lost}` : `${line}${lost}`;
+}
+
+function phaseLine(r: RunState): string {
   switch (r.phase) {
     case "sort":
       return r.stopping ? "עוצרת אחרי המיון" : "התוכנה עובדת: ממיינת את החומרים לסעיפים";

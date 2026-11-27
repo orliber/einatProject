@@ -62,6 +62,9 @@ export function ApproveQueue({ o, asks, onReviewed, running, buildDue }: {
   const [text, setText] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [whole, setWhole] = useState(false);
+  /** The whole draft open below has changes not saved yet, and she asked to hide it. */
+  const [wholeDirty, setWholeDirty] = useState(false);
+  const [askHide, setAskHide] = useState(false);
   const current = asks[0];
 
   async function act(f: () => Promise<unknown>) {
@@ -241,11 +244,20 @@ export function ApproveQueue({ o, asks, onReviewed, running, buildDue }: {
                 להשתמש בכל {rest} שנשארו
               </button>
             )}
-            <button type="button" className="btn btn-ghost btn-small style-whole" aria-expanded={whole} onClick={() => setWhole((w) => !w)}>
+            <button type="button" className="btn btn-ghost btn-small style-whole" aria-expanded={whole}
+              onClick={() => { if (whole && wholeDirty) setAskHide(true); else setWhole((w) => !w); }}>
               {whole ? "להסתיר את הטיוטה" : "לעבור על כל הטיוטה בבת אחת"}
             </button>
           </div>
-          {whole && <ProfileEditor key={o.draft.id} view={o.draft} o={o} />}
+          {/* Hiding it over changes not saved asks first (UID-6). */}
+          {askHide && whole && (
+            <div className="row wrap-row style-known-ask" role="alert">
+              <span className="small grow">מה ששינית בטיוטה עדיין לא נשמר.</span>
+              <button type="button" className="btn btn-primary btn-small" onClick={() => setAskHide(false)}>להמשיך לערוך</button>
+              <button type="button" className="btn btn-small" onClick={() => { setAskHide(false); setWholeDirty(false); setWhole(false); }}>להסתיר בלי לשמור</button>
+            </div>
+          )}
+          {whole && <ProfileEditor key={o.draft.id} view={o.draft} o={o} onDirtyChange={setWholeDirty} />}
         </>
       )}
     </section>

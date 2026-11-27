@@ -226,4 +226,58 @@ describe("the short letter", () => {
     await user.click(within(review).getByRole("button", { name: /^שליחה/ }));
     expect(await screen.findByText("פסקה בדויה ראשונה (parents).")).toBeInTheDocument();
   });
+
+  it("UIC-7: a double click on 'שמירה' saves once, and nothing is said about another wording", async () => {
+    let release: () => void = () => undefined;
+    const { user, letters, app, calls } = await openLetter((cmd) => (cmd === "edit_paragraph" ? new Promise((r) => { release = () => r(false); }) : undefined));
+    letters.parents = [para("l1", "פסקה בדויה.")];
+    await user.click(screen.getByRole("radio", { name: "לצוות החינוכי" }));
+    await user.click(screen.getByRole("radio", { name: "להורים" }));
+    await user.click(await screen.findByRole("button", { name: "עריכה" }));
+    await user.type(screen.getByRole("textbox", { name: "עריכת הפסקה" }), " נוסף");
+    await user.dblClick(screen.getByRole("button", { name: "שמירה" }));
+    expect(calls.filter((c) => c.cmd === "edit_paragraph")).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "בשמירה…" })).toBeDisabled();
+    release();
+    await waitFor(() => expect(screen.queryByRole("textbox", { name: "עריכת הפסקה" })).toBeNull());
+    expect(calls.filter((c) => c.cmd === "edit_paragraph")).toHaveLength(1);
+    expect(app.notify).not.toHaveBeenCalled();
+  });
+
+  it("the letter is not produced while a paragraph edit is open", async () => {
+    const { user, letters } = await openLetter();
+    letters.parents = [para("l1", "פסקה בדויה מאושרת.", "approved")];
+    await user.click(screen.getByRole("radio", { name: "לצוות החינוכי" }));
+    await user.click(screen.getByRole("radio", { name: "להורים" }));
+    const produce = await screen.findByRole("button", { name: "הפקת המכתב" });
+    expect(produce).toBeEnabled();
+    await user.click(screen.getByRole("button", { name: "עריכה" }));
+    expect(produce).toBeDisabled();
+    expect(screen.getByText("קודם שומרים או מבטלים את העריכה שפתוחה.")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "ביטול" }));
+    expect(produce).toBeEnabled();
+  });
+
+  it("the school letter waits for approved recommendations, and says so before the click", async () => {
+    const { user, calls } = await openLetter(() => undefined, { recs: [] });
+    await user.click(screen.getByRole("radio", { name: "לצוות החינוכי" }));
+    expect(screen.getByRole("button", { name: "ניסוח המכתב" })).toBeDisabled();
+    expect(screen.getByText(/ועוד אין המלצות מאושרות/)).toBeInTheDocument();
+    expect(calls.some((c) => c.cmd === "prepare_letter")).toBe(false);
+    // The parents' letter does not need them.
+    await user.click(screen.getByRole("radio", { name: "להורים" }));
+    expect(screen.getByRole("button", { name: "ניסוח המכתב" })).toBeEnabled();
+  });
+
+  it("her note for the letter is kept when she leaves the page and comes back", async () => {
+    const { user, view, caseId, app } = await openLetter();
+    await user.type(screen.getByRole("textbox", { name: /מה עוד חשוב שיהיה במכתב/ }), "הערה בדויה");
+    view.unmount();
+    render(
+      <Host app={app}>
+        <CaseHost caseId={caseId}>{(api) => <LetterCard api={api} />}</CaseHost>
+      </Host>,
+    );
+    expect(await screen.findByRole("textbox", { name: /מה עוד חשוב שיהיה במכתב/ })).toHaveValue("הערה בדויה");
+  });
 });

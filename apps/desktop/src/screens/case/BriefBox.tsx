@@ -1,7 +1,8 @@
 // What she asks Claude before a draft (D-140): one box, the same wherever something is sent
 // to be worded on the report page. Her words, a style in one click, her recent wishes, and
 // for a new section "keep it for this section". Enter sends (an empty box sends as always),
-// Shift+Enter is a new line, Esc closes. What is asked goes out only inside the request,
+// Shift+Enter is a new line, Esc closes. Her points are written a line each: there Enter is a
+// new line and Ctrl+Enter sends. What is asked goes out only inside the request,
 // through the filter and the gate, and is shown on "what leaves the computer".
 import { useEffect, useRef, useState } from "react";
 import { LocalText, type LocalTextHandle } from "../../components/LocalText";
@@ -116,6 +117,9 @@ export function BriefBox({ id, title, hint, placeholder, chips, chipsTitle, rece
     setMissing(null);
     onSend(wish, typed.trim(), keeping, { text: typed, picked: [...picked], keep: keeping });
   };
+  /** Her points, one a line: Enter is the next point, and only Ctrl+Enter (or the button) sends. */
+  const lines = needs?.what === "typed";
+  const keys = lines ? "Enter שורה חדשה · Ctrl+Enter שולח" : `${needs ? "Enter שולח" : "Enter שולח, גם בלי לכתוב כלום"} · Shift+Enter שורה חדשה`;
   const toggle = (label: string) => {
     setMissing(null);
     setPicked((p) => (p.includes(label) ? p.filter((x) => x !== label) : [...p, label]));
@@ -133,9 +137,12 @@ export function BriefBox({ id, title, hint, placeholder, chips, chipsTitle, rece
         onEmptyChange={(empty) => { if (!empty) setMissing(null); }}
         onKeyDown={(e) => {
           if (e.key !== "Enter" || e.shiftKey || e.nativeEvent.isComposing) return;
+          if (lines && !(e.ctrlKey || e.metaKey)) return;
           e.preventDefault();
           send();
         }} />
+      {/* Beside the box, where she types, not under the buttons. */}
+      <span className="small muted">{keys} · ההנחיה עוברת את הסינון יחד עם החומרים.</span>
       {missing && <span id={`${id}-missing`} className="small warn-text" role="alert">{missing}</span>}
       <div className="brief-box-group">
         <span className="small muted brief-box-sub">{chipsTitle}</span>
@@ -169,7 +176,6 @@ export function BriefBox({ id, title, hint, placeholder, chips, chipsTitle, rece
         <button type="button" className="btn" onClick={onCancel}>ביטול</button>
         <button type="button" className="btn btn-primary" disabled={busy} onClick={send}>{sendLabel}</button>
       </div>
-      <span className="small muted">{needs ? "Enter שולח" : "Enter שולח, גם בלי לכתוב כלום"} · Shift+Enter שורה חדשה · ההנחיה עוברת את הסינון יחד עם החומרים.</span>
     </div>
   );
 }

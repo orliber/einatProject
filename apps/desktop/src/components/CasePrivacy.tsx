@@ -3,6 +3,7 @@
 // the place of the card that was shown before each send and on import. Plain text only.
 import { useState } from "react";
 import { useApp } from "../App";
+import { useAi } from "../ai";
 import { roleLabel } from "../i18n/he";
 import { ipc } from "../ipc/client";
 import type { Identity } from "../ipc/generated/Identity";
@@ -18,9 +19,12 @@ export function CasePrivacyCard(props: {
   onChanged: (fresh: Identity[]) => Promise<void>;
 }) {
   const { fail } = useApp();
+  const ai = useAi();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [history, setHistory] = useState(false);
+  /** "להחזיר" lets the name out as written in the whole case: asked once, in its row. */
+  const [asking, setAsking] = useState<string | null>(null);
   const found = props.identities.filter((i) => i.source !== "manual");
 
   async function act(key: string, run: () => Promise<unknown>) {
@@ -47,6 +51,18 @@ export function CasePrivacyCard(props: {
           <ul className="auto-list">
             {found.map((i) => {
               const words = [i.value, ...i.aliases].join(", ");
+              if (asking === i.id) {
+                return (
+                  <li key={i.id} className="auto-item auto-ask" role="group" aria-label={`להחזיר את ${words}?`}>
+                    <span className="grow small">"{words}" יישלח ל-{ai} כמו שהוא, בכל התיק הזה.</span>
+                    <button type="button" className="btn btn-small" disabled={off} aria-label={`כן, להחזיר את ${words}`}
+                      onClick={() => void act(i.id, async () => { await ipc.restoreAutoHidden(props.caseId, i.value, i.tag); setAsking(null); })}>
+                      {busy === i.id ? <Spinner /> : "כן, להחזיר"}
+                    </button>
+                    <button type="button" className="btn btn-small btn-ghost" disabled={off} onClick={() => setAsking(null)}>ביטול</button>
+                  </li>
+                );
+              }
               return (
                 <li key={i.id} className="auto-item">
                   <div className="grow stack" style={{ gap: 2 }}>
@@ -65,8 +81,8 @@ export function CasePrivacyCard(props: {
                     {busy === `${i.id}:ok` ? <Spinner /> : "נכון, תמיד להסתיר"}
                   </button>
                   <button type="button" className="btn btn-small" disabled={off} aria-label={`להחזיר את ${words}`}
-                    onClick={() => void act(i.id, () => ipc.restoreAutoHidden(props.caseId, i.value, i.tag))}>
-                    {busy === i.id ? <Spinner /> : "להחזיר"}
+                    onClick={() => setAsking(i.id)}>
+                    להחזיר
                   </button>
                 </li>
               );

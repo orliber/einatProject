@@ -296,4 +296,26 @@ describe("writing the whole report in the background", () => {
     expect([r.done, r.failed]).toEqual([1, 1]);
     expect(runLine(r)).toContain("לנסות שוב");
   });
+
+  it("after the sorting, the line says the materials were sorted and names a section left with no material", async () => {
+    let lineWhileWriting = "";
+    mockIPC(async (cmd) => {
+      if (cmd === "prepare_sort_parts") return [["i1", prepared({ approval_id: "sort" })]];
+      if (cmd === "send_sort") return { assigned: 1 };
+      // "ג" had material before the sorting and has none after it.
+      if (cmd === "prepare_full_draft") return four.filter(([k]) => k !== "c");
+      if (cmd === "send_section") {
+        lineWhileWriting = runLine(runOf("c1") ?? ({} as never));
+        return {};
+      }
+      return null;
+    });
+    const { api } = caseApi({ unsorted: true });
+    (api.detail as { sections: unknown[] }).sections = ["a", "b", "c", "d"].map((k) => ({ key: k, title: `סעיף ${({ a: "א", b: "ב", c: "ג", d: "ד" } as Record<string, string>)[k]}`, paragraphs: [], source_count: 1, sortable: true }));
+    // The summary is written later, from the approved sections: not named as lost.
+    (api.detail as { sections: unknown[] }).sections.push({ key: "summary", title: "סיכום", paragraphs: [], source_count: 2, sortable: false });
+    await runWholeReport(api, { verify: false, ai: "Claude" });
+    expect(lineWhileWriting).toMatch(/^החומרים מוינו\. התוכנה עובדת: נכתבו \d מתוך 3 סעיפים\. אחרי המיון לא נמצא חומר לסעיף "סעיף ג", ולכן הוא לא נכתב$/);
+    expect(runLine(runOf("c1") ?? ({} as never))).toBe("הדוח נכתב. 3 סעיפים מחכים לאישורך. אחרי המיון לא נמצא חומר לסעיף \"סעיף ג\", ולכן הוא לא נכתב");
+  });
 });

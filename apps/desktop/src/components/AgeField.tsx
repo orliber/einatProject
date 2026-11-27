@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { DateField, todayIso } from "./DateField";
 import type { Age } from "../ipc/generated/Age";
 
@@ -65,6 +65,22 @@ export function AgeField(props: { idPrefix: string; years: string; months: strin
   const monthsBad = problem !== null && problem.startsWith("חודשים");
   const yearsBad = problem !== null && !monthsBad;
   const computed = birth && on ? ageFrom(birth, on) : null;
+  /** The age typed before the birth date filled the fields: back to it when the date stops
+   *  being a date (a year still being typed), so a half-typed date never leaves a wrong age. */
+  const before = useRef<{ years: string; months: string } | null>(null);
+  /** A valid birth date fills the age at once (a "שימוש בגיל" not pressed lost it). */
+  function dates(nextBirth: string, nextOn: string) {
+    setBirth(nextBirth);
+    setOn(nextOn);
+    const age = nextBirth && nextOn ? ageFrom(nextBirth, nextOn) : null;
+    if (age && age.years < 25) {
+      before.current ??= { years: props.years, months: props.months };
+      props.onChange(String(age.years), String(age.months));
+    } else if (before.current) {
+      props.onChange(before.current.years, before.current.months);
+      before.current = null;
+    }
+  }
   const y = `${props.idPrefix}-years`;
   const m = `${props.idPrefix}-months`;
 
@@ -92,18 +108,21 @@ export function AgeField(props: { idPrefix: string; years: string; months: strin
         <div className="age-calc">
           <div className="field">
             <label htmlFor={`${props.idPrefix}-birth`}>תאריך לידה</label>
-            <DateField id={`${props.idPrefix}-birth`} value="" onChange={setBirth} notAfterToday />
+            <DateField id={`${props.idPrefix}-birth`} value="" onChange={(d) => dates(d, on)} notAfterToday />
           </div>
           <div className="field">
             <label htmlFor={`${props.idPrefix}-on`}>תאריך האבחון</label>
-            <DateField id={`${props.idPrefix}-on`} value={on} onChange={setOn} />
+            <DateField id={`${props.idPrefix}-on`} value={on} onChange={(d) => dates(birth, d)} />
           </div>
           <div className="age-calc-result">
             {computed ? (
-              <button type="button" className="btn btn-small btn-primary"
-                onClick={() => { props.onChange(String(computed.years), String(computed.months)); setCalc(false); setBirth(""); }}>
-                שימוש בגיל {computed.years}:{computed.months}
-              </button>
+              <>
+                <span className="small" role="status">הגיל {computed.years}:{computed.months} הוזן בשדות.</span>
+                <button type="button" className="btn btn-small btn-primary"
+                  onClick={() => { before.current = null; setCalc(false); setBirth(""); }}>
+                  סיום
+                </button>
+              </>
             ) : (
               <span className="small muted">{birth && on ? "תאריך האבחון לפני תאריך הלידה" : " "}</span>
             )}

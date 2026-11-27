@@ -81,7 +81,7 @@ export function Interpretations({ o, running, onRead }: { o: StyleOverview; runn
                             save(item.id);
                           }
                         }} />
-                      <span className="row">
+                      <span className="row style-item-actions">
                         <button type="button" className="btn btn-small btn-primary" disabled={busy || !draft.trim()} onClick={() => save(item.id)}>שמירה ואישור</button>
                         <button type="button" className="btn btn-small" onClick={() => setEditing(null)}>ביטול</button>
                       </span>
@@ -89,7 +89,7 @@ export function Interpretations({ o, running, onRead }: { o: StyleOverview; runn
                   ) : (
                     <span className="stack grow">
                       <span className="style-item-text">{item.text}</span>
-                      <span className="row">
+                      <span className="row style-item-actions">
                         {!item.approved && <span className="chip chip-warn">מחכה לאישור</span>}
                         {item.support > 1 && <span className="hint">ב-{item.support} דוחות</span>}
                         {!item.approved && <button type="button" className="btn btn-small btn-primary" disabled={busy} onClick={() => void act(item.id, () => ipc.updateInterpretation(item.id, null, true, null))}>אישור</button>}

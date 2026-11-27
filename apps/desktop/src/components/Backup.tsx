@@ -124,7 +124,8 @@ export function CheckBackupDialog({ staged, onClose }: { staged: StagedBackup; o
 
   async function check(e?: FormEvent) {
     e?.preventDefault();
-    if (!pw) return;
+    // Enter pressed again while the backup is being checked is not a second check (UIA-10).
+    if (busy || !pw) return;
     setBusy(true);
     setError(null);
     try {

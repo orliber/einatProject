@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useApp } from "../../App";
 import { useAi } from "../../ai";
@@ -10,8 +10,10 @@ import { KIND_HINT, KIND_LABEL, KINDS } from "./labels";
 // הסגנון שלי · the profile
 
 /** The profile's items, to check, change, delete or add. `kinds`: only these are shown (a row of
- * "what the program knows"); the rest of the profile is kept as it is when she saves. */
-export function ProfileEditor({ view, o, kinds }: { view: StyleProfileView; o: StyleOverview; kinds?: StyleKind[] }) {
+ * "what the program knows"); the rest of the profile is kept as it is when she saves.
+ * `onDirtyChange`: told whenever there are changes not saved yet, so what holds the editor does
+ * not close it over them without asking (UID-6). */
+export function ProfileEditor({ view, o, kinds, onDirtyChange }: { view: StyleProfileView; o: StyleOverview; kinds?: StyleKind[]; onDirtyChange?: (dirty: boolean) => void }) {
   const { fail, notify } = useApp();
   const ai = useAi();
   const qc = useQueryClient();
@@ -19,8 +21,18 @@ export function ProfileEditor({ view, o, kinds }: { view: StyleProfileView; o: S
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [editing, setEditing] = useState<string | null>(null);
+  /** The item whose words are open in a box: the item itself, as toggle and delete find it.
+   *  Not its id: every item she added herself has the id "" until it is saved. */
+  const [editing, setEditing] = useState<StyleItem | null>(null);
   const isDraft = view.status === "draft";
+  const ids = useId();
+  const told = useRef(onDirtyChange);
+  useEffect(() => {
+    told.current = onDirtyChange;
+  });
+  useEffect(() => {
+    told.current?.(dirty);
+  }, [dirty]);
   const shownKinds = kinds ?? KINDS;
 
   const groups = useMemo(() => {
@@ -52,6 +64,15 @@ export function ProfileEditor({ view, o, kinds }: { view: StyleProfileView; o: S
   }
 
   const enabledCount = items.filter((i) => i.enabled).length;
+  /** Out of the list, with "ביטול" to put it back where it was: a stray Enter on × loses nothing. */
+  const remove = (item: StyleItem) => {
+    const at = items.indexOf(item);
+    change((all) => all.filter((x) => x !== item));
+    notify("הפריט הוסר.", {
+      label: "ביטול",
+      run: () => change((all) => (all.includes(item) ? all : [...all.slice(0, at), item, ...all.slice(at)])),
+    });
+  };
 
   return (
     <section id="style-profile" className={isDraft ? "style-profile style-draft" : "style-profile"} aria-label={isDraft ? "טיוטת פרופיל הסגנון" : "פרופיל הסגנון"}>
@@ -79,15 +100,18 @@ export function ProfileEditor({ view, o, kinds }: { view: StyleProfileView; o: S
               <div key={kind} className="style-kind">
                 <span className="style-kind-title">{KIND_LABEL[kind]}{KIND_HINT[kind] && <span className="muted small"> · {KIND_HINT[kind]}</span>}</span>
                 <ul className="style-items">
-                  {list.map((item) => (
-                    <li key={item.id} className={item.enabled ? "style-item" : "style-item style-item-off"}>
-                      <input type="checkbox" aria-label="להשתמש בפריט" checked={item.enabled}
-                        onChange={() => change((all) => all.map((x) => (x.id === item.id ? { ...x, enabled: !x.enabled } : x)))} />
-                      {editing === item.id ? (
-                        <textarea className="textarea grow" rows={kind === "example" || kind === "inference" ? 4 : 2} autoFocus defaultValue={item.text}
-                          onBlur={(e) => { const text = e.target.value.trim(); setEditing(null); if (text && text !== item.text) change((all) => all.map((x) => (x.id === item.id ? { ...x, text } : x))); }} />
+                  {list.map((item) => {
+                    // Each control is described by its item's words: twenty rows never sound alike.
+                    const textId = `${ids}-${items.indexOf(item)}`;
+                    return (
+                    <li key={item.id || textId} className={item.enabled ? "style-item" : "style-item style-item-off"}>
+                      <input type="checkbox" aria-label="להשתמש בפריט" aria-describedby={textId} checked={item.enabled}
+                        onChange={() => change((all) => all.map((x) => (x === item ? { ...x, enabled: !x.enabled } : x)))} />
+                      {editing === item ? (
+                        <textarea id={textId} className="textarea grow" aria-label="נוסח הפריט" rows={kind === "example" || kind === "inference" ? 4 : 2} autoFocus defaultValue={item.text}
+                          onBlur={(e) => { const text = e.target.value.trim(); setEditing(null); if (text && text !== item.text) change((all) => all.map((x) => (x === item ? { ...x, text } : x))); }} />
                       ) : (
-                        <button type="button" className={kind === "example" ? "style-item-text style-example grow" : "style-item-text grow"} title="עריכה" onClick={() => setEditing(item.id)}>
+                        <button id={textId} type="button" className={kind === "example" ? "style-item-text style-example grow" : "style-item-text grow"} title="עריכה" onClick={() => setEditing(item)}>
                           <ItemText item={item} />
                         </button>
                       )}
@@ -96,9 +120,10 @@ export function ProfileEditor({ view, o, kinds }: { view: StyleProfileView; o: S
                       {item.origin === "edited" && <span className="chip chip-sand">בניסוח שלך</span>}
                       {item.origin === "accepted" && <span className="chip chip-sand">אישרת</span>}
                       {item.origin === "reports" && item.support > 1 && <span className="chip">ב-{item.support} דוחות</span>}
-                      <button type="button" className="btn icon-btn" aria-label="מחיקה" onClick={() => change((all) => all.filter((x) => x.id !== item.id))}><CloseIcon /></button>
+                      <button type="button" className="btn icon-btn" aria-label="מחיקה" aria-describedby={textId} onClick={() => remove(item)}><CloseIcon /></button>
                     </li>
-                  ))}
+                    );
+                  })}
                 </ul>
               </div>
             );

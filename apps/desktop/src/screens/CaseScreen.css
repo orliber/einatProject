@@ -562,8 +562,11 @@
 }
 .contents-list {
   position: relative;
-  flex-grow: 1;
-  min-height: 0;
+  /* Only the room left over: the block under it keeps its own height while there is room. */
+  flex: 1 1 0;
+  /* A low window with larger text (1100x620 at 140%): the list keeps about six rows, and the
+     block under it scrolls instead of squeezing the list to two. */
+  min-height: min(240px, 100%);
   overflow: auto;
   display: flex;
   flex-direction: column;
@@ -672,6 +675,13 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
+  /* Shrinks and scrolls when the window is low: the buttons come first, the key hints last. */
+  min-height: 0;
+  flex-shrink: 1;
+  overflow-y: auto;
+  /* Room for the buttons' focus ring inside the scrolling box. */
+  padding: 2px;
+  margin: -2px;
 }
 .contents-keys {
   display: flex;
@@ -680,6 +690,25 @@
   margin: 0;
   font-size: var(--text-xs);
   color: var(--ink-muted);
+}
+.contents-keys-where {
+  margin-top: 4px;
+  font-weight: 700;
+  color: var(--ink-soft);
+}
+.contents-keys-where:first-child {
+  margin-top: 0;
+}
+/* "לאשר את כל הטיוטות?" asked in place of its button. */
+.contents-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--sand);
+  font-size: var(--text-sm);
+  color: var(--ink-soft);
 }
 .contents-keys kbd {
   font-family: var(--font-ui);

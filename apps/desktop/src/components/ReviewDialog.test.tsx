@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { mockIPC } from "@tauri-apps/api/mocks";
 import { AppContext, type AppApi } from "../App";
 import { prepared, status } from "../test/fixtures";
-import { ReviewDialog } from "./ReviewDialog";
+import { detailsLine, namesLine, ReviewDialog } from "./ReviewDialog";
 import { Dialog } from "./ui";
 
 function api(over: Partial<ReturnType<typeof status>> = {}): AppApi {
@@ -68,6 +68,9 @@ describe("ReviewDialog", () => {
     expect(calls).toContainEqual({ cmd: "change_role", args: { caseId: "c1", tag: "[גננת_2]", role: "school_teacher" } });
 
     await user.click(screen.getByRole("button", { name: "להחזיר את חן" }));
+    // Asked once first: the word would go out as written in the whole case.
+    expect(calls.some((c) => c.cmd === "restore_auto_hidden")).toBe(false);
+    await user.click(screen.getByRole("button", { name: "כן, להחזיר את חן" }));
     expect(calls).toContainEqual({ cmd: "restore_auto_hidden", args: { caseId: "c1", token: "חן", tag: "[אדם_1]" } });
     expect(reprepare).toHaveBeenCalledTimes(2);
     expect(await screen.findByText("הסתרתי אוטומטית פרט אחד")).toBeInTheDocument();
@@ -182,5 +185,16 @@ describe("ReviewDialog: 'show this screen before every send'", () => {
     // Not left ticked as if it were saved: the status (what the core holds) is read again.
     expect(box).not.toBeChecked();
     expect(app.refresh).toHaveBeenCalled();
+  });
+});
+
+describe("the checklist before sending", () => {
+  it("says one and many in Hebrew, and marks the quoted words as examples", () => {
+    expect(namesLine(0)).toBe("אין שמות מהתיק בטקסט");
+    expect(namesLine(1)).toBe('שם אחד יוחלף בתפקיד (למשל "הילד", "האם")');
+    expect(namesLine(3)).toBe('3 שמות יוחלפו בתפקיד (למשל "הילד", "האם")');
+    expect(detailsLine(0)).toBe('אין ת"ז, טלפון או תאריך');
+    expect(detailsLine(1)).toBe('פרט מזהה אחד יוחלף (למשל תאריך ב"לפני כחודש")');
+    expect(detailsLine(2)).toBe('2 פרטים מזהים יוחלפו (למשל תאריך ב"לפני כחודש")');
   });
 });

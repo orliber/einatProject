@@ -10,6 +10,7 @@ import { ReportRunDialog } from "../components/ReportRunDialog";
 import { ProgressLine, estimateMs, recordDuration, timed, WaitLine, type Task } from "../components/Progress";
 import { ErrorLine, CloseIcon, Skeleton, dialogOpen, SearchIcon, FullPageIcon, ChatIcon, HelpIcon } from "../components/ui";
 import { useDailyUpdateCheck } from "../components/Update";
+import { SendStoppedSign } from "../components/TopBar";
 import { ActionsMenu, type MenuItem } from "../components/Menu";
 import { SampleGuide } from "./case/SampleGuide";
 import { CaseSearch } from "./case/CaseSearch";
@@ -28,7 +29,7 @@ import "./CaseScreen.css";
 import { useAi } from "../ai";
 import { useShownName } from "../discreet";
 import { notSentMessage } from "../sending";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { forgetRun, isRunning, runLine, runWholeReport, showingCase, stopRun, useRun } from "./case/reportRun";
 
 export interface ReviewRequest {
@@ -125,6 +126,15 @@ export function sortSummary(r: SortResult): string {
   return `${lead}${what} לסעיפים. אפשר לשנות בכרטיס החומר.${rest}${left}${long}`;
 }
 
+/** What "approve all" will do, asked once: "5 פסקאות ב-3 סעיפים יאושרו וייכנסו לדוח." */
+export function confirmLine(paragraphs: number, sections: number, held: number): string {
+  const what = paragraphs === 1 ? "פסקה אחת" : `${paragraphs} פסקאות`;
+  const where = sections === 1 ? "בסעיף אחד" : `ב-${sections} סעיפים`;
+  const verb = paragraphs === 1 ? "תאושר ותיכנס" : "יאושרו וייכנסו";
+  const rest = held === 0 ? "" : held === 1 ? " פסקה אחת עם הערה נשארת לבדיקה שלך." : ` ${held} פסקאות עם הערה נשארות לבדיקה שלך.`;
+  return `${what} ${where} ${verb} לדוח.${rest}`;
+}
+
 /** After "approve all": how many went into the report, and how many wait for her eye. */
 export function approvedLine(approved: number, held: number): string {
   const went = approved === 1 ? "אושרה פסקה אחת" : `אושרו ${approved} פסקאות`;
@@ -142,6 +152,7 @@ function sectionState(s: CaseDetail["sections"][number]): SectionState {
 
 export function CaseScreen({ caseId, view, section }: { caseId: string; view: string; section?: string }) {
   const { go, fail, lockNow, status, notify, showHelp } = useApp();
+  const qc = useQueryClient();
   const shown = useShownName();
   // The case bar shows no app status (D-204 §3): demo mode and a new version are in the top bar
   // and on the lock screen. The hourly look for a version still runs while a case is open.
@@ -370,10 +381,31 @@ export function CaseScreen({ caseId, view, section }: { caseId: string; view: st
   /** `quiet`: the reading that runs by itself after a material was added (round 31): when
    *  there is nothing to read, or it cannot be built now, it says nothing; the button stays. */
   const [preparingSort, setPreparingSort] = useState(false);
+  /** UIC-2: the sorting on its way, whoever started it (the quiet reading, a button): one at a
+   *  time per case, so a material is never sent twice while its first answer is still out. */
+  const sorting = useRef<Promise<boolean> | null>(null);
   /** Resolves true when the sorting was sent (or the run does it), false when she went back. */
   const startSort = async (quiet = false): Promise<boolean> => {
     // While the whole report is written, its run does the sorting: never a second request.
     if (isRunning(caseId)) return true;
+    const inFlight = sorting.current;
+    if (inFlight) {
+      const sent = await inFlight.catch(() => false);
+      // The quiet reading goes on with what was added meanwhile (the core says quietly when
+      // nothing is left); a button waits for the sorting on its way and goes on with it, and
+      // asks again itself only when that one did not go (its failure is said then).
+      if (quiet || !sent) return startSort(quiet);
+      return sent;
+    }
+    const mine = runSort(quiet);
+    sorting.current = mine;
+    try {
+      return await mine;
+    } finally {
+      if (sorting.current === mine) sorting.current = null;
+    }
+  };
+  const runSort = async (quiet: boolean): Promise<boolean> => {
     if (!quiet) setError(null);
     setPreparingSort(true);
     try {
@@ -568,6 +600,8 @@ export function CaseScreen({ caseId, view, section }: { caseId: string; view: st
             );
           })}
         </nav>
+        {/* The emergency stop is on: the same sign as the top bar's, which this page does not have. */}
+        <SendStoppedSign />
         {/* D-204 §3: one quiet family of tools, each an icon with its name. */}
         <div className="case-tools">
           {stage === 2 && !narrowBar && (
@@ -592,7 +626,11 @@ export function CaseScreen({ caseId, view, section }: { caseId: string; view: st
           onNext={(from) => (from === "details" ? go({ name: "case", id: caseId, view: "materials" }) : from === "materials" ? toReport() : go({ name: "case", id: caseId, view: "finish" }))}
           onDelete={() => {
             setThrowing(true);
-            ipc.deleteCase(caseId).then(() => go({ name: "cases" }), (e: unknown) => { setThrowing(false); setError(fail(e as never)); });
+            // The lists read again before the way back to them: the deleted sample is not left there
+            // (nor in "להמשיך"), and the recycle bin shows it.
+            ipc.deleteCase(caseId)
+              .then(() => Promise.all(["cases", "trash"].map((k) => qc.invalidateQueries({ queryKey: [k] }))))
+              .then(() => go({ name: "cases" }), (e: unknown) => { setThrowing(false); setError(fail(e as never)); });
           }} />
       )}
       {(elsewhere.length > 0 || failures.length > 0 || run || preparingSort) && (
@@ -727,6 +765,9 @@ function Contents(props: {
 }) {
   const { detail, jobs, view } = props;
   const ai = useAi();
+  /** "לאשר את כל הטיוטות" asks once (no undo for an approval): the drafts as they were when she
+   *  pressed, so a draft that lands meanwhile is never approved unseen. */
+  const [confirmAll, setConfirmAll] = useState<{ ids: string[]; held: string[]; sections: number } | null>(null);
   const content = detail.sections.filter((s) => s.key !== "signature");
   const approved = content.filter((s) => s.approved && !s.paragraphs.some((p) => p.status === "proposed")).length;
   const waiting = content.filter((s) => s.paragraphs.some((p) => p.status === "proposed")).length;
@@ -809,10 +850,21 @@ function Contents(props: {
             </button>
           </p>
         )}
-        {readyDrafts > 1 && (
-          <button type="button" className="btn btn-primary" disabled={props.approvingAll} onClick={() => props.onApproveAll(readyIds, heldIds)}>
+        {readyDrafts > 1 && !confirmAll && (
+          <button type="button" className="btn btn-primary" disabled={props.approvingAll}
+            onClick={() => setConfirmAll({ ids: readyIds, held: heldIds, sections: readyDrafts })}>
             ✓ לאשר את כל הטיוטות ({readyDrafts})
           </button>
+        )}
+        {confirmAll && (
+          <div className="contents-confirm" role="group" aria-label="לאשר את כל הטיוטות?">
+            <span>{confirmLine(confirmAll.ids.length, confirmAll.sections, confirmAll.held.length)}</span>
+            <div className="row">
+              <button type="button" className="btn btn-primary btn-small" autoFocus disabled={props.approvingAll}
+                onClick={() => { props.onApproveAll(confirmAll.ids, confirmAll.held); setConfirmAll(null); }}>כן, לאשר</button>
+              <button type="button" className="btn btn-small" onClick={() => setConfirmAll(null)}>ביטול</button>
+            </div>
+          </div>
         )}
         {props.approvedAll && (
           stillHeld[0] ? (
@@ -831,9 +883,15 @@ function Contents(props: {
           </button>
         )}
         {done && <button type="button" className={closingEmpty.length ? "btn" : "btn btn-primary"} onClick={props.onFinish}>להוצאת הדוח ←</button>}
+        {/* The keys mean one thing on a section's heading and another on a paragraph: each pair
+            says where it works, as the shortcuts list does. */}
         <p className="contents-keys">
+          <span className="contents-keys-where">על כותרת הסעיף:</span>
           <span><kbd>Enter</kbd> לאשר ולעבור הלאה</span>
           <span><kbd>{MOD}+Enter</kbd> לשנות</span>
+          <span className="contents-keys-where">על פסקה:</span>
+          <span><kbd>Enter</kbd> לערוך</span>
+          <span><kbd>{MOD}+Enter</kbd> לאשר</span>
         </p>
       </div>
     </aside>

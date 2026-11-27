@@ -8,7 +8,7 @@ import { ErrorLine, SendIcon, Spinner, WarnIcon, dialogOpen } from "../../compon
 import { ProgressLine, timed, WaitLine } from "../../components/Progress";
 import { Why } from "../../components/Why";
 import { Similar } from "../../components/Similar";
-import { useHoldUnsaved } from "../../components/Unsaved";
+import { SECTION_PAGE, useHoldUnsaved } from "../../components/Unsaved";
 import { LocalText, type LocalTextHandle } from "../../components/LocalText";
 import { kindLabel, STALE_EDIT } from "../../i18n/he";
 import { useRotatingPlaceholder } from "../../components/Rotating";
@@ -112,7 +112,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
 
   // One request at a time per section: while it is prepared, reviewed or written.
   const job = api.jobs.find((j) => j.section === section.key);
-  const holdLive = useHoldUnsaved(caseId, `פסקה בסעיף "${section.title}"`, editing?.text ?? own);
+  const holdLive = useHoldUnsaved(caseId, `פסקה בסעיף "${section.title}"${SECTION_PAGE}`, editing?.text ?? own);
   const [preparing, setPreparing] = useState(false);
   const working = preparing || busy || job !== undefined;
 

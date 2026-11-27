@@ -128,6 +128,7 @@ describe("materials", () => {
     await user.click(within(list).getByRole("button", { name: new RegExp(title) }));
     const dialog = await screen.findByRole("dialog", { name: title });
     await user.click(within(dialog).getByRole("button", { name: "מחיקה" }));
+    await user.click(within(await screen.findByRole("dialog", { name: "מחיקת החומר" })).getByRole("button", { name: "מחיקה" }));
     await waitFor(() => expect(within(list).queryByRole("button", { name: new RegExp(title) })).toBeNull());
     const notice = await screen.findByRole("status");
     expect(notice).toHaveTextContent("החומר נמחק מהתיק.");

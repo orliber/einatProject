@@ -71,7 +71,7 @@ for (const size of sizes) {
       if (size) await page.setViewportSize(size);
       // A material with a long file-like name stays in its row (round 49).
       await page.getByRole("button", { name: "אינטייק עם ההורים (רישום אינטייק)" }).click();
-      const write = page.getByRole("dialog", { name: "הוספת טקסט" });
+      const write = page.getByRole("dialog", { name: /^(הוספת טקסט|רישום .+)$/ });
       await write.getByLabel("כותרת").fill("סיכום_אינטייק_עם_ההורים_Weissberg-Abramovich_גרסה_סופית_מתוקנת_2026-10-15.docx");
       await write.getByLabel("הטקסט").fill("טקסט בדוי.");
       await write.getByRole("button", { name: "שמירה בתיק" }).click();

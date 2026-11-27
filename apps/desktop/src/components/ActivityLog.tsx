@@ -90,7 +90,7 @@ export function ActivitySettings() {
   return (
     <section className="card setting" aria-labelledby="s-activity">
       <h2 id="s-activity">יומן פעולות</h2>
-      <p className="muted small">כניסות, שליחות, ייצוא ומחיקות, בלי תוכן ובלי שמות. חתום כך ששינוי מתגלה.</p>
+      <p className="muted small">כניסות, שליחות, ייצוא ומחיקות, בלי תוכן. השם שליד פעולה מוצג רק כאן, מתוך הכספת, ולא נשמר ביומן. היומן חתום כך ששינוי מתגלה.</p>
       <button type="button" className="btn align-start" onClick={() => setOpen(true)}>פתיחת היומן</button>
       {open && <ActivityDialog onClose={() => setOpen(false)} />}
     </section>

@@ -45,14 +45,22 @@ export function withoutPaths(detail: string): string {
   return kept.join(" ");
 }
 
+const PLATFORMS: Record<string, string> = { windows: "Windows", macos: "macOS", linux: "Linux" };
+
+/** The time on her computer's clock, as she reads it, with the exact moment after it for Or. */
+export function reportTime(at: Date): string {
+  const local = at.toLocaleString("he-IL", { day: "numeric", month: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" });
+  return `${local} (⁦${at.toISOString()}⁩)`;
+}
+
 /** The text she sees, may edit, and copies. Plain text only. */
-export function bugReportText(f: BugFacts): string {
+export function bugReportText(f: BugFacts, at: Date = new Date()): string {
   const lines = [
     "דוח תקלה מכספת האבחון",
     `גרסה: ${f.version} (${f.commit})`,
-    `מערכת: ${f.platform}`,
+    `מערכת: ${PLATFORMS[f.platform] ?? f.platform}`,
     `מסך: ${f.screen}`,
-    `שעה: ${new Date().toISOString()}`,
+    `שעה: ${reportTime(at)}`,
   ];
   if (f.keyCheck && f.keyCheck.slowestMs > 0) {
     const seconds = (ms: number) => (ms / 1000).toFixed(1);

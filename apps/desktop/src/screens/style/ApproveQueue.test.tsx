@@ -194,4 +194,20 @@ describe("the approval queue", () => {
     const q = await screen.findByRole("region", { name: "לאשר אחד-אחד" });
     for (const name of ["להשתמש בזה", "לערוך", "לא צריך", "להשתמש בכל 2 שנשארו"]) expect(within(q).getByRole("button", { name })).toBeDisabled();
   });
+
+  it("UID-6: hiding the whole draft over changes not saved asks first", async () => {
+    const { user } = await openQueue(overview({ draft }));
+    await user.click(await screen.findByRole("button", { name: "לעבור על כל הטיוטה בבת אחת" }));
+    const editor = await screen.findByRole("region", { name: "טיוטת פרופיל הסגנון" });
+    const first = within(editor).getAllByRole("checkbox", { name: "להשתמש בפריט" })[0] as HTMLElement;
+    await user.click(first);
+    await user.click(screen.getByRole("button", { name: "להסתיר את הטיוטה" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("מה ששינית בטיוטה עדיין לא נשמר.");
+    expect(first).not.toBeChecked();
+    await user.click(screen.getByRole("button", { name: "להמשיך לערוך" }));
+    expect(screen.getByRole("region", { name: "טיוטת פרופיל הסגנון" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "להסתיר את הטיוטה" }));
+    await user.click(screen.getByRole("button", { name: "להסתיר בלי לשמור" }));
+    expect(screen.queryByRole("region", { name: "טיוטת פרופיל הסגנון" })).toBeNull();
+  });
 });

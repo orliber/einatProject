@@ -56,7 +56,7 @@ describe("the brief box as it goes", () => {
     render(<>{box({ describedBy: "earlier-line", needs: { what: "typed", say: "צריך לכתוב משהו" } })}<p id="earlier-line">שורה</p></>);
     expect(screen.getByRole("textbox")).toHaveAttribute("aria-describedby", "earlier-line");
     screen.getByRole("textbox").focus();
-    await user.keyboard("{Enter}");
+    await user.keyboard("{Control>}{Enter}{/Control}");
     expect(screen.getByRole("textbox")).toHaveAttribute("aria-describedby", "brief-x-missing earlier-line");
   });
 
@@ -66,5 +66,29 @@ describe("the brief box as it goes", () => {
     expect(screen.getByRole("button", { name: "קצר וממוקד" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("button", { name: "מפורט" })).toHaveAttribute("aria-pressed", "false");
     expect(screen.getByRole("checkbox", { name: /לזכור לסעיף הזה/ })).not.toBeChecked();
+  });
+
+  it("her points: Enter is the next line, and only Ctrl+Enter sends; the keys are said beside the box", async () => {
+    const user = userEvent.setup();
+    const onSend = vi.fn();
+    render(box({ onSend, needs: { what: "typed", say: "כתבי קודם את הנקודות שלך." } }));
+    const text = screen.getByRole("textbox");
+    await user.click(text);
+    await user.keyboard("נקודה בדויה ראשונה{Enter}נקודה בדויה שנייה");
+    expect(onSend).not.toHaveBeenCalled();
+    expect(text).toHaveValue("נקודה בדויה ראשונה\nנקודה בדויה שנייה");
+    expect(screen.getByText(/Enter שורה חדשה · Ctrl\+Enter שולח/)).toBeInTheDocument();
+    await user.keyboard("{Control>}{Enter}{/Control}");
+    expect(onSend).toHaveBeenCalledTimes(1);
+    expect(onSend.mock.calls[0]?.[1]).toBe("נקודה בדויה ראשונה\nנקודה בדויה שנייה");
+  });
+
+  it("a wish still goes with Enter", async () => {
+    const user = userEvent.setup();
+    const onSend = vi.fn();
+    render(box({ onSend }));
+    await user.click(screen.getByRole("textbox"));
+    await user.keyboard("קצר{Enter}");
+    expect(onSend).toHaveBeenCalledTimes(1);
   });
 });

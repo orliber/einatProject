@@ -79,6 +79,22 @@ describe("NewCaseDialog", () => {
     expect(onCreated).not.toHaveBeenCalled();
   });
 
+  it("what stops the case from opening is said beside the button, and the missing name is marked and has the keyboard", async () => {
+    const { user, dialog } = open();
+    await user.click(within(dialog).getByRole("button", { name: "פתיחת התיק" }));
+    const foot = dialog.querySelector(".dialog-foot") as HTMLElement;
+    expect(within(foot).getByRole("alert")).toHaveTextContent("צריך את שם הילד/ה");
+    const name = dialog.querySelector("#name-0") as HTMLElement;
+    expect(name).toHaveFocus();
+    expect(name).toHaveAttribute("aria-invalid", "true");
+    await user.type(name, "יונתן");
+    expect(name).not.toHaveAttribute("aria-invalid");
+    // The consent question, too, is asked there.
+    await user.click(within(dialog).getByRole("button", { name: "פתיחת התיק" }));
+    expect(within(foot).getByRole("alert")).toHaveTextContent("עוד לא סומנה הסכמת ההורים");
+    expect(within(foot).getByRole("button", { name: "לפתוח בלי הסכמה" })).toBeInTheDocument();
+  });
+
   it("creates the case with what she typed: gender, age, consent, people", async () => {
     const { calls, user, dialog, onCreated } = open((cmd) => (cmd === "create_case" ? "case-7" : null));
     await user.clear(within(dialog).getByLabelText("קוד התיק"));
@@ -192,7 +208,8 @@ describe("NewCaseDialog", () => {
     );
     await user.type(dialog.querySelector("#name-1") as HTMLElement, "דפנה");
     const found = await within(dialog).findByRole("status", {}, { timeout: 3000 });
-    expect(found).toHaveTextContent('"דפנה": אם בתיק תיק-12 (<img src=x onerror=alert(1)>), בסל המחזור');
+    // "בתיק-12", not "בתיק תיק-12".
+    expect(found).toHaveTextContent('"דפנה": אם בתיק-12 (<img src=x onerror=alert(1)>), בסל המחזור');
     expect(dialog.querySelector("img")).toBeNull();
     // One-letter fragments are not looked up; the typed names are.
     const asked = calls.filter((c) => c.cmd === "find_name_matches").at(-1)?.args;

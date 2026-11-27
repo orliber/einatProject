@@ -23,4 +23,14 @@ describe("bug report", () => {
     expect(text).not.toContain("TEST-0042");
     expect(text).not.toContain("Fictional");
   });
+
+  it("the time is the computer's local time as she reads it, and the system is named as she knows it", () => {
+    const at = new Date(2026, 10, 27, 12, 53);
+    const text = bugReportText({ version: "0.9.0", commit: "dev", platform: "windows", keyCheck: null, screen: "הגדרות", failure: null, crashes: [] }, at);
+    const line = text.split("\n").find((l) => l.startsWith("שעה: ")) ?? "";
+    expect(line).toContain("27.11.2026");
+    expect(line).toContain("12:53");
+    expect(line).toContain(at.toISOString());
+    expect(text).toContain("מערכת: Windows");
+  });
 });

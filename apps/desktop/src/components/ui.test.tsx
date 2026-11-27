@@ -119,7 +119,7 @@ describe("ErrorLine", () => {
     await user.click(screen.getByRole("button", { name: "דוח תקלה לאור" }));
     const box = await screen.findByRole("textbox", { name: "תוכן הדוח" });
     const text = (box as HTMLTextAreaElement).value;
-    for (const part of ["0.5.1 (abc123)", "windows", "תיק (לשונית report)", "קוד שגיאה: egress", "401 from provider", "crates/x.rs:3"]) {
+    for (const part of ["0.5.1 (abc123)", "מערכת: Windows", "תיק (לשונית report)", "קוד שגיאה: egress", "401 from provider", "crates/x.rs:3"]) {
       expect(text).toContain(part);
     }
     expect(text).not.toContain("c-secret");
@@ -255,6 +255,17 @@ describe("Dialog", () => {
     expect(dialog).toHaveFocus();
     expect(dialog).toHaveAttribute("aria-modal", "true");
     expect(await a11yViolations(document.body)).toEqual([]);
+  });
+
+  it("the page behind stays put while a dialog is open, until the last one closes (UID-7)", () => {
+    const html = document.documentElement;
+    const outer = render(<Dialog title="חלון ראשון" onClose={vi.fn()}><p>תוכן בדוי</p></Dialog>);
+    expect(html).toHaveClass("dialog-open");
+    const inner = render(<Dialog title="חלון שני" onClose={vi.fn()}><p>תוכן בדוי</p></Dialog>);
+    inner.unmount();
+    expect(html).toHaveClass("dialog-open");
+    outer.unmount();
+    expect(html).not.toHaveClass("dialog-open");
   });
 
   it("a field marked autoFocus inside keeps the focus, so she can type at once (regression)", async () => {

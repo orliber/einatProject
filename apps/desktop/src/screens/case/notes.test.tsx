@@ -158,6 +158,7 @@ describe("notes on the report page (D-161)", () => {
     });
     const contents = await screen.findByRole("complementary", { name: "תוכן הדוח" });
     await user.click(await within(contents).findByRole("button", { name: /לאשר את כל הטיוטות \(2\)/ }));
+    await user.click(within(await screen.findByRole("group", { name: "לאשר את כל הטיוטות?" })).getByRole("button", { name: "כן, לאשר" }));
     const sent = calls.find((c) => c.cmd === "approve_clean_paragraphs");
     // Only the clean ones are offered; the core decides again anyway.
     expect(sent?.args.draftIds).toEqual(["parents_view-0", "kindergarten-0"]);

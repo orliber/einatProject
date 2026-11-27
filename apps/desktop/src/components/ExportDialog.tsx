@@ -1,11 +1,14 @@
 import { useEffect, useState } from "react";
-import { useApp } from "../App";
+import { useApp, type Route } from "../App";
 import { useShownName } from "../discreet";
 import { ipc, type ExportCheck } from "../ipc/client";
 import type { CaseApi } from "../screens/CaseScreen";
 import { Switch } from "./Switch";
 import { Dialog, ErrorLine, Spinner } from "./ui";
 import { timed, WaitLine } from "./Progress";
+import { editRoute, editSectionTitle, openEdits } from "./Unsaved";
+import { useKeptValue } from "../kept";
+import { leftNotesKey, scoreNotesOpen } from "../screens/case/FinishView";
 import "./ExportDialog.css";
 
 /** "דוח אבחון X.docx" → "דוח אבחון X - להורים.docx", as the core names the parents' file. */
@@ -18,6 +21,15 @@ export function parentsFileName(name: string): string {
 export function shownFileName(name: string, pdf: boolean): string {
   const dot = name.lastIndexOf(".");
   return pdf ? `${dot < 0 ? name : name.slice(0, dot)}.pdf` : name;
+}
+
+/** The file name in a right-to-left line: the name and its extension each isolated, so the
+ *  extension stays at the end ("תיק-1024.pdf", never "תיק-pdf.1024"). */
+function FileName({ name }: { name: string }) {
+  const dot = name.lastIndexOf(".");
+  const stem = dot < 0 ? name : name.slice(0, dot);
+  const ext = dot < 0 ? "" : name.slice(dot);
+  return <span className="export-file-name"><bdi>{stem}</bdi>{ext && <bdi dir="ltr">{ext}</bdi>}</span>;
 }
 
 /** The report, or with `letter` the short letter (EX-4), into the downloads folder. The files
@@ -35,7 +47,14 @@ export function ExportDialog({ api, onClose, letter }: { api: CaseApi; onClose: 
   const [numbers, setNumbers] = useState(false);
   const [opening, setOpening] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [saved, setSaved] = useState<string | null>(null);
+  /** The file made, with what it is: what was chosen when she pressed, not what is chosen now. */
+  const [saved, setSaved] = useState<{ path: string; parents: boolean } | null>(null);
+  /** A PDF with "[חסר: …]" left in: she said once that it goes out so. */
+  const [pdfMarksOk, setPdfMarksOk] = useState(false);
+  const [askPdfMarks, setAskPdfMarks] = useState(false);
+  // A paragraph editor of the report open with her text not saved: the file waits for it.
+  const [unsaved] = useState(() => (letter ? [] : openEdits(api.caseId)));
+  const leftKeys = useKeptValue<string[]>(leftNotesKey(api.caseId)) ?? [];
   const [error, setError] = useState<string | null>(null);
 
   // The check runs when the dialog opens, and again from "לנסות שוב" when it failed: the
@@ -59,12 +78,23 @@ export function ExportDialog({ api, onClose, letter }: { api: CaseApi; onClose: 
     ipc.reportSettings().then((s) => setOpening(s.parents_opening)).catch(() => setOpening(null));
   }, [letter]);
 
-  async function run() {
+  /** `confirmed`: she answered "כן" to the PDF with marks left in it. */
+  async function run(confirmed = false) {
+    if (busy) return;
+    // A PDF cannot be completed afterwards: asked once before it goes with the marks in it.
+    if (!letter && pdf && (check?.to_complete.length ?? 0) > 0 && !pdfMarksOk && !confirmed) {
+      setAskPdfMarks(true);
+      return;
+    }
+    if (confirmed) setPdfMarksOk(true);
+    setAskPdfMarks(false);
     setBusy(true);
     setError(null);
+    const forThem = parents && !letter;
     try {
       const version = parents ? { show_numbers: numbers } : null;
-      setSaved(await timed("export", letter ? ipc.exportLetter(api.caseId, letter, null) : pdf ? ipc.exportPdf(api.caseId, null, version) : ipc.exportReport(api.caseId, null, version), exportKind));
+      const path = await timed("export", letter ? ipc.exportLetter(api.caseId, letter, null) : pdf ? ipc.exportPdf(api.caseId, null, version) : ipc.exportReport(api.caseId, null, version), exportKind);
+      setSaved({ path, parents: forThem });
     } catch (e) {
       setError(fail(e as never));
     } finally {
@@ -72,30 +102,39 @@ export function ExportDialog({ api, onClose, letter }: { api: CaseApi; onClose: 
     }
   }
 
-  const blocked = !letter && (check?.blocking.length ?? 0) > 0;
+  const blocked = !letter && ((check?.blocking.length ?? 0) > 0 || unsaved.length > 0);
   const forParents = parents && !letter;
+  const scoreSections = letter ? [] : scoreNotesOpen(api.detail.sections, leftKeys);
+  const firstUnsaved = unsaved.map(editSectionTitle).find((t) => t !== null);
+  const unsavedKey = firstUnsaved ? api.detail.sections.find((s) => s.title === firstUnsaved)?.key : undefined;
+  // Back to the editor itself: the report page on its section, or the section's page when it is
+  // open there (a section's key alone opens that page, not the report's editor).
+  const backTo: Route = unsavedKey ? editRoute(api.caseId, unsavedKey)
+    : { name: "case", id: api.caseId, view: unsaved.length > 0 ? "finish" : api.detail.sections[0]?.key ?? "materials" };
   const child = api.detail.identities.find((i) => i.role === "child")?.value;
 
   if (saved) {
     return (
-      <Dialog narrow title={letter ? "המכתב מוכן" : forParents ? "הגרסה להורים מוכנה" : "הדוח מוכן"} onClose={onClose}
+      <Dialog narrow title={letter ? "המכתב מוכן" : saved.parents ? "הגרסה להורים מוכנה" : "הדוח מוכן"} onClose={onClose}
         footer={<><span className="grow" /><button type="button" className="btn btn-primary" onClick={onClose}>סגירה</button></>}>
         <div className="stack">
           <p>הקובץ נשמר:</p>
-          <p className="saved-path" dir="ltr">{saved}</p>
+          <p className="saved-path" dir="ltr">{saved.path}</p>
         </div>
       </Dialog>
     );
   }
 
   return (
-    <Dialog help="export" title={letter ? "הפקת מכתב Word" : pdf ? "הפקת דוח PDF" : "הפקת דוח Word"} subtitle={`${api.detail.meta.code}${child ? ` · ${shown(child)}` : ""} · רק פסקאות שאישרת נכנסות ל${letter ? "מכתב" : "דוח"}`} onClose={onClose}
+    <Dialog help="export" title={letter ? "הפקת מכתב Word" : pdf ? "הפקת דוח PDF" : "הפקת דוח Word"} subtitle={`${api.detail.meta.code}${child ? ` · ${shown(child)}` : ""} · רק פסקאות שאישרת נכנסות ל${letter ? "מכתב" : "דוח"}`}
+      // While the file is being made the window stays: it says when it is ready, and where.
+      {...(busy ? {} : { onClose })}
       footer={
         <>
           <span className="grow" />
-          <button type="button" className="btn" onClick={onClose}>ביטול</button>
-          <button type="button" className="btn btn-primary" disabled={!check || blocked || busy} onClick={() => void run()}>
-            {busy ? <><Spinner /> מפיקה…</> : letter ? "הפקת המכתב" : forParents ? "הפקת הגרסה להורים" : "הפקת הדוח"}
+          <button type="button" className="btn" disabled={busy} onClick={onClose}>ביטול</button>
+          <button type="button" className="btn btn-primary" disabled={!check || blocked || busy} onClick={() => void run(askPdfMarks)}>
+            {busy ? <><Spinner /> בהפקה…</> : askPdfMarks ? "כן, להפיק PDF עם הסימונים" : letter ? "הפקת המכתב" : forParents ? "הפקת הגרסה להורים" : "הפקת הדוח"}
           </button>
         </>
       }>
@@ -103,14 +142,14 @@ export function ExportDialog({ api, onClose, letter }: { api: CaseApi; onClose: 
         <div className="stack grow">
           {!letter && (
             <div className="row" role="radiogroup" aria-label="איזה דוח">
-              <label className="row small"><input type="radio" name="version" checked={!parents} onChange={() => setParents(false)} /> הדוח המלא</label>
-              <label className="row small"><input type="radio" name="version" checked={parents} onChange={() => setParents(true)} /> גרסה להורים</label>
+              <label className="row small"><input type="radio" name="version" checked={!parents} disabled={busy} onChange={() => setParents(false)} /> הדוח המלא</label>
+              <label className="row small"><input type="radio" name="version" checked={parents} disabled={busy} onChange={() => setParents(true)} /> גרסה להורים</label>
             </div>
           )}
           {forParents && (
             <div className="parents-version stack">
               <span className="small">אותם סעיפים מאושרים, בלי טבלאות הציונים. במקומן טבלה פשוטה: חזק / בטווח הגיל / קשה יותר, מחושבת מהציונים. נבנית במחשב הזה, שום דבר לא נשלח.</span>
-              <Switch id="parents-numbers" label="להציג ציונים בגרסה להורים" checked={numbers} onChange={setNumbers}
+              <Switch id="parents-numbers" label="להציג ציונים בגרסה להורים" checked={numbers} disabled={busy} onChange={setNumbers}
                 hint={numbers ? "הציונים יופיעו בטבלה ובטקסט." : "בלי ציונים: משפט עם ציון יוצא מהגרסה להורים."} />
               {opening !== null && (
                 <p className="small">
@@ -120,11 +159,26 @@ export function ExportDialog({ api, onClose, letter }: { api: CaseApi; onClose: 
               )}
             </div>
           )}
-          {!check && !checkError && <WaitLine task="check" label="בודקת את הדוח" />}
+          {!check && !checkError && <WaitLine task="check" label="בדיקת הדוח" />}
           {!check && <ErrorLine error={checkError} retry={() => { setCheckError(null); setCheckRun((n) => n + 1); }} />}
-          {busy && <WaitLine key={exportKind} task="export" speed={exportKind} label={letter ? "מפיקה את המכתב" : pdf ? "מפיקה את ה-PDF" : "מפיקה את קובץ ה-Word"} />}
+          {busy && <WaitLine key={exportKind} task="export" speed={exportKind} label={letter ? "הפקת המכתב" : pdf ? "הפקת ה-PDF" : "הפקת קובץ ה-Word"} />}
           {check && !letter && (
             <ul className="checklist">
+              {unsaved.map((e) => {
+                const title = editSectionTitle(e);
+                return (
+                  <li key={e.place} className="bad">
+                    <span aria-hidden="true">!</span>
+                    <span>{title ? `יש עריכה שלא נשמרה בסעיף "${title}". שומרים או מבטלים אותה, ואז מפיקים.` : "יש תיקון שלא נשמר בשלב הסיום. שומרים או מבטלים אותו, ואז מפיקים."}</span>
+                  </li>
+                );
+              })}
+              {scoreSections.length > 0 && (
+                <li className="warn">
+                  <span aria-hidden="true">!</span>
+                  <span>מספר שלא תואם את טבלת הציונים: {scoreSections.join(" · ")}. כדאי לבדוק לפני ההפקה.</span>
+                </li>
+              )}
               <li className={check.included_sections > 0 ? "ok" : "bad"}>
                 <span aria-hidden="true">{check.included_sections > 0 ? "✓" : "!"}</span>
                 <span>{check.included_sections} סעיפים עם פסקאות מאושרות</span>
@@ -149,7 +203,7 @@ export function ExportDialog({ api, onClose, letter }: { api: CaseApi; onClose: 
                   <span>{check.score_tables === 1 ? "טבלת הציונים תצורף כנספח" : `${check.score_tables} טבלאות ציונים יצורפו כנספח`}</span>
                 </li>
               )}
-              {!blocked ? (
+              {check.blocking.length === 0 ? (
                 check.to_complete.length > 0 ? (
                   // The file goes out with these marks in it as they are: say so, not the opposite.
                   <li className="warn">
@@ -179,18 +233,24 @@ export function ExportDialog({ api, onClose, letter }: { api: CaseApi; onClose: 
 
           {!letter && (
             <div className="row" role="radiogroup" aria-label="סוג הקובץ">
-              <label className="row small"><input type="radio" checked={!pdf} onChange={() => setPdf(false)} /> Word (אפשר להמשיך לערוך)</label>
-              <label className="row small"><input type="radio" checked={pdf} onChange={() => setPdf(true)} /> PDF להדפסה בלבד (אי אפשר לשנות)</label>
+              <label className="row small"><input type="radio" name="file-type" checked={!pdf} disabled={busy} onChange={() => { setPdf(false); setAskPdfMarks(false); }} /> Word (אפשר להמשיך לערוך)</label>
+              <label className="row small"><input type="radio" name="file-type" checked={pdf} disabled={busy} onChange={() => setPdf(true)} /> PDF להדפסה בלבד (אי אפשר לשנות)</label>
             </div>
           )}
           {pdf && !letter && <span className="small muted">את ה-PDF אי אפשר לשנות. בהגדרות אפשר לבדוק אם עותק הוא המקורי.</span>}
+          {pdf && !letter && check && check.to_complete.length > 0 && (
+            <p className={askPdfMarks ? "small warn-text" : "small"} role={askPdfMarks ? "alert" : undefined}>
+              ב-PDF אי אפשר להשלים אחר כך: {check.to_complete.length === 1 ? "הסימון [חסר: …] יישאר בקובץ" : "הסימונים [חסר: …] יישארו בקובץ"} כמו שהוא.
+              {askPdfMarks && " להפיק בכל זאת?"}
+            </p>
+          )}
           {/* D-081: the file goes out without a password, and she is told so. */}
           <span className="small muted">הקובץ נפתח בלי סיסמה: כל מי שיקבל אותו יוכל לקרוא אותו.</span>
           {check && !letter && (
-            <p className="small"><b>שם הקובץ:</b> <span className="export-file-name">{shownFileName(forParents ? parentsFileName(check.file_name) : check.file_name, pdf)}</span> <span className="muted">(בלי שם הילד)</span></p>
+            <p className="small"><b>שם הקובץ:</b> <FileName name={shownFileName(forParents ? parentsFileName(check.file_name) : check.file_name, pdf)} /> <span className="muted">(בלי שם הילד)</span></p>
           )}
           {blocked && (
-            <button type="button" className="btn btn-small align-start" onClick={() => { onClose(); go({ name: "case", id: api.caseId, view: api.detail.sections[0]?.key ?? "materials" }); }}>לסעיפים</button>
+            <button type="button" className="btn btn-small align-start" onClick={() => { onClose(); go(backTo); }}>{unsaved.length > 0 ? "חזרה לעריכה" : "לסעיפים"}</button>
           )}
           <ErrorLine error={error} />
         </div>

@@ -118,6 +118,20 @@ describe("the daily check and the chip", () => {
     vi.resetModules();
   });
 
+  it("a version remembered for more than a day is asked about again, and the chip names the newer one (OPS-9)", async () => {
+    localStorage.setItem("dv.updateFound", JSON.stringify(UPDATE));
+    localStorage.setItem("dv.updateCheckedAt", String(Date.now() - 3 * 86_400_000));
+    const fresh = await freshModule();
+    const newer: UpdateView = { ...UPDATE, version: "0.9.4", notes: ["שינוי בדוי שלישי"] };
+    const { calls, user } = await show(<fresh.UpdateChip />, (cmd) => (cmd === "check_update" ? newer : cmd === "ping" ? { ipc_version: 1, core_version: "0.9.2", build_commit: "t", fips_active: false, platform: "windows", slowest_key_check_ms: 0, key_check_wait_ms: 0 } : undefined));
+    await waitFor(() => expect(calls.some((c) => c.cmd === "check_update")).toBe(true));
+    await waitFor(() => expect(JSON.parse(localStorage.getItem("dv.updateFound") ?? "null")?.version).toBe("0.9.4"));
+    await user.click(await screen.findByRole("button", { name: /גרסה חדשה/ }));
+    const dialog = await screen.findByRole("dialog", { name: "גרסה 0.9.4 מוכנה" });
+    expect(dialog).toHaveTextContent("שינוי בדוי שלישי");
+    vi.resetModules();
+  });
+
   it("a remembered version that is already running (after the install) is forgotten (regression)", async () => {
     localStorage.setItem("dv.updateFound", JSON.stringify(UPDATE));
     localStorage.setItem("dv.updateCheckedAt", String(Date.now()));

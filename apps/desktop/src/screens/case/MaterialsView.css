@@ -180,9 +180,6 @@
   gap: 10px;
   flex-wrap: wrap;
 }
-.material-head h2 {
-  font-size: var(--text-xl);
-}
 .material-text {
   flex-grow: 1;
   overflow: auto;
@@ -236,7 +233,7 @@
 .sections-pick {
   display: grid;
   gap: 14px;
-  max-height: 52vh;
+  max-height: calc(52vh / var(--zoom, 1));
   overflow-y: auto;
 }
 .sections-part {
@@ -364,4 +361,17 @@
 .materials-ai {
   align-items: center;
   gap: 8px;
+}
+
+/* The "נשמר בתיק" band and the lines of a batch sit inside the page's margins, under its head. */
+.view > .note-sand {
+  margin: 12px 24px 0;
+}
+/* A section a material cannot feed (a previous report feeds only its own): visibly not a choice. */
+.sections-pick .check-row:has(input:disabled) {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.sections-pick .check-row input:disabled {
+  cursor: not-allowed;
 }

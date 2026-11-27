@@ -23,11 +23,27 @@ export interface MenuItem {
  * gone by then, and the focus would fall to the page (WCAG 2.4.3). The focus leaving the menu
  * closes it, before the item runs. Nowhere to go back to: the item just runs.
  */
-function backTo(back: RefObject<HTMLElement | null>, run: () => void): () => void {
+function backTo(back: RefObject<HTMLElement | null>, run: () => void, picked: RefObject<boolean>): () => void {
   return () => {
+    picked.current = true;
     back.current?.focus();
     run();
   };
+}
+
+/**
+ * After a chosen item the focus is where `backTo` put it, or in the dialog the item opened (its
+ * field with autoFocus): the menu's own return of the focus, which Radix runs a moment after it
+ * closes, must not take it from there (UID-5). Escape and a click outside still return it as
+ * Radix does. One per menu, passed to its Content and its Items.
+ */
+function usePicked() {
+  const picked = useRef(false);
+  const onCloseAutoFocus = useCallback((e: Event) => {
+    if (picked.current) e.preventDefault();
+    picked.current = false;
+  }, []);
+  return { picked, onCloseAutoFocus };
 }
 
 /** What can take the focus: a control, or an element with a tabindex of its own. */
@@ -59,6 +75,7 @@ function rowIn(list: Element, target: Element): Element {
 export function ActionsMenu({ items, label, buttonRef }: { items: MenuItem[]; label: string; buttonRef?: RefObject<HTMLButtonElement | null> }) {
   const [armed, setArmed] = useState(false);
   const own = useRef<HTMLButtonElement | null>(null);
+  const { picked, onCloseAutoFocus } = usePicked();
   // The same ref follows the plain button and the menu's own, which takes its place once armed.
   const ref = useCallback((el: HTMLButtonElement | null) => {
     own.current = el;
@@ -76,8 +93,8 @@ export function ActionsMenu({ items, label, buttonRef }: { items: MenuItem[]; la
     <DropdownMenu.Root dir="rtl" modal={false} defaultOpen>
       <DropdownMenu.Trigger asChild>{button(false)}</DropdownMenu.Trigger>
       <DropdownMenu.Portal>
-        <DropdownMenu.Content className="menu" align="end" sideOffset={4} onClick={(e) => e.stopPropagation()}>
-          <Items items={items} Item={DropdownMenu.Item} back={own} />
+        <DropdownMenu.Content className="menu" align="end" sideOffset={4} onClick={(e) => e.stopPropagation()} onCloseAutoFocus={onCloseAutoFocus}>
+          <Items items={items} Item={DropdownMenu.Item} back={own} picked={picked} />
         </DropdownMenu.Content>
       </DropdownMenu.Portal>
     </DropdownMenu.Root>
@@ -86,16 +103,17 @@ export function ActionsMenu({ items, label, buttonRef }: { items: MenuItem[]; la
 
 /** The items of a menu. A chosen item gives the focus back to `back` (the menu's button, or the
  *  element of the row a right-click menu was opened on) before it runs (`backTo`). */
-function Items({ items, Item, back }: {
+function Items({ items, Item, back, picked }: {
   items: MenuItem[];
   Item: typeof DropdownMenu.Item | typeof ContextMenu.Item;
   back: RefObject<HTMLElement | null>;
+  picked: RefObject<boolean>;
 }) {
   return (
     <>
       {items.map((it) => (
         <Item key={it.label} className={it.danger ? "menu-item danger" : "menu-item"} disabled={it.disabled ?? false}
-          onSelect={backTo(back, it.run)}>
+          onSelect={backTo(back, it.run, picked)}>
           {it.label}
         </Item>
       ))}
@@ -106,14 +124,15 @@ function Items({ items, Item, back }: {
 /** A small "+" (or any trigger) that opens a list of ways to add something. */
 export function AddMenu({ items, label, children, className }: { items: MenuItem[]; label: string; children: ReactNode; className?: string }) {
   const own = useRef<HTMLButtonElement | null>(null);
+  const { picked, onCloseAutoFocus } = usePicked();
   return (
     <DropdownMenu.Root dir="rtl" modal={false}>
       <DropdownMenu.Trigger asChild>
         <button ref={own} type="button" className={className} aria-label={label} title={label}>{children}</button>
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
-        <DropdownMenu.Content className="menu" align="end" sideOffset={4}>
-          <Items items={items} Item={DropdownMenu.Item} back={own} />
+        <DropdownMenu.Content className="menu" align="end" sideOffset={4} onCloseAutoFocus={onCloseAutoFocus}>
+          <Items items={items} Item={DropdownMenu.Item} back={own} picked={picked} />
         </DropdownMenu.Content>
       </DropdownMenu.Portal>
     </DropdownMenu.Root>
@@ -123,6 +142,7 @@ export function AddMenu({ items, label, children, className }: { items: MenuItem
 /** The same actions on right click over `children` (one row: a folder in the tree). */
 export function RightClick({ items, children }: { items: MenuItem[]; children: ReactNode }) {
   const back = useRef<HTMLElement | null>(null);
+  const { picked, onCloseAutoFocus } = usePicked();
   // Runs before Radix opens the menu, while the focus is still where she was.
   const mark = (e: MouseEvent | PointerEvent) => {
     back.current = backOf(e.currentTarget);
@@ -131,8 +151,8 @@ export function RightClick({ items, children }: { items: MenuItem[]; children: R
     <ContextMenu.Root dir="rtl" modal={false}>
       <ContextMenu.Trigger asChild onContextMenu={mark} onPointerDown={(e) => { if (e.pointerType !== "mouse") mark(e); }}>{children}</ContextMenu.Trigger>
       <ContextMenu.Portal>
-        <ContextMenu.Content className="menu">
-          <Items items={items} Item={ContextMenu.Item} back={back} />
+        <ContextMenu.Content className="menu" onCloseAutoFocus={onCloseAutoFocus}>
+          <Items items={items} Item={ContextMenu.Item} back={back} picked={picked} />
         </ContextMenu.Content>
       </ContextMenu.Portal>
     </ContextMenu.Root>
@@ -144,6 +164,7 @@ export function RightClick({ items, children }: { items: MenuItem[]; children: R
 export function RightClickArea({ itemsAt, children }: { itemsAt: (target: Element) => MenuItem[] | null; children: ReactElement }) {
   const [items, setItems] = useState<MenuItem[]>([]);
   const back = useRef<HTMLElement | null>(null);
+  const { picked, onCloseAutoFocus } = usePicked();
   // Runs before Radix's own handlers (right click, and a long press on touch), which skip
   // opening when the default is prevented.
   const pick = (e: MouseEvent | PointerEvent) => {
@@ -160,8 +181,8 @@ export function RightClickArea({ itemsAt, children }: { itemsAt: (target: Elemen
     <ContextMenu.Root dir="rtl" modal={false}>
       <ContextMenu.Trigger asChild onContextMenu={pick} onPointerDown={(e) => { if (e.pointerType !== "mouse") pick(e); }}>{children}</ContextMenu.Trigger>
       <ContextMenu.Portal>
-        <ContextMenu.Content className="menu">
-          <Items items={items} Item={ContextMenu.Item} back={back} />
+        <ContextMenu.Content className="menu" onCloseAutoFocus={onCloseAutoFocus}>
+          <Items items={items} Item={ContextMenu.Item} back={back} picked={picked} />
         </ContextMenu.Content>
       </ContextMenu.Portal>
     </ContextMenu.Root>

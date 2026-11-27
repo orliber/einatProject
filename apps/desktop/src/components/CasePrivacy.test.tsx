@@ -49,6 +49,10 @@ describe("CasePrivacyCard", () => {
     expect(screen.getByText("רינת")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "להחזיר את חן" }));
+    // Asked once first: the name would go out as written in the whole case.
+    expect(screen.getByRole("group", { name: "להחזיר את חן?" })).toHaveTextContent('"חן" יישלח ל-Claude כמו שהוא, בכל התיק הזה.');
+    expect(calls.some((c) => c[0] === "restore_auto_hidden")).toBe(false);
+    await user.click(screen.getByRole("button", { name: "כן, להחזיר את חן" }));
     expect(calls).toContainEqual(["restore_auto_hidden", { caseId: "c1", token: "חן", tag: "[גננת_3]" }]);
     expect(changed).toHaveBeenLastCalledWith(now);
 
