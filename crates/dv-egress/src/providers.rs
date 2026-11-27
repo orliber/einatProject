@@ -1016,7 +1016,15 @@ mod tests {
         let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let url = format!("http://{}/api/chat", closed.local_addr().unwrap());
         drop(closed);
-        let e = client.post(&url).body("{}").send().unwrap_err();
+        // Windows retries a refused connection for about two seconds before giving up, so
+        // this client waits longer than that: the answer must be "refused", not a timeout.
+        let patient = reqwest::blocking::Client::builder()
+            .use_preconfigured_tls(crate::tls_config())
+            .no_proxy()
+            .timeout(Duration::from_secs(30))
+            .build()
+            .unwrap();
+        let e = patient.post(&url).body("{}").send().unwrap_err();
         assert_eq!(local_send_error(&e), EgressError::LocalUnavailable);
     }
 
