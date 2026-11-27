@@ -156,6 +156,12 @@ export function App() {
     let stop: (() => void) | null = null;
     void onCoreEvent((e) => {
       if (!alive) return;
+      // The window's ×: what she was typing reaches the core, and the lock that follows
+      // closes the program (D-218). The core does not wait long for it.
+      if (e.kind === "closing") {
+        void holdNow().then(() => ipc.lock()).catch(() => undefined);
+        return;
+      }
       if (e.kind === "idle_soon") setIdleIn(e.seconds);
       // A backup made on its own: the reminder and the settings read the backup again.
       if (e.kind === "backed_up") {

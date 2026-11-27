@@ -1,6 +1,6 @@
 // The optional name model (D-053): off by default. Turning it on downloads it once to this
 // computer; from then on every material is also read by it, here, to find names no rule knows.
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useApp } from "../App";
 import { ipc } from "../ipc/client";
@@ -14,24 +14,44 @@ export function NameModelSettings() {
   const qc = useQueryClient();
   const status = useQuery({ queryKey: ["name-model"], queryFn: ipc.nameModelStatus });
   const [downloading, setDownloading] = useState(false);
+  /** This page started the download and waits for its answer (else it only watches one). */
+  const mine = useRef(false);
   /** The share that came and about how long is left, by the download's own pace. */
   const [pace, setPace] = useState("");
   const [error, setError] = useState<string | null>(null);
+
+  // A download started before she left this page (or before it reloaded) is still running:
+  // show it, and keep the switch off, so a second click does not start another (UIA-5).
+  useEffect(() => {
+    let alive = true;
+    ipc.nameModelProgress().then((p) => alive && p !== null && setDownloading(true)).catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (!downloading) return;
     const started = Date.now();
     const id = window.setInterval(() => {
-      ipc.nameModelProgress().then((p) => setPace(p ? byPace(started, Date.now(), p[0], p[1]) : "")).catch(() => undefined);
+      ipc.nameModelProgress().then((p) => {
+        setPace(p ? byPace(started, Date.now(), p[0], p[1]) : "");
+        // Ended while this page was not the one that started it: read the result.
+        if (p === null && !mine.current) {
+          setDownloading(false);
+          void qc.invalidateQueries({ queryKey: ["name-model"] });
+        }
+      }).catch(() => undefined);
     }, 1000);
     return () => window.clearInterval(id);
-  }, [downloading]);
+  }, [downloading, qc]);
 
   async function change(on: boolean) {
     setError(null);
     try {
       if (on && !status.data?.downloaded) {
         setDownloading(true);
+        mine.current = true;
         await ipc.downloadNameModel();
       } else {
         await ipc.setNameModel(on);
@@ -40,6 +60,7 @@ export function NameModelSettings() {
     } catch (e) {
       setError(fail(e as never));
     } finally {
+      mine.current = false;
       setDownloading(false);
       setPace("");
       await qc.invalidateQueries({ queryKey: ["name-model"] });

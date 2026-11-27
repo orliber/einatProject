@@ -102,6 +102,9 @@ fn describe(
         "lock" if text("reason") == "computer_locked" => {
             ("access", "נעילה (המחשב ננעל)".to_owned(), false)
         }
+        "lock" if text("reason") == "app_closed" => {
+            ("access", "נעילה (התוכנה נסגרה)".to_owned(), false)
+        }
         "lock" => ("access", "נעילה".to_owned(), false),
         "password_changed" => ("security", "הסיסמה הוחלפה".to_owned(), false),
         "recovery_key_rotated" => ("security", "ערכת השחזור הוחלפה".to_owned(), false),

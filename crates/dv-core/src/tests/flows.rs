@@ -986,6 +986,29 @@ fn readiness_follows_what_the_program_checks_and_keeps_what_she_confirmed() {
 // ------------------------------------------------------------ unsaved typing
 
 #[test]
+fn closing_the_program_keeps_what_she_was_typing_and_logs_the_lock() {
+    let (_dir, mut core, case) = setup(None);
+    let typed = vec![crate::UnsavedEdit {
+        case_id: case.clone(),
+        place: "פסקה בסעיף רקע".into(),
+        view: "report".into(),
+        text: "טקסט שנכתב רגע לפני שהחלון נסגר".into(),
+    }];
+    core.hold_unsaved(typed.clone());
+    assert!(core.lock_on_close());
+    assert!(!core.is_unlocked());
+    // Closing again (the exit after the window's own close) does nothing more.
+    assert!(!core.lock_on_close());
+    core.unlock(PASSWORD).unwrap();
+    assert_eq!(core.take_unsaved().unwrap(), typed);
+    let log = core.activity(None).unwrap();
+    assert!(
+        log.entries.iter().any(|e| e.text == "נעילה (התוכנה נסגרה)"),
+        "the log says the program closed"
+    );
+}
+
+#[test]
 fn every_open_editor_is_kept_at_the_lock_not_only_the_last_one() {
     let (_dir, mut core, case) = setup(None);
     let edit = |case_id: &str, place: &str, text: &str| crate::UnsavedEdit {

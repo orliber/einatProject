@@ -179,6 +179,26 @@ describe("App", () => {
     expect(await screen.findByLabelText("סיסמה")).toBeInTheDocument();
   });
 
+  it("closing the window hands over what is typed and then locks (D-218)", async () => {
+    const calls: string[] = [];
+    mockIPC(
+      (cmd) => {
+        calls.push(cmd);
+        if (cmd === "app_status") return status({ unlocked: true });
+        if (cmd === "list_cases") return [];
+        if (cmd === "ping") return { ipc_version: 1, core_version: "0.1.0", build_commit: "t", fips_active: false, platform: "linux" };
+        return null;
+      },
+      { shouldMockEvents: true },
+    );
+    render(<App />);
+    expect(await screen.findByRole("heading", { name: "התיק הראשון" })).toBeInTheDocument();
+    await act(async () => {
+      await emit("core", { kind: "closing" });
+    });
+    await vi.waitFor(() => expect(calls).toContain("lock"));
+  });
+
   it("when events cannot reach the window, a lock still shows within 15 seconds (D-060)", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     let unlocked = true;

@@ -273,6 +273,17 @@ impl Core {
         true
     }
 
+    /// The program is closing (the window's ×, Alt+F4, ⌘Q, Windows shutting down): the vault
+    /// locks as it does by hand, so what she was typing is kept in it and offered back at the
+    /// next opening, and the log shows why it locked (D-218). False when it was not open.
+    pub fn lock_on_close(&mut self) -> bool {
+        if self.vault.is_none() {
+            return false;
+        }
+        self.lock_because(Some("app_closed"));
+        true
+    }
+
     #[must_use]
     pub fn is_unlocked(&self) -> bool {
         self.vault.is_some()
