@@ -229,11 +229,18 @@ fn cell(
         .map(|f| format!("<w:shd w:val=\"clear\" w:color=\"auto\" w:fill=\"{f}\"/>"))
         .unwrap_or_default();
     let b = if bold { "<w:b/><w:bCs/>" } else { "" };
+    // "<0.1", ">99.9": a right-to-left run would give the sign the paragraph's direction and
+    // draw it mirrored on the number's right ("0.1>"); a plain run keeps it on the left.
+    let rtl = if compared_number(text) {
+        ""
+    } else {
+        "<w:rtl/>"
+    };
     let run = if text.is_empty() {
         String::new()
     } else {
         format!(
-            "<w:r><w:rPr>{b}<w:rtl/></w:rPr><w:t xml:space=\"preserve\">{}</w:t></w:r>",
+            "<w:r><w:rPr>{b}{rtl}</w:rPr><w:t xml:space=\"preserve\">{}</w:t></w:r>",
             esc(text)
         )
     };
@@ -313,6 +320,21 @@ pub(crate) fn bar_end(value: f64, min: f64, hi: f64) -> f64 {
     }
 }
 
+/// A cell that is only a number after a comparison sign ("<0.1", "> 99.9", "±3").
+fn compared_number(text: &str) -> bool {
+    let mut chars = text.trim().chars();
+    chars
+        .next()
+        .is_some_and(|c| matches!(c, '<' | '>' | '≤' | '≥' | '±' | '~'))
+        && {
+            let rest = chars.as_str().trim_start();
+            rest.starts_with(|c: char| c.is_ascii_digit())
+                && rest
+                    .chars()
+                    .all(|c| c.is_ascii_digit() || matches!(c, '.' | ',' | '%'))
+        }
+}
+
 /// Bars of table cells on a fixed axis: a label and the score, then one cell per `step`,
 /// filled up to the score. The band within one standard deviation of the mean is tinted, and
 /// the header row names the axis in groups of one standard deviation.
@@ -328,7 +350,7 @@ fn chart(c: &ScoreChart, l: &Layout) -> String {
     grid.extend(std::iter::repeat_n(cell_w, cells));
     let width = label_w + score_w + cell_w * cells;
     let start = |i: usize| c.min + step * i as f64;
-    let in_band = |i: usize| start(i) + step > c.mean - c.sd && start(i) < c.mean + c.sd;
+    let in_band = |i: usize| c.in_band(start(i), step);
     let small = l.id("ChartText");
     let text = l.id("TableText");
 
@@ -766,6 +788,41 @@ pub(crate) mod tests {
         assert_eq!(doc.matches("w:fill=\"1F3A5F\"").count(), 15);
         assert_eq!(doc.matches("w:fill=\"EEF3F2\"").count(), 0);
         assert!(doc.contains("<w:gridSpan w:val=\"3\"/>"));
+    }
+
+    /// EXPORT-3: a percentile cell "<0.1" is a left-to-right run, so Word keeps the sign on
+    /// the number's left; a Hebrew cell stays right to left.
+    #[test]
+    fn a_compared_number_cell_is_not_right_to_left() {
+        let lt = cell(1000, 1, None, "TableText", false, "<0.1");
+        assert!(!lt.contains("<w:rtl/>") && lt.contains("&lt;0.1"), "{lt}");
+        assert!(!cell(1000, 1, None, "TableText", false, ">99.9").contains("<w:rtl/>"));
+        assert!(cell(1000, 1, None, "TableText", false, "ממוצע").contains("<w:rtl/>"));
+        assert!(cell(1000, 1, None, "TableText", false, "102").contains("<w:rtl/>"));
+        assert!(cell(1000, 1, None, "TableText", false, "<0.1 נמוך").contains("<w:rtl/>"));
+    }
+
+    /// EXPORT-4: on the scaled profile a cell is one score, so the band is 7 to 13, as the
+    /// note under the chart says ("7–13"), not 7 to 12.
+    #[test]
+    fn scaled_profile_band_covers_seven_to_thirteen() {
+        let mut r = sample();
+        r.tables[0].charts.push(crate::ScoreChart {
+            title: "פרופיל תת-המבחנים".into(),
+            min: 1.0,
+            max: 20.0,
+            step: 1.0,
+            mean: 10.0,
+            sd: 3.0,
+            bars: vec![crate::ChartBar {
+                label: "קוביות".into(),
+                value: 3.0,
+            }],
+            note: "הרקע הבהיר: סטיית תקן אחת סביב הממוצע (7–13).".into(),
+        });
+        let doc = part(&render(&r).unwrap(), "word/document.xml");
+        assert_eq!(doc.matches("w:fill=\"1F3A5F\"").count(), 3);
+        assert_eq!(doc.matches("w:fill=\"EEF3F2\"").count(), 7);
     }
 
     /// The parents' version of the sample: one chart, scores found in the case.

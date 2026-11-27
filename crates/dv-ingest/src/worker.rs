@@ -107,19 +107,19 @@ pub fn run(exe: &Path, file_name: &str, bytes: &[u8], timeout: Duration) -> Work
         return Err(IngestError::Worker("pipes".to_owned()));
     };
 
-    let mut payload = file_name.replace(['\n', '\r'], " ").into_bytes();
+    // The writer needs its own copy (a worker that stops reading must not hold this thread
+    // past the timeout); sized once, so no partial copy is left behind by a reallocation, and
+    // wiped once written, like the file in the job.
+    let name = file_name.replace(['\n', '\r'], " ");
+    let mut payload = Vec::with_capacity(name.len() + 1 + bytes.len());
+    payload.extend_from_slice(name.as_bytes());
     payload.push(b'\n');
     payload.extend_from_slice(bytes);
     let writer = std::thread::spawn(move || {
         let _ = stdin.write_all(&payload);
+        wipe(&mut payload);
     });
-    let reader = std::thread::spawn(move || {
-        let mut buf = Vec::new();
-        (&mut stdout)
-            .take(MAX_OUTPUT_BYTES)
-            .read_to_end(&mut buf)
-            .map(|_| buf)
-    });
+    let reader = std::thread::spawn(move || read_wiped(&mut stdout, MAX_OUTPUT_BYTES));
 
     let status = match child.wait_timeout(timeout) {
         Ok(Some(status)) => status,
@@ -133,18 +133,73 @@ pub fn run(exe: &Path, file_name: &str, bytes: &[u8], timeout: Duration) -> Work
         }
     };
     let _ = writer.join();
-    let output = reader
+    // The worker's answer holds the whole text of the document: wiped once it is parsed.
+    let mut output = reader
         .join()
         .map_err(|_| IngestError::Worker("reader".to_owned()))?
         .map_err(|e| IngestError::Worker(e.to_string()))?;
     if !status.success() {
+        wipe(&mut output);
         // A parser crash on a hostile or broken file ends here, not in the app.
         // `code()` is the process's exit code, on Windows the NTSTATUS (0xC0000135: a library
         // it could not load); none when a signal ended it.
         return Err(exit_error(status.code()));
     }
-    serde_json::from_slice::<WorkerResult>(&output)
-        .map_err(|e| IngestError::Worker(e.to_string()))?
+    let parsed = serde_json::from_slice::<WorkerResult>(&output)
+        .map_err(|e| IngestError::Worker(e.to_string()));
+    wipe(&mut output);
+    parsed?
+}
+
+/// Overwrite all of `buf`, its spare room included, with zeros before it is freed.
+fn wipe(buf: &mut Vec<u8>) {
+    let room = buf.capacity();
+    buf.clear();
+    buf.resize(room, 0);
+    // Keeps the writes from being dropped as dead stores before the free.
+    std::hint::black_box(buf.as_slice());
+    buf.clear();
+}
+
+/// Everything `from` gives, up to `limit` bytes. The buffer grows by hand, so each smaller
+/// buffer it outgrows is wiped before it is freed (no copy of the text is left in the heap).
+fn read_wiped(from: &mut impl Read, limit: u64) -> std::io::Result<Vec<u8>> {
+    let limit = usize::try_from(limit).unwrap_or(usize::MAX);
+    let mut buf: Vec<u8> = Vec::with_capacity(64 * 1024);
+    let mut chunk = [0u8; 64 * 1024];
+    let result = loop {
+        let room = limit.saturating_sub(buf.len()).min(chunk.len());
+        if room == 0 {
+            break Ok(());
+        }
+        let Some(window) = chunk.get_mut(..room) else {
+            break Ok(());
+        };
+        match from.read(window) {
+            Ok(0) => break Ok(()),
+            Ok(n) => {
+                let read = window.get(..n).unwrap_or_default();
+                if buf.len() + n > buf.capacity() {
+                    let mut bigger = Vec::with_capacity((buf.capacity() * 2).max(buf.len() + n));
+                    bigger.extend_from_slice(&buf);
+                    wipe(&mut buf);
+                    buf = bigger;
+                }
+                buf.extend_from_slice(read);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(e) => break Err(e),
+        }
+    };
+    chunk.fill(0);
+    std::hint::black_box(&chunk);
+    match result {
+        Ok(()) => Ok(buf),
+        Err(e) => {
+            wipe(&mut buf);
+            Err(e)
+        }
+    }
 }
 
 /// What a worker that did not end well means. `code` is the process's exit code, on Windows
@@ -165,6 +220,21 @@ fn exit_error(code: Option<i32>) -> IngestError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// INGEST-12: the answer is read whole and up to the limit, and a wiped buffer holds zeros.
+    #[test]
+    fn the_answer_is_read_whole_and_wiped() {
+        let answer: Vec<u8> = (0..300_000u32).map(|i| (i % 251) as u8).collect();
+        let read = read_wiped(&mut answer.as_slice(), MAX_OUTPUT_BYTES).unwrap();
+        assert_eq!(read, answer);
+        let cut = read_wiped(&mut answer.as_slice(), 70_000).unwrap();
+        assert_eq!(cut.as_slice(), answer.get(..70_000).unwrap());
+        let mut buf = answer.clone();
+        buf.reserve(10);
+        let room = buf.capacity();
+        wipe(&mut buf);
+        assert!(buf.is_empty() && buf.capacity() == room);
+    }
 
     #[test]
     fn only_a_reader_that_could_not_start_is_tried_again() {

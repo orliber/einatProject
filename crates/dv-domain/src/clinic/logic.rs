@@ -1275,6 +1275,30 @@ pub fn money(amount: Agorot) -> String {
     money_text(i64::from(amount))
 }
 
+/// Agorot as a message to the family writes them: thousands apart, `1,650`, `12,500.50` (the
+/// ₪ is the caller's). The same as the page shows money (`moneyNumber`).
+#[must_use]
+pub fn money_grouped(amount: Agorot) -> String {
+    let text = money(amount);
+    let (sign, rest) = text
+        .strip_prefix('-')
+        .map_or(("", text.as_str()), |r| ("-", r));
+    let (whole, part) = rest
+        .split_once('.')
+        .map_or((rest, None), |(w, p)| (w, Some(p)));
+    let mut grouped = String::with_capacity(whole.len() + whole.len() / 3);
+    for (i, c) in whole.chars().enumerate() {
+        if i > 0 && (whole.len() - i) % 3 == 0 {
+            grouped.push(',');
+        }
+        grouped.push(c);
+    }
+    match part {
+        Some(p) => format!("{sign}{grouped}.{p}"),
+        None => format!("{sign}{grouped}"),
+    }
+}
+
 /// What the clinic is owed in all: the sum of what each family still owes. A family that
 /// paid ahead does not hide another family's debt.
 pub fn total_due(balances: &[Balance]) -> Result<Agorot, DomainError> {
@@ -2646,7 +2670,7 @@ fn placeholder_value(placeholder: &str, values: &MessageValues) -> String {
         "{תאריך}" => values.date.as_deref().map(display_date).unwrap_or_default(),
         "{שעה}" => values.start.map(display_time).unwrap_or_default(),
         "{מקום}" => clean_line(&values.place),
-        "{סכום}" => values.amount.map(money).unwrap_or_default(),
+        "{סכום}" => values.amount.map(money_grouped).unwrap_or_default(),
         "{שמי}" => clean_line(&values.me),
         _ => String::new(),
     }
@@ -3027,4 +3051,28 @@ pub fn next_visit_day(visits: &[Visit], today: &Today) -> Option<String> {
         .map(|v| v.date.as_str())
         .min()
         .map(str::to_owned)
+}
+
+#[cfg(test)]
+mod grouped_money {
+    use super::{fill_message, money_grouped, MessageValues};
+
+    #[test]
+    fn money_in_a_message_has_its_thousands_apart() {
+        assert_eq!(money_grouped(45_000), "450");
+        assert_eq!(money_grouped(165_000), "1,650");
+        assert_eq!(money_grouped(1_250_050), "12,500.50");
+        assert_eq!(money_grouped(10_000_000), "100,000");
+        assert_eq!(money_grouped(-165_000), "-1,650");
+        assert_eq!(money_grouped(5), "0.05");
+        assert_eq!(money_grouped(i32::MIN), "-21,474,836.48");
+        let values = MessageValues {
+            amount: Some(165_000),
+            ..MessageValues::default()
+        };
+        assert_eq!(
+            fill_message("היתרה לתשלום היא {סכום} ₪.", &values),
+            "היתרה לתשלום היא 1,650 ₪."
+        );
+    }
 }

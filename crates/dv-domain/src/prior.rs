@@ -136,21 +136,46 @@ const MONTHS: &[&str] = &[
     "דצמבר",
 ];
 
-/// The date of a document: the latest date written in it, leaving out lines about a birth
-/// (a report states the child's date of birth; the report itself is the latest). Reads
-/// `14.3.2024`, `14/03/24`, `3/2024` and `מרץ 2024`. `None` when there is none.
+/// The date of a document: the latest date written in it, leaving out the date after a word
+/// about a birth (a report states the child's date of birth; the report itself is the
+/// latest). Reads `14.3.2024`, `14/03/24`, `3/2024`, `מרץ 2024` and `מרס 2024`. `None` when
+/// there is none.
 #[must_use]
 pub fn document_date(text: &str) -> Option<DocDate> {
-    text.lines()
-        .filter(|l| !l.contains("לידה") && !l.contains("נולד"))
-        .flat_map(dates_in_line)
-        .max()
+    text.lines().flat_map(dates_but_birth).max()
 }
 
-fn dates_in_line(line: &str) -> Vec<DocDate> {
+/// The dates of a line, without the first date after each word about a birth: "תאריך לידה:
+/// 03.05.2019   תאריך הבדיקה: 14.3.2024" (a header row read as one line) keeps the exam date.
+fn dates_but_birth(line: &str) -> Vec<DocDate> {
+    let mut dates = dates_in_line(line);
+    dates.sort_by_key(|(at, _)| *at);
+    // Which dates are births, chosen before any is left out: "ילידה" holds both "יליד" and
+    // "לידה", and is still one birth.
+    let births: Vec<usize> = ["לידה", "נולד", "יליד"]
+        .iter()
+        .flat_map(|w| line.match_indices(w).map(|(at, _)| at))
+        .filter_map(|birth| dates.iter().position(|(at, _)| *at > birth))
+        .collect();
+    dates
+        .into_iter()
+        .enumerate()
+        .filter(|(k, _)| !births.contains(k))
+        .filter_map(|(_, (_, d))| d)
+        .collect()
+}
+
+/// Months by another spelling, read but never written ("מרס", the Academy's, and "מארס").
+const OTHER_MONTHS: &[(&str, u8)] = &[("מרס", 3), ("מארס", 3)];
+
+/// The dates in a line, each with the byte where it starts. A run of numbers joined like a
+/// date that is not one of a document's dates ("12/5/85") is there as `None`, so it is still
+/// the date after "יליד".
+fn dates_in_line(line: &str) -> Vec<(usize, Option<DocDate>)> {
     let mut out = Vec::new();
     // Numeric: runs of digits joined by . / or -.
-    let chars: Vec<char> = line.chars().collect();
+    let indexed: Vec<(usize, char)> = line.char_indices().collect();
+    let chars: Vec<char> = indexed.iter().map(|(_, c)| *c).collect();
     let mut i = 0;
     while i < chars.len() {
         if !chars.get(i).is_some_and(char::is_ascii_digit)
@@ -176,25 +201,31 @@ fn dates_in_line(line: &str) -> Vec<DocDate> {
             }
             j += 1;
         }
-        if let Some(d) = numeric_date(&parts) {
-            out.push(d);
+        if parts.len() > 1 {
+            out.push((
+                indexed.get(i).map_or(0, |(at, _)| *at),
+                numeric_date(&parts),
+            ));
         }
         i = j.max(i + 1);
     }
     // A month by name, then a year.
-    for (m, name) in MONTHS.iter().enumerate() {
-        let mut rest = line;
-        while let Some(at) = rest.find(name) {
-            let after = rest.get(at + name.len()..).unwrap_or_default();
+    let named = MONTHS
+        .iter()
+        .zip(1u8..)
+        .map(|(name, m)| (*name, m))
+        .chain(OTHER_MONTHS.iter().copied());
+    for (name, month) in named {
+        for (at, _) in line.match_indices(name) {
+            let after = line.get(at + name.len()..).unwrap_or_default();
             let year: String = after
                 .trim_start_matches([' ', ','])
                 .chars()
                 .take_while(char::is_ascii_digit)
                 .collect();
-            if let (Some(y), Ok(month)) = (full_year(&year, false), u8::try_from(m + 1)) {
-                out.push((y, month));
+            if let Some(y) = full_year(&year, false) {
+                out.push((at, Some((y, month))));
             }
-            rest = after;
         }
     }
     out
@@ -315,6 +346,31 @@ mod tests {
         assert_eq!(document_date("נולד ב-1.1.2020"), None);
         assert_eq!(document_date("בלי תאריך"), None);
         assert_eq!(document_date("קוד 7-1234"), None);
+        // DOMAIN-7: a header row with both dates on one line keeps the exam date.
+        assert_eq!(
+            document_date("תאריך לידה: 03.05.2019   תאריך הבדיקה: 14.3.2024"),
+            Some((2024, 3))
+        );
+        assert_eq!(
+            document_date("תאריך הבדיקה: 14.3.2024 | תאריך לידה: 03.05.2019\nנבדק ב-2/2023"),
+            Some((2024, 3))
+        );
+        assert_eq!(document_date("סיכום מרס 2024"), Some((2024, 3)));
+        assert_eq!(document_date("סיכום מארס 2024"), Some((2024, 3)));
+        assert_eq!(
+            document_date("נולד ב-1.1.2020, נבדק ב-2.2.2020"),
+            Some((2020, 2))
+        );
+        assert_eq!(document_date("תאריך לידה: מרס 2020"), None);
+        // "ילידה" holds "יליד" and "לידה": still one birth date, and the exam date stays.
+        assert_eq!(
+            document_date("ילידה 3.5.2019, נבדקה 14.3.2024"),
+            Some((2024, 3))
+        );
+        assert_eq!(
+            document_date("האם ילידת 3/7/79, נבדק 14.3.2024"),
+            Some((2024, 3))
+        );
     }
 
     #[test]

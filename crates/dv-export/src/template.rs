@@ -519,6 +519,53 @@ fn without_rsids(xml: &str) -> String {
     out
 }
 
+/// A kept XML part of hers that Word stamps with edit-session ids (settings.xml has its own
+/// cleaning).
+fn carries_rsids(name: &str) -> bool {
+    let Some(rest) = name.strip_prefix("word/") else {
+        return false;
+    };
+    !rest.contains('/')
+        && rest.ends_with(".xml")
+        && (rest.starts_with("header")
+            || rest.starts_with("footer")
+            || matches!(
+                rest,
+                "styles.xml"
+                    | "stylesWithEffects.xml"
+                    | "numbering.xml"
+                    | "footnotes.xml"
+                    | "endnotes.xml"
+            ))
+}
+
+/// `xml` without its `<w:rsid w:val="…"/>` elements (a style's edit-session id).
+fn without_rsid_elements(xml: &str) -> String {
+    const KEY: &str = "<w:rsid ";
+    let mut out = String::with_capacity(xml.len());
+    let mut rest = xml;
+    while let Some(at) = rest.find(KEY) {
+        let Some((before, from)) = rest.split_at_checked(at) else {
+            break;
+        };
+        out.push_str(before);
+        // Only a self-closing element with nothing but attributes in it.
+        let attrs_end = from.find("/>").filter(|close| {
+            from.get(KEY.len()..*close)
+                .is_some_and(|a| !a.contains(['<', '>']))
+        });
+        match attrs_end.and_then(|close| from.get(close + 2..)) {
+            Some(after) => rest = after,
+            None => {
+                out.push_str(KEY);
+                rest = from.get(KEY.len()..).unwrap_or_default();
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
 /// The section properties without the header and footer references to `ids`.
 fn drop_references(sect: &str, ids: &[&String]) -> String {
     let mut out = String::with_capacity(sect.len());
@@ -695,6 +742,13 @@ fn build(report: &Report, template: &[u8]) -> Result<Built, ExportError> {
 
     // Which of her parts stay, and the relationships that point at them.
     let mut out: Parts = parts.iter().filter(|(n, _)| kept(n)).cloned().collect();
+    // Her headers, footers, notes, numbering and styles carry the same edit-session ids as
+    // her body: dropped, so the files she gives out cannot be tied to each other by them.
+    for (name, data) in &mut out {
+        if carries_rsids(name) {
+            *data = without_rsid_elements(&without_rsids(text(data)?)).into_bytes();
+        }
+    }
     let names: HashSet<String> = out.iter().map(|(n, _)| n.clone()).collect();
     let mut keep_rels: Vec<Rel> = doc_rels
         .into_iter()
@@ -1051,6 +1105,34 @@ mod tests {
         );
         // Her paragraphs and section carry edit-session ids in the fixture: none is left.
         assert!(!doc.contains("rsid"), "{doc}");
+        // EXPORT-7: nor in her header and styles.
+        let stamped = fixture(|n, c| {
+            Some(match n {
+                "word/header1.xml" => c.replace(
+                    "<w:p>",
+                    "<w:p w:rsidR=\"00A1B2C3\" w:rsidRDefault=\"00D4E5F6\">",
+                ),
+                "word/styles.xml" => c.replace(
+                    "<w:style w:type=\"paragraph\" w:styleId=\"1\">",
+                    "<w:style w:type=\"paragraph\" w:styleId=\"1\"><w:rsid w:val=\"00A1B2C3\"/>",
+                ),
+                _ => c,
+            })
+        });
+        assert!(part(&stamped, "word/header1.xml")
+            .unwrap()
+            .contains("00A1B2C3"));
+        let out2 = render_with_template(&sample(), &stamped).unwrap();
+        let hdr2 = part(&out2, "word/header1.xml").unwrap();
+        assert!(
+            !hdr2.contains("rsid") && hdr2.contains("מרפאה בדויה"),
+            "{hdr2}"
+        );
+        let styles2 = part(&out2, "word/styles.xml").unwrap();
+        assert!(
+            !styles2.contains("rsid") && styles2.contains("w:styleId=\"1\""),
+            "{styles2}"
+        );
         assert!(
             settings.contains("removePersonalInformation")
                 && settings.contains("evenAndOddHeaders")
