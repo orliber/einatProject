@@ -1087,7 +1087,7 @@ fn every_open_editor_is_kept_at_the_lock_not_only_the_last_one() {
 }
 
 #[test]
-fn the_latest_text_of_an_editor_is_kept_and_a_long_one_is_cut_not_lost() {
+fn the_latest_text_of_an_editor_is_kept_and_a_long_one_comes_back_whole() {
     let (_dir, mut core, case) = setup(None);
     let edit = |text: String| crate::UnsavedEdit {
         case_id: case.clone(),
@@ -1107,13 +1107,13 @@ fn the_latest_text_of_an_editor_is_kept_and_a_long_one_is_cut_not_lost() {
         vec![edit("גרסה שנייה".into())]
     );
 
-    let long: String = "א".repeat(60_000);
-    core.hold_unsaved(vec![edit(long)]);
+    // A long imported material (some 30 pages) she was correcting: not cut (CORE-8).
+    let long: String = "א".repeat(200_000);
+    core.hold_unsaved(vec![edit(long.clone())]);
     core.lock();
     core.unlock(PASSWORD).unwrap();
     let back = core.take_unsaved().unwrap().pop().unwrap();
-    assert_eq!(back.text.chars().count(), 50_000);
-    assert!(back.text.chars().all(|c| c == 'א'));
+    assert_eq!(back.text, long);
     core.hold_unsaved(Vec::new());
 
     // A locked session takes nothing new, so nothing is offered after the next entry.

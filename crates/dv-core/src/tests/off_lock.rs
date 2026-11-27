@@ -261,6 +261,27 @@ fn reading_a_document_and_exporting_run_while_the_core_works() {
         .iter()
         .any(|e| e.event == "export"));
 
+    // Taken for a file the shell writes: nothing is recorded until the file is saved
+    // (EXPORT-6, JOBS-5), and a lock in between records nothing at all.
+    let job = c
+        .begin_export_report(&case, Some("סיסמה ארוכה מאוד לקובץ"))
+        .unwrap();
+    let before = c.vault_ref().unwrap().audit_seq();
+    let (file, _, record) = c.take_export(job.run()).unwrap();
+    assert!(!file.is_empty());
+    assert_eq!(c.vault_ref().unwrap().audit_seq(), before, "not yet saved");
+    c.record_export(record).unwrap();
+    assert!(c.vault_ref().unwrap().audit_seq() > before);
+    let job = c
+        .begin_export_report(&case, Some("סיסמה ארוכה מאוד לקובץ"))
+        .unwrap();
+    let (_, _, record) = c.take_export(job.run()).unwrap();
+    c.lock();
+    c.unlock(PASSWORD).unwrap();
+    let before = c.vault_ref().unwrap().audit_seq();
+    assert!(c.record_export(record).is_err());
+    assert_eq!(c.vault_ref().unwrap().audit_seq(), before);
+
     // A weak password fails in the job and records nothing.
     let job = c.begin_export_report(&case, Some("קצר")).unwrap();
     let before = c.vault_ref().unwrap().audit_seq();

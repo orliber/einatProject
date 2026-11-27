@@ -136,8 +136,12 @@ fn fix_text(
     let text = dropped.as_deref().unwrap_or(text);
     let mut spans: Vec<Span> = Vec::new();
     let words = |s: usize, e: usize| text.get(s..e).map(str::to_owned);
-    // A text the scan cannot read is left as it is: the gate refuses it again ("internal").
-    for h in patterns::find(text, req.ctx.today).unwrap_or_default() {
+    // Read with the case's tags and generic ones blanked, as the gate reads it, so the number
+    // inside a tag ("[אחות_1] ביוני") is never taken for a date (PRIV-6). Offsets are the
+    // same, byte for byte. A text the scan cannot read is left as it is: the gate refuses it
+    // again ("internal").
+    let blanked = patterns::blank_tags(text, |t| req.case_tags.contains(t) || is_generic_tag(t));
+    for h in patterns::find(&blanked, req.ctx.today).unwrap_or_default() {
         if let Some(w) = words(h.start, h.end) {
             spans.push((
                 h.start,

@@ -128,6 +128,22 @@ fn every_fixable_refusal_is_hidden_and_the_fixed_request_passes_the_gate() {
     }
 }
 
+/// PRIV-6: a numbered tag before a month is read as the gate reads it, so the fix never
+/// takes "1] ביוני" for a date and never breaks the tag.
+#[test]
+fn a_numbered_tag_before_a_month_stays_whole_through_the_fix() {
+    let ids = identities();
+    let phone = mobile(2, "4567890");
+    let text = format!("[רופא_1] ביוני בדק אותו. טלפון {phone}");
+    let (body, _, codes) = fixed(&raw(&text));
+    assert!(codes.iter().any(|c| c == "pattern"), "{codes:?}");
+    let out = body["messages"][0]["content"].as_str().unwrap().to_owned();
+    // The tag is whole (the month itself may be hidden as a date, after it).
+    assert!(out.starts_with("[רופא_1] "), "{out}");
+    assert!(!contains_norm(&out, &phone), "{out}");
+    gate_body(&body, &ids, CASE).unwrap_or_else(|b| panic!("{out}: {b:?}"));
+}
+
 /// The review of stage 2: a name hidden alone let the surname next to it out. Each of these
 /// was refused before the fix loop, and must not go out in part now.
 #[test]

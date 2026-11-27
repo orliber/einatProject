@@ -13,8 +13,10 @@ use crate::{Core, CoreError};
 
 /// Settings key of the edit kept at lock. Empty = none.
 pub(crate) const UNSAVED_KEY: &str = "unsaved_edit";
-/// Far longer than a paragraph; a longer text is cut, not refused.
-const MAX_CHARS: usize = 50_000;
+/// As long as the longest material she can import and correct in the materials editor (a
+/// material comes from a file of at most 25 MiB, and its text is not longer than its file), so
+/// what she was correcting comes back whole (CORE-8). Only a text beyond any material is cut.
+const MAX_CHARS: usize = crate::MAX_ORIGINAL_BYTES;
 /// Editors open at once (several cases, a paragraph and a note). More than this keeps the latest.
 pub(crate) const MAX_EDITS: usize = 8;
 

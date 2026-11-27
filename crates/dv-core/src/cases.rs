@@ -3,7 +3,7 @@
 use super::*;
 
 /// The id of the made-up case (U3).
-const SAMPLE_KEY: &str = "sample_case_id";
+pub(crate) const SAMPLE_KEY: &str = "sample_case_id";
 
 /// The made-up case's materials. Every word is invented.
 const SAMPLE_INPUTS: &[(InputKind, &str, &str)] = &[
@@ -95,7 +95,9 @@ impl Core {
         for (kind, title, text) in SAMPLE_INPUTS {
             self.add_input(&id, *kind, title, text)?;
         }
-        self.vault_mut()?.set_setting(SAMPLE_KEY, &id)?;
+        // The program's own bookkeeping, not a setting she changed: the case_created entry
+        // already says what happened (CORE-9).
+        self.vault_mut()?.set_state(SAMPLE_KEY, &id)?;
         Ok(id)
     }
 

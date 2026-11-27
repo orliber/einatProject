@@ -2164,7 +2164,126 @@ fn number_masks(
             r.out = book.tag_for(base, span_text(text, r.start, r.end)?);
         }
     }
+    // A child's surname alone ("משפחת נחמיאס") is hidden as well under the child's tag, but
+    // restoring writes the child by first name ("משפחת הדר", PRIV-4). With the book, those
+    // words go out under a numbered tag instead, which comes back as the very same words.
+    // The same span is hidden either way; only the tag's name changes.
+    for r in reps.iter_mut().filter(|r| r.declared && !r.relative) {
+        let Some(identity) = ctx
+            .identities
+            .iter()
+            .find(|i| i.case_id == ctx.case_id && i.tag == r.out)
+        else {
+            continue;
+        };
+        let words = span_text(text, r.start, r.end)?;
+        if hides_a_surname(identity, words) {
+            r.out = book.tag_for(NAME_BASE, words);
+        }
+    }
     Ok(())
+}
+
+/// The mask base a child's surname goes out under (PRIV-4): a name, by number only.
+const NAME_BASE: &str = "שם";
+
+/// Whether `words`, matched as this child's name, are not the child's first name but a
+/// surname: another word of the declared name ("נחמיאס" of "הדר נחמיאס"), or an alias that
+/// is no form of the first name ("נחמיאס" typed as the alias of "הדר"). Restoring writes a
+/// child's first name, so these words would come back as another name. An alias that is a
+/// form of the first name (a spelling, a nickname, a misread one letter off, the name in
+/// another script: "Noam" for "נועם") is the first name, and keeps the child's tag. Only for
+/// the roles restored by first name; anyone else is restored by the name as declared.
+pub(crate) fn hides_a_surname(identity: &Identity, words: &str) -> bool {
+    if !matches!(
+        identity.role,
+        Role::Child | Role::Brother | Role::Sister | Role::OtherChild
+    ) {
+        return false;
+    }
+    let Some(said) = normalize(words)
+        .split(' ')
+        .find(|w| !w.is_empty() && !is_title(w))
+        .map(str::to_owned)
+    else {
+        return false;
+    };
+    let forms = |name: &str| -> Vec<String> {
+        name_phrases(name)
+            .into_iter()
+            .filter_map(|p| match p.as_slice() {
+                [one] => Some(one.clone()),
+                _ => None,
+            })
+            .collect()
+    };
+    let first = normalize(crate::restore::prose_name(identity));
+    let first_forms = forms(&first);
+    if first_forms.contains(&said) {
+        return false;
+    }
+    let hebrew = |w: &str| w.chars().any(|c| ('\u{0590}'..='\u{05FF}').contains(&c));
+    let of_first = |w: &str| {
+        first_forms.iter().any(|f| f == w || one_edit_apart(f, w)) || hebrew(w) != hebrew(&first)
+    };
+    let mut surnames: Vec<String> = Vec::new();
+    let value: Vec<String> = normalize(&identity.value)
+        .split(' ')
+        .filter(|w| !w.is_empty() && !is_title(w))
+        .map(str::to_owned)
+        .collect();
+    for w in value.iter().skip(1) {
+        surnames.extend(forms(w));
+    }
+    for alias in &identity.aliases {
+        let words: Vec<String> = normalize(alias)
+            .split(' ')
+            .filter(|w| !w.is_empty() && !is_title(w))
+            .map(str::to_owned)
+            .collect();
+        match words.as_slice() {
+            [] => {}
+            [only] if of_first(only) => {}
+            [only] => surnames.extend(forms(only)),
+            [lead, rest @ ..] => {
+                if !of_first(lead) {
+                    surnames.extend(forms(lead));
+                }
+                for w in rest {
+                    surnames.extend(forms(w));
+                }
+            }
+        }
+    }
+    surnames.contains(&said)
+}
+
+/// One letter added, removed or changed ("אלוו" for "אלון").
+fn one_edit_apart(a: &str, b: &str) -> bool {
+    let (a, b): (Vec<char>, Vec<char>) = (a.chars().collect(), b.chars().collect());
+    let (short, long) = if a.len() <= b.len() {
+        (&a, &b)
+    } else {
+        (&b, &a)
+    };
+    match long.len() - short.len() {
+        0 => {
+            short
+                .iter()
+                .zip(long.iter())
+                .filter(|(x, y)| x != y)
+                .count()
+                <= 1
+        }
+        1 => (0..long.len()).any(|skip| {
+            long.iter()
+                .enumerate()
+                .filter(|(i, _)| *i != skip)
+                .map(|(_, c)| c)
+                .eq(short.iter())
+        }),
+        _ => false,
+    }
 }
 
 /// Square brackets around words that are not a tag ("[מחנכת]" written by the model, "[...]"

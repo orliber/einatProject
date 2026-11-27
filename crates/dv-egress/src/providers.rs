@@ -539,7 +539,7 @@ impl ProviderTransport {
             .body(body.to_vec())
             .send()
             .map_err(|e| match self.provider {
-                Provider::Local => EgressError::LocalUnavailable,
+                Provider::Local => local_send_error(&e),
                 _ => crate::send_error(&e),
             })?;
         let status = resp.status().as_u16();
@@ -554,6 +554,17 @@ impl ProviderTransport {
             Provider::Local => from_local(model, &v),
             _ => from_gemini(model, &v),
         }
+    }
+}
+
+/// A request to the local model that failed: nothing answering on its port is Ollama not
+/// running; a connection made and then cut or out of time (a long section on a slow
+/// computer) is not, and says so (EGRESS-7).
+fn local_send_error(e: &reqwest::Error) -> EgressError {
+    if e.is_connect() {
+        EgressError::LocalUnavailable
+    } else {
+        EgressError::Interrupted(crate::cut_reason(e))
     }
 }
 
@@ -578,6 +589,9 @@ fn status_error(provider: Provider, status: u16, text: &str) -> EgressError {
     match status {
         // Ollama answers a model that is not installed with 404.
         404 if provider == Provider::Local => EgressError::LocalUnavailable,
+        // Ollama's 5xx is the model failing on this computer (it did not load, no memory):
+        // no busy service to wait for, so not sent again; its words go to the details.
+        500..=599 if provider == Provider::Local => EgressError::Rejected(status, message),
         401 | 403 => EgressError::Unauthorized,
         // Gemini answers a wrong key with 400.
         400 if message.contains("API key") => EgressError::Unauthorized,
@@ -957,6 +971,12 @@ mod tests {
             (Provider::Local, 404, "", EgressError::LocalUnavailable),
             (Provider::Gemini, 503, "", EgressError::Unavailable(503)),
             (
+                Provider::Local,
+                500,
+                r#"{"error":"model requires more system memory"}"#,
+                EgressError::Rejected(500, "model requires more system memory".into()),
+            ),
+            (
                 Provider::OpenAi,
                 400,
                 r#"{"error":{"message":"bad"}}"#,
@@ -970,6 +990,34 @@ mod tests {
                 "{provider:?} {status}"
             );
         }
+    }
+
+    /// EGRESS-7: only nothing answering is "Ollama is not running"; a model that answers
+    /// too slowly is a cut connection.
+    #[test]
+    fn a_local_model_that_is_slow_is_not_said_to_be_missing() {
+        let client = reqwest::blocking::Client::builder()
+            .use_preconfigured_tls(crate::tls_config())
+            .no_proxy()
+            .timeout(Duration::from_millis(300))
+            .build()
+            .unwrap();
+        // Listening, never answering.
+        let slow = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/api/chat", slow.local_addr().unwrap());
+        let e = client.post(&url).body("{}").send().unwrap_err();
+        assert!(
+            matches!(local_send_error(&e), EgressError::Interrupted(ref r) if r.starts_with("timed out")),
+            "{:?}",
+            local_send_error(&e)
+        );
+        drop(slow);
+        // Nothing listening.
+        let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/api/chat", closed.local_addr().unwrap());
+        drop(closed);
+        let e = client.post(&url).body("{}").send().unwrap_err();
+        assert_eq!(local_send_error(&e), EgressError::LocalUnavailable);
     }
 
     #[test]

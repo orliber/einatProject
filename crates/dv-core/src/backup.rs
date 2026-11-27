@@ -31,12 +31,13 @@ pub const AUTO_KEEP: usize = 3;
 /// After a failed automatic backup (a full drive), the next try waits this long.
 const AUTO_RETRY: std::time::Duration = std::time::Duration::from_secs(60 * 60);
 
-/// The file name offered in the "Save as" window. A date, nothing about any case.
+/// The file name offered in the "Save as" window. A date, nothing about any case: the date in
+/// Israel, as her screen shows it, not the UTC one (OPS-8).
 #[must_use]
 pub fn backup_file_name(now: i64) -> String {
     format!(
         "גיבוי כספת האבחון {}.{BACKUP_EXTENSION}",
-        crate::dates::iso(crate::dates::date_of(now))
+        crate::dates::iso(crate::dates::israel_date_of(now))
     )
 }
 
@@ -58,7 +59,7 @@ fn short_id(vault_id: &str) -> String {
 pub fn auto_backup_file_name(now: i64, vault_id: &str) -> String {
     format!(
         "{AUTO_PREFIX}{} ({}).{BACKUP_EXTENSION}",
-        crate::dates::iso(crate::dates::date_of(now)),
+        crate::dates::iso(crate::dates::israel_date_of(now)),
         short_id(vault_id)
     )
 }
@@ -292,5 +293,12 @@ mod tests {
             backup_file_name(1_790_683_200),
             "גיבוי כספת האבחון 2026-09-29.vaultbak"
         );
+        // 2026-11-15 22:30 UTC is 00:30 on 16.11 in Israel: named for the 16th, both names.
+        let after_midnight = 1_794_781_800;
+        assert_eq!(
+            backup_file_name(after_midnight),
+            "גיבוי כספת האבחון 2026-11-16.vaultbak"
+        );
+        assert!(auto_backup_file_name(after_midnight, "abcdefgh12").contains("2026-11-16 ("));
     }
 }

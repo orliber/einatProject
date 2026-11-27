@@ -1258,6 +1258,58 @@ fn a_note_is_the_record_one_for_a_visit_and_never_removed() {
 // ------------------------------------------------------------------ money
 
 #[test]
+fn marking_a_visit_held_is_no_change_in_the_income_diary_but_an_edit_is() {
+    let (_dir, mut core) = open_clinic();
+    let tamar = new_patient(&mut core, "תמר");
+    let visit = save_visit(
+        &mut core,
+        Visit {
+            fee: 60_000,
+            ..a_visit(&tamar, VisitKind::Therapy, "2026-11-27", 9 * 60)
+        },
+    );
+    let held = mark(&mut core, &visit, VisitStatus::Held);
+    let shown = |core: &mut Core| {
+        diary(core, "2026-11")
+            .days
+            .iter()
+            .flat_map(|d| d.lines.iter())
+            .find(|l| l.record_id == visit.id)
+            .cloned()
+            .unwrap()
+    };
+    assert!(!shown(&mut core).changed, "only marked");
+    // Held, then cancelled: a mark that changed.
+    let cancelled = mark(&mut core, &held, VisitStatus::Cancelled);
+    assert!(shown(&mut core).changed);
+
+    // A new one whose fee was edited is changed.
+    let other = save_visit(
+        &mut core,
+        Visit {
+            fee: 60_000,
+            ..a_visit(&tamar, VisitKind::Therapy, "2026-11-26", 10 * 60)
+        },
+    );
+    save_visit(
+        &mut core,
+        Visit {
+            fee: 65_000,
+            ..other.clone()
+        },
+    );
+    let line = diary(&mut core, "2026-11")
+        .days
+        .iter()
+        .flat_map(|d| d.lines.iter())
+        .find(|l| l.record_id == other.id)
+        .cloned()
+        .unwrap();
+    assert!(line.changed);
+    drop(cancelled);
+}
+
+#[test]
 fn payments_and_charges_are_voided_with_a_reason_and_never_removed() {
     let (_dir, mut core) = open_clinic();
     let noam = new_patient(&mut core, "נועם");

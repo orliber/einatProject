@@ -617,6 +617,13 @@ impl Core {
         self.end_name_model();
         // The filter's index of every case's names, kept between requests, goes too.
         dv_privacy::forget_identity_index();
+        if self.vault.is_some() {
+            // Wrong passwords typed inside the open vault (erase for good, a restore drill, a
+            // new password) were never tries to get in: they kept their wait, but the next
+            // opening does not report them as failed entries (CORE-4). Tries at the lock
+            // screen are counted while the vault is closed and are not touched here.
+            self.failed_unlocks = 0;
+        }
         if let Some(v) = self.vault.take() {
             // A new password or kit begun while open lands as "locked meanwhile"; its check
             // must not keep her from opening the vault again.

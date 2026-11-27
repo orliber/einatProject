@@ -13,7 +13,7 @@ mod secret_clipboard;
 mod win_platform;
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -53,6 +53,35 @@ struct AppState {
     /// The window's × was pressed while the vault was open: the page hands over what she was
     /// typing and asks to lock, and that lock ends the program (D-218).
     closing: Arc<AtomicBool>,
+    /// Reports being written and recorded now (`save_and_record`): closing waits for them.
+    exporting: Arc<AtomicUsize>,
+}
+
+/// One report file being written and then recorded, counted until it is done either way.
+struct Exporting(Arc<AtomicUsize>);
+
+impl Exporting {
+    fn start(count: &Arc<AtomicUsize>) -> Self {
+        count.fetch_add(1, Ordering::SeqCst);
+        Self(Arc::clone(count))
+    }
+}
+
+impl Drop for Exporting {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+/// The longest closing waits for a report being written and recorded to finish.
+const EXPORT_WAIT: Duration = Duration::from_secs(10);
+
+/// Wait (a bounded time) until no report is between its file and its record.
+fn wait_for_exports(count: &AtomicUsize) {
+    let until = std::time::Instant::now() + EXPORT_WAIT;
+    while count.load(Ordering::SeqCst) > 0 && std::time::Instant::now() < until {
+        std::thread::sleep(Duration::from_millis(50));
+    }
 }
 
 /// One answer on its way: how many words, and what was written (still tagged, as it came)
@@ -554,6 +583,7 @@ fn main() {
                 models,
                 model_progress: Arc::default(),
                 closing: Arc::default(),
+                exporting: Arc::default(),
             });
             Ok(())
         })
@@ -574,8 +604,10 @@ fn main() {
             api.prevent_close();
             let _ = window.emit(CORE_EVENT, CoreEvent::Closing);
             let app = window.app_handle().clone();
+            let exporting = Arc::clone(&state.exporting);
             std::thread::spawn(move || {
                 std::thread::sleep(CLOSE_WAIT);
+                wait_for_exports(&exporting);
                 app.exit(0);
             });
         })
@@ -784,6 +816,7 @@ fn main() {
     app.run(|handle, event| {
         if let tauri::RunEvent::Exit = event {
             if let Some(state) = handle.try_state::<AppState>() {
+                wait_for_exports(&state.exporting);
                 lock_for_exit(&state.core, &state.clipboard);
             }
         }
@@ -792,7 +825,25 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::one_copy;
+    use super::{one_copy, wait_for_exports, Exporting};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    #[test]
+    fn closing_waits_for_a_report_between_its_file_and_its_record() {
+        let count = Arc::new(AtomicUsize::new(0));
+        let writing = Exporting::start(&count);
+        assert_eq!(count.load(Ordering::SeqCst), 1);
+        let done = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            drop(writing);
+        });
+        let started = std::time::Instant::now();
+        wait_for_exports(&count);
+        assert!(started.elapsed() >= std::time::Duration::from_millis(150));
+        assert_eq!(count.load(Ordering::SeqCst), 0);
+        done.join().unwrap();
+    }
 
     #[test]
     fn a_second_copy_of_the_program_is_refused_while_the_first_runs() {

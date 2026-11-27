@@ -25,6 +25,57 @@ fn the_sample_case_is_made_once_and_its_child_is_hidden_like_any_other() {
 }
 
 #[test]
+fn opening_the_sample_case_logs_no_settings_change() {
+    let (_dir, mut core, _case) = setup(None);
+    core.create_sample_case().unwrap();
+    let log = core.activity(None).unwrap();
+    assert!(
+        !log.entries.iter().any(|e| e.text.contains("הגדרה עודכנה")),
+        "{:?}",
+        log.entries.iter().map(|e| &e.text).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn a_wrong_password_typed_inside_the_vault_is_no_failed_entry_at_the_next_opening() {
+    let (_dir, mut core, case) = setup(None);
+    core.delete_case(&case).unwrap();
+    assert!(core.purge_case(&case, "ניחוש ארוך אבל שגוי").is_err());
+    core.lock();
+    core.not_before = None;
+    let status = core.unlock(PASSWORD).unwrap();
+    assert!(status.since_last.is_none(), "{:?}", status.since_last);
+    let log = core.activity(None).unwrap();
+    assert!(
+        !log.entries.iter().any(|e| e.text.contains("נכשל")),
+        "{:?}",
+        log.entries.iter().map(|e| &e.text).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn a_backup_that_fails_on_the_computers_own_disk_does_not_blame_the_chosen_folder() {
+    let (dir, mut core, _case) = setup(None);
+    let drive = tempfile::tempdir().unwrap();
+    let task = core
+        .begin_backup(&drive.path().join("גיבוי.vaultbak"))
+        .unwrap();
+    // The scratch folder next to the vault is gone (as when that disk is full).
+    for e in std::fs::read_dir(dir.path()).unwrap().flatten() {
+        if e.file_name().to_string_lossy().starts_with(".backup-") {
+            std::fs::remove_dir_all(e.path()).unwrap();
+        }
+    }
+    match core.finish_backup(task.run()) {
+        Err(CoreError::Needs(m, _)) => {
+            assert!(m.contains("בדיסק של המחשב"), "{m}");
+            assert!(!m.contains("דיסק נייד"), "{m}");
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
 fn delete_goes_to_the_bin_and_erasing_needs_the_password() {
     let (_dir, mut core, case) = setup(None);
     core.delete_case(&case).unwrap();
@@ -108,6 +159,30 @@ fn folders_hold_cases_and_refuse_loops() {
         core.list_cases().unwrap()[0].folder_id.as_deref(),
         Some(child.id.as_str())
     );
+}
+
+#[test]
+fn deleting_a_folder_never_leaves_two_subfolders_with_one_name_side_by_side() {
+    let (_dir, mut core, _case) = setup(None);
+    core.create_folder(None, "2025").unwrap();
+    let archive = core.create_folder(None, "ארכיון").unwrap();
+    let inner = core.create_folder(Some(&archive.id), " 2025").unwrap();
+    assert!(matches!(
+        core.delete_folder(&archive.id),
+        Err(CoreError::Refused(m)) if m.contains("2025")
+    ));
+    assert_eq!(core.folders().unwrap().len(), 3, "nothing deleted");
+    // Once renamed, it moves up as before.
+    core.rename_folder(&inner.id, "2025 ישן").unwrap();
+    core.delete_folder(&archive.id).unwrap();
+    let mut names: Vec<_> = core
+        .folders()
+        .unwrap()
+        .into_iter()
+        .map(|f| f.name)
+        .collect();
+    names.sort();
+    assert_eq!(names, ["2025", "2025 ישן"]);
 }
 
 #[test]
@@ -1557,6 +1632,34 @@ fn letters_are_written_from_the_approved_recommendations_only() {
     let last = changed.len() - 1;
     changed[last] ^= 1;
     assert!(core.check_original(&changed).unwrap().is_none());
+}
+
+#[test]
+fn an_exported_letter_is_dated_as_a_letter_not_as_the_report() {
+    let (_dir, mut core, case) = setup(None);
+    core.add_own_paragraph(
+        &case,
+        "recommendations",
+        "מומלץ שאלון יקבל הכנה מראש למעברים בגן.",
+    )
+    .unwrap();
+    let p = core.prepare_letter(&case, "parents", "").unwrap();
+    core.send_section(&p.approval_id.unwrap()).unwrap();
+    for para in core.letter(&case, "parents").unwrap() {
+        core.approve_paragraph(&case, &para.id).unwrap();
+    }
+    // EXPORT-8: the lines at the top of the letter say "the letter's date", never "the report's".
+    let (_, doc, _) = core.letter_doc(&case, "parents").unwrap();
+    let labels: Vec<&str> = doc.info.iter().map(|l| l.label.as_str()).collect();
+    assert!(labels.contains(&"תאריך המכתב"), "{labels:?}");
+    assert!(!labels.contains(&"תאריך הדוח"), "{labels:?}");
+    let file = core.export_letter(&case, "parents", None).unwrap();
+    let text = read_docx_text(&file);
+    assert!(text.contains("תאריך המכתב"), "{text}");
+    assert!(!text.contains("תאריך הדוח"), "{text}");
+    // The report itself keeps its own date line.
+    let report = read_docx_text(&core.export_report(&case, None).unwrap());
+    assert!(report.contains("תאריך הדוח"), "{report}");
 }
 
 #[test]

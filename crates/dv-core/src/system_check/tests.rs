@@ -509,6 +509,11 @@ fn every_way_the_connection_ends_has_its_own_line() {
             CheckState::Failed,
             "אנטי-וירוס",
         ),
+        (
+            Reach::Clock("certificate: expired".into()),
+            CheckState::Failed,
+            "התאריך",
+        ),
         (Reach::Pinned, CheckState::Failed, "רשות"),
         (
             Reach::Tls("tls: closed".into()),
