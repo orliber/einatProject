@@ -116,3 +116,8 @@ th[aria-sort="descending"] .patients-sort {
   color: var(--ink-soft);
   overflow-wrap: anywhere;
 }
+
+/* No card matched, but a session note did: a quiet line in place of the empty state. */
+.patients-notes-only {
+  margin: 0;
+}

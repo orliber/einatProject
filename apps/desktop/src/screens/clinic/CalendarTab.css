@@ -480,7 +480,15 @@ button.cal-day-name:hover {
 }
 .cal-visit-who {
   font-weight: 600;
-  overflow-wrap: anywhere;
+}
+/* In a block of the grid the time comes first and the name keeps one line: a long name ends
+   with "…" (the whole name is in the button's name), never broken inside a word. */
+.cal-visit-open .cal-visit-who {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 .cal-visit-kind {
   color: var(--ink-soft);
@@ -570,8 +578,17 @@ button.cal-day-name:hover {
   gap: var(--space-4);
   align-items: start;
 }
+/* The day's list keeps "תזכורת" and "⋯" on their row: the name gives way, the actions do not
+   drop to a line of their own under it. */
 .cal-day-view .clinic-visit {
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+}
+.cal-day-view .clinic-visit-body {
+  min-width: 0;
+  overflow-wrap: break-word;
+}
+.cal-day-view .clinic-visit-actions {
+  flex-wrap: nowrap;
 }
 @container page (max-width: 720px) {
   .cal-day-view {

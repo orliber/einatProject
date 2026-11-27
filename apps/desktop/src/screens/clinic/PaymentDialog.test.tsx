@@ -70,6 +70,59 @@ describe("“לרשום תקבול” from a visit's row", () => {
     expect(notes).toContain("התקבול נרשם");
   });
 
+  it("once the family has paid, the box says so, and a sum above the balance asks before it is recorded", async () => {
+    const { user, today, requests, notes } = await openToday();
+    const row = within(today).getAllByRole("listitem").find((li) => within(li).queryByRole("button", { name: "התקיימה" })) as HTMLElement;
+    await user.click(within(row).getByRole("button", { name: "התקיימה" }));
+    await within(row).findByRole("button", { name: "לכתוב סיכום" });
+    await waitFor(() => expect(requests().filter((r) => r.op === "overview").length).toBeGreaterThan(1));
+    const openPayment = async () => {
+      await user.click(within(row).getByRole("button", { name: /^עוד פעולות לפגישה/ }));
+      await user.click(await screen.findByRole("menuitem", { name: "לרשום תקבול" }));
+      return screen.findByRole("dialog", { name: "תקבול חדש" });
+    };
+    // Pay what the family owes, whatever it is.
+    let dialog = await openPayment();
+    const card = requests().find((r) => r.op === "patient_card");
+    expect(card).toBeDefined();
+    const amount = within(dialog).getByLabelText("סכום");
+    const hint = within(dialog).queryByText(/^היתרה של המשפחה: /)?.textContent;
+    if (hint) {
+      await user.clear(amount);
+      await user.type(amount, hint.replace(/[^\d.]/g, "").replace(/\.$/, ""));
+    }
+    await user.click(within(dialog).getByRole("button", { name: "רישום התקבול" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "תקבול חדש" })).toBeNull());
+    expect(notes).toContain("התקבול נרשם");
+    const saved = () => requests().filter((r) => r.op === "save_payment").length;
+    expect(saved()).toBe(1);
+
+    // Again, with a zero too many: the box said nothing is owed, and she is asked first.
+    dialog = await openPayment();
+    expect(dialog).toHaveTextContent("למשפחה אין יתרה פתוחה: הכול כבר שולם.");
+    await user.clear(within(dialog).getByLabelText("סכום"));
+    await user.type(within(dialog).getByLabelText("סכום"), "6000");
+    await user.click(within(dialog).getByRole("button", { name: "רישום התקבול" }));
+    const ask = await screen.findByRole("dialog", { name: "הסכום גבוה מהיתרה" });
+    expect(ask).toHaveTextContent("למשפחה אין יתרה פתוחה. אחרי הרישום תהיה למשפחה זכות של");
+    await user.click(within(ask).getByRole("button", { name: "ביטול" }));
+    expect(saved()).toBe(1);
+    expect(within(dialog).getByLabelText("סכום")).toHaveValue("6000");
+
+    // Recorded after all: the family is now ahead, and a further sum adds to what it has.
+    await user.click(within(dialog).getByRole("button", { name: "רישום התקבול" }));
+    await user.click(within(await screen.findByRole("dialog", { name: "הסכום גבוה מהיתרה" })).getByRole("button", { name: "לרשום 6,000 ₪" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "תקבול חדש" })).toBeNull());
+    expect(saved()).toBe(2);
+    dialog = await openPayment();
+    expect(await within(dialog).findByText("למשפחה כבר יש זכות של 6,000 ₪.")).toBeInTheDocument();
+    await user.clear(within(dialog).getByLabelText("סכום"));
+    await user.type(within(dialog).getByLabelText("סכום"), "100");
+    await user.click(within(dialog).getByRole("button", { name: "רישום התקבול" }));
+    expect(await screen.findByRole("dialog", { name: "הסכום גבוה מהיתרה" }))
+      .toHaveTextContent("למשפחה כבר יש זכות של 6,000 ₪. אחרי הרישום תהיה למשפחה זכות של 6,100 ₪.");
+  });
+
   it("a refusal of the vault stays in the dialog, and nothing is claimed", async () => {
     const refuse: Override = (cmd, args) => {
       if (cmd === "copy_secret") return 60;

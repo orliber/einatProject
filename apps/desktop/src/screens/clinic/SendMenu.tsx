@@ -6,13 +6,15 @@ import { useApp } from "../../App";
 import { AddMenu } from "../../components/Menu";
 import { isDiscreet, shownName } from "../../discreet";
 import { asUiError, ipc } from "../../ipc/client";
+import { MOD } from "../../shortcuts";
 import { clinicApi } from "../../ipc/clinic";
 import type { Channel } from "../../ipc/generated/Channel";
 import type { MessageKind } from "../../ipc/generated/MessageKind";
 
-/** When the protected clipboard lets go of a copy (the app says how long: 20 s on a Mac). */
+/** When the protected clipboard lets go of a copy (the app says how long: 20 s on a Mac). Said
+ *  of the clipboard, so it agrees with "התזכורת" and "הודעת התשלום" alike. */
 export function clearsIn(seconds: number): string {
-  return seconds === 60 ? "יימחק מהלוח בעוד דקה" : `יימחק מהלוח בעוד ${seconds} שניות`;
+  return seconds === 60 ? "הלוח יתנקה בעוד דקה" : `הלוח יתנקה בעוד ${seconds} שניות`;
 }
 
 /** What opened on her computer, as the toast says it. */
@@ -51,7 +53,7 @@ export function useSend(kind: MessageKind, patientId: string, visitId: string | 
       const handed = await ipc.sendMessage(kind, patientId, visitId, channel, null);
       const to = handed.to === NAMELESS_CONTACT ? NAMELESS_CONTACT : shownName(handed.to, isDiscreet());
       // Initials end with their own full stop ("י. ל."): the sentence does not add a second one.
-      notify(`${OPENED[channel]} מול ${to}${to.endsWith(".") ? "" : "."} ${WHAT[kind]} בלוח המוגן: מדביקים (Ctrl+V) ושולחים. ${clearsIn(handed.clears_in)}.`);
+      notify(`${OPENED[channel]} מול ${to}${to.endsWith(".") ? "" : "."} ${WHAT[kind]} בלוח המוגן: מדביקים (${MOD}+V) ושולחים. ${clearsIn(handed.clears_in)}.`);
     } catch (e) {
       notify(fail(asUiError(e)));
     }

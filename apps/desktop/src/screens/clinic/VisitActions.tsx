@@ -14,6 +14,9 @@ import { useShownName } from "./parts";
 import { visitCharge } from "./PaymentDialog";
 import { SendMenu } from "./SendMenu";
 
+/** What the toast says once a visit was marked from its row (with "ביטול" beside it). */
+export const MARKED: Record<"held" | "no_show", string> = { held: "הפגישה סומנה \"התקיימה\"", no_show: "הפגישה סומנה \"לא הגיעו\"" };
+
 /** The focus is nowhere: on the page itself, or on an element that has left it. */
 export function focusLost(): boolean {
   const at = document.activeElement;
@@ -24,7 +27,7 @@ export function focusLost(): boolean {
  * The step a visit offers now, and "⋯" with the rest, always ending with "לפתוח את הפגישה".
  * Only for a visit with a patient (not time she kept for herself): `patientId` is its patient.
  * On the card (`onCard`) the "⋯" is named by the visit's date, there is no reminder
- * (`reminders={false}`), and "לא הגיעו" is offered (`onNoShow`).
+ * (`reminders={false}`). "לא הגיעו" is offered with `onNoShow`.
  */
 export function VisitActions({ view, patientId, now, onHold, onNote, onOpen, onNoShow, onPay, reminders = true, onCard = false, follow = false }: {
   view: VisitView;
@@ -36,7 +39,7 @@ export function VisitActions({ view, patientId, now, onHold, onNote, onOpen, onN
   onOpen: () => void;
   /** The lists (not the card, which has "תקבול חדש"): "לרשום תקבול" in "⋯" of a visit that charges. */
   onPay?: (v: Visit) => void;
-  /** The card only: "לא הגיעו" in "⋯". */
+  /** "לא הגיעו" in "⋯" (the card, the front page and the calendar's day list). */
   onNoShow?: (v: Visit) => void;
   /** False on the card, which has no reminder. */
   reminders?: boolean;

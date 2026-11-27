@@ -1684,7 +1684,8 @@ export class FakeClinic {
       "{שעה}": v ? formatTime(v.start) : "",
       "{מקום}": v ? v.place : "",
       // What the family still owes; a family that paid ahead owes nothing.
-      "{סכום}": plainMoney(Math.max(0, due)),
+      // With its thousands apart, as the core's `money_grouped`: "1,650".
+      "{סכום}": moneyNumber(Math.max(0, due)),
       "{שמי}": this.host.myName(),
     });
   }

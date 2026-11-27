@@ -121,6 +121,9 @@ describe("the patients' search also reads the session notes of every card (D-216
     const box = await screen.findByRole("region", { name: "נמצא בסיכומי הפגישות" });
     expect(box).toHaveTextContent(word);
     expect(opened.requests().some((r) => r.op === "search_notes" && r.text === word && r.personal)).toBe(true);
+    // No card has the word: the page does not say "not found" above what it found.
+    expect(screen.queryByText("לא נמצא מטופל כזה")).toBeNull();
+    expect(screen.getByText("אין מטופל בשם הזה. החיפוש נמצא בסיכומים:")).toBeInTheDocument();
     const names = within(box).getAllByRole("button");
     await opened.user.click(names[0] as HTMLElement);
     // The card of the family whose note it is (the newest note that holds the word).
@@ -146,6 +149,11 @@ describe("the patients' search also reads the session notes of every card (D-216
     const box = await screen.findByRole("region", { name: "נמצא בסיכומי הפגישות" });
     expect(box).toHaveTextContent("הרשומה מוסתרת במצב דיסקרטי.");
     expect(box).not.toHaveTextContent(word);
+    expect(box).toHaveTextContent("במצב דיסקרטי לא מחפשים בתרשומות האישיות.");
+    // A word nothing holds: the empty page says the personal notes were not read.
+    await opened.user.clear(opened.search);
+    await opened.user.type(opened.search, "מילהשאיןבשוםסיכום");
+    expect(await screen.findByText(/במצב דיסקרטי לא מחפשים בתרשומות האישיות\.$/)).toBeInTheDocument();
     const asked = opened.requests().filter((r) => r.op === "search_notes");
     expect(asked.length).toBeGreaterThan(0);
     expect(asked.every((r) => r.op === "search_notes" && !r.personal)).toBe(true);

@@ -21,7 +21,8 @@ import type { VisitKind } from "../../ipc/generated/VisitKind";
 import type { VisitStatus } from "../../ipc/generated/VisitStatus";
 import type { VisitView } from "../../ipc/generated/VisitView";
 import { FreeTimes, HolidayLine } from "./FreeTimes";
-import { RememberList } from "./RememberList";
+import { suggestStart } from "./calendarLayout";
+import { RememberList, withTyped } from "./RememberList";
 import { VisitPrep } from "./VisitPrep";
 import { useClinicSettings, useDeleteVisit, usePatients, useReloadClinic, useSaveVisit, useToday } from "./clinicData";
 import {
@@ -70,6 +71,8 @@ interface Form {
   fee: string;
   note: string;
   remember: RememberItem[];
+  /** A line typed under "לא לשכוח" without "הוספה": saved with the visit, and closing asks first. */
+  rememberTyped: string;
   status: VisitStatus;
   statusNote: string;
   chargeMissed: boolean;
@@ -80,21 +83,24 @@ interface Form {
 }
 
 /** The form as it opens: the visit as it is kept, or a new one with what is already known. */
-function firstForm(props: VisitDialogProps, settings: ClinicSettings, patients: PatientRow[], today: string): Form {
+function firstForm(props: VisitDialogProps, settings: ClinicSettings, patients: PatientRow[], now: { date: string; minute: number }): Form {
+  const today = now.date;
+  // Today, not an hour already gone (it would show at once as "not marked"), as the calendar does.
   const existing = props.view?.visit;
   if (existing) {
     return {
       kind: existing.kind, patientId: existing.patient_id, title: existing.title, date: existing.date, start: formatTime(existing.start),
-      minutes: String(existing.minutes), place: existing.place, fee: moneyText(existing.fee), note: existing.note, remember: existing.remember ?? [], status: existing.status,
+      minutes: String(existing.minutes), place: existing.place, fee: moneyText(existing.fee), note: existing.note, remember: existing.remember ?? [], rememberTyped: "", status: existing.status,
       statusNote: existing.status_note, chargeMissed: existing.charge_missed, repeat: false, every: "1", count: "8", scope: "one",
     };
   }
   const kind = props.start?.kind ?? "assessment";
   const patientId = props.start?.patientId ?? null;
   const d = defaultsFor(settings, kind, patients.find((r) => r.patient.id === patientId));
+  const date = props.start?.date ?? today;
   return {
-    kind, patientId, title: "", date: props.start?.date ?? today, start: formatTime(props.start?.start ?? settings.day_start),
-    minutes: String(d.minutes), place: settings.places[0] ?? "", fee: moneyText(d.fee), note: "", remember: [], status: "planned", statusNote: "",
+    kind, patientId, title: "", date, start: formatTime(props.start?.start ?? suggestStart(date, now, settings.day_start, settings.day_end)),
+    minutes: String(d.minutes), place: settings.places[0] ?? "", fee: moneyText(d.fee), note: "", remember: [], rememberTyped: "", status: "planned", statusNote: "",
     chargeMissed: false, repeat: false, every: "1", count: "8", scope: "one",
   };
 }
@@ -126,7 +132,7 @@ export function VisitDialog(props: VisitDialogProps) {
   const [overlapping, setOverlapping] = useState<SavedVisits | null>(null);
 
   if (opened === null && settingsRead.data && patientsRead.data) {
-    const start = firstForm(props, settingsRead.data, patientsRead.data, now.date);
+    const start = firstForm(props, settingsRead.data, patientsRead.data, now);
     setOpened(start);
     setForm(start);
   }
@@ -172,6 +178,13 @@ export function VisitDialog(props: VisitDialogProps) {
   const onCard = existing !== undefined && existing.patient_id !== null;
   const kinds = onCard ? VISIT_KINDS.filter((k) => k !== "block") : VISIT_KINDS;
   const dirty = JSON.stringify(form) !== JSON.stringify(first);
+  // A planned visit at an hour already gone is allowed (she may write one down after the
+  // fact), but she is told, so an hour left as it opened does not slip by.
+  const startMinute = parseTime(form.start);
+  // Her own time is never marked, so it is not said of it.
+  const passed = !block && form.status === "planned" && form.date !== "" && startMinute !== null
+    && (form.date < now.date || (form.date === now.date && startMinute < now.minute))
+    && (!existing || form.date !== first.date || form.start !== first.start);
   const every = Number(form.every);
   const count = Number(form.count);
   const lastOfSeries = form.repeat && form.date !== "" && Number.isInteger(count) && count >= 2 && count <= 52 ? addDays(form.date, 7 * every * (count - 1)) : null;
@@ -203,7 +216,7 @@ export function VisitDialog(props: VisitDialogProps) {
       charge_missed: missed && !block && form.chargeMissed,
       series_id: existing?.series_id ?? null,
       note: form.note,
-      remember: form.remember,
+      remember: withTyped(form.remember, form.rememberTyped),
     };
   }
 
@@ -273,7 +286,8 @@ export function VisitDialog(props: VisitDialogProps) {
         )}
 
         {/* Opening a visit, she first sees what not to forget for it (D-207). */}
-        {existing && <RememberList id="visit-remember" items={form.remember} onChange={(remember) => set({ remember })} />}
+        {existing && <RememberList id="visit-remember" items={form.remember} onChange={(remember) => set({ remember })}
+          text={form.rememberTyped} onText={(rememberTyped) => set({ rememberTyped })} />}
 
         {/* And, while it is still ahead, what the last session left and what is open for this family. */}
         {existing && existing.status === "planned" && !block && existing.patient_id !== null && (
@@ -307,6 +321,11 @@ export function VisitDialog(props: VisitDialogProps) {
             onChange={(minutes) => { setTyped((t) => ({ ...t, minutes: true })); set({ minutes }); }} />
         </div>
         <HolidayLine date={form.date} enabled={settings.holidays} />
+        {passed && (
+          <p className="note-warn" role="status">
+            <span>השעה הזו כבר עברה. אפשר לשמור כך, והפגישה תופיע בין הפגישות שעוד לא סומנו.</span>
+          </p>
+        )}
         {(!existing || existing.status === "planned") && (
           <FreeTimes from={form.date === "" ? now.date : form.date} minutes={Number(form.minutes)} skip={existing?.id ?? null} today={now.date}
             onPick={(slot) => {
@@ -327,7 +346,8 @@ export function VisitDialog(props: VisitDialogProps) {
         <TextAreaField id="visit-note" label="הערה מעשית (לא חובה)" value={form.note} rows={2} maxLength={4000}
           placeholder="למשל: חדר 2, החניה מאחור" onChange={(note) => set({ note })} />
 
-        {!existing && <RememberList id="visit-remember" items={form.remember} onChange={(remember) => set({ remember })} />}
+        {!existing && <RememberList id="visit-remember" items={form.remember} onChange={(remember) => set({ remember })}
+          text={form.rememberTyped} onText={(rememberTyped) => set({ rememberTyped })} />}
 
         {!existing && (
           <fieldset className="clinic-group">

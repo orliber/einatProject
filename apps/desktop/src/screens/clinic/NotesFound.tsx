@@ -26,6 +26,7 @@ export function NotesFound({ query }: { query: string }) {
         {hits.map((hit) => <Hit key={hit.note_id} hit={hit} discreet={discreet} onOpen={() => nav.openPatient(hit.patient_id)} />)}
       </ul>
       {found.data?.more === true && <p className="hint">מוצגים הסיכומים האחרונים. מילה נוספת בחיפוש תצמצם את הרשימה.</p>}
+      {discreet && <p className="hint">במצב דיסקרטי לא מחפשים בתרשומות האישיות.</p>}
     </Section>
   );
 }

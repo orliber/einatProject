@@ -84,7 +84,7 @@ describe("the follow-ups tab", () => {
     // The number beside the heading is the number of alerts; each kind says how many it has.
     expect(within(needs()).getAllByText(String(alerts.length)).length).toBeGreaterThan(0);
     for (const g of alertGroups(alerts)) {
-      const label = { unmarked: "פגישה שלא סומנה", no_note: "פגישה בלי סיכום", debt: "חוב פתוח", waiting: "המתנה ארוכה", report_due: "דוח מתעכב", no_next_visit: "אין פגישה הבאה", task_overdue: "משימה שמועדה עבר", feedback_soon: "שיחת משוב קרובה", materials_missing: "חסרים שאלונים או מסמכים", unreadable: "רישום שלא נקרא" }[g.kind];
+      const label = { unmarked: "פגישה שלא סומנה", no_note: "פגישה בלי סיכום", debt: "חוב פתוח", waiting: "המתנה ארוכה", report_due: "דוח מתעכב", no_next_visit: "אין פגישה הבאה", task_overdue: "מעקב שמועדו עבר", feedback_soon: "שיחת משוב קרובה", materials_missing: "חסרים שאלונים או מסמכים", unreadable: "רישום שלא נקרא" }[g.kind];
       const box = within(needs()).getByRole("region", { name: `${label}: ${g.alerts.length}` });
       expect(within(box).getByRole("heading", { name: label })).toBeInTheDocument();
       expect(within(box).getAllByRole("listitem").length).toBe(Math.min(4, g.alerts.length));
@@ -183,6 +183,26 @@ describe("the follow-ups tab", () => {
     expect(within(form).queryByRole("alert")).toBeNull();
   });
 
+  it("a due date typed wrong is refused, not saved as a follow-up without a date", async () => {
+    const { user, requests } = await openOn(TASKS);
+    await ready();
+    const form = within(mine()).getByRole("form", { name: "מעקב חדש" });
+    await user.type(within(form).getByLabelText("מעקב חדש"), "לדבר עם היועצת");
+    await user.type(within(form).getByLabelText("עד מתי (לא חובה)"), "31.02.2027");
+    await user.click(within(form).getByRole("button", { name: "הוספה" }));
+    expect(within(form).getByRole("alert")).toHaveTextContent("תאריך היעד לא תקין. אפשר לתקן אותו, או למחוק אותו כדי לשמור בלי תאריך.");
+    expect(within(form).getByLabelText("עד מתי (לא חובה)")).toHaveAttribute("aria-invalid", "true");
+    expect(requests().some((r) => r.op === "save_task")).toBe(false);
+
+    // Editing a follow-up: a mistyped date never erases the one it has.
+    await user.click(within(lineOf("להזמין טפסי שאלונים")).getByRole("button", { name: "עריכת המעקב: להזמין טפסי שאלונים" }));
+    const dialog = await screen.findByRole("dialog", { name: "עריכת מעקב" });
+    await user.type(within(dialog).getByLabelText("עד מתי (לא חובה)"), "32.11.2026");
+    await user.click(within(dialog).getByRole("button", { name: "שמירה" }));
+    expect(await within(dialog).findByText("תאריך היעד לא תקין. אפשר לתקן אותו, או למחוק אותו כדי לשמור בלי תאריך.")).toBeInTheDocument();
+    expect(requests().some((r) => r.op === "save_task")).toBe(false);
+  });
+
   it("the vault's refusal of a new follow-up is shown on the line, and what she typed stays", async () => {
     const { user } = await openOn(TASKS, refusing("save_task", "המעקב לא נשמר, כי הכספת עסוקה."));
     await ready();
@@ -223,10 +243,10 @@ describe("the follow-ups tab", () => {
   it("“בוצע” on the alert of an overdue follow-up closes it", async () => {
     const { user, requests } = await openOn(TASKS);
     await ready();
-    const overdue = within(needs()).getByRole("region", { name: "משימה שמועדה עבר: 1" });
+    const overdue = within(needs()).getByRole("region", { name: "מעקב שמועדו עבר: 1" });
     await user.click(within(overdue).getByRole("button", { name: "בוצע" }));
     await waitFor(() => expect(requests().some((r) => r.op === "save_task" && r.task.title === "להזכיר להורים את יתרת התשלום" && r.task.done_on === "2026-11-15")).toBe(true));
-    await waitFor(() => expect(within(needs()).queryByRole("region", { name: /^משימה שמועדה עבר/ })).toBeNull());
+    await waitFor(() => expect(within(needs()).queryByRole("region", { name: /^מעקב שמועדו עבר/ })).toBeNull());
     expect(within(mine()).queryByRole("region", { name: /^באיחור/ })).toBeNull();
   });
 

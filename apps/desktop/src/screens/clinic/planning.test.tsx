@@ -56,6 +56,43 @@ describe("planning from a card", () => {
     expect(card.patient.status).toBe("active");
   });
 
+  it("closes at once when the proposal was not touched; a step moved to a day off says so, and closing then asks", async () => {
+    const { user } = await openCard("עומר");
+    await user.click(await screen.findByRole("button", { name: "לקבוע את כל המסלול" }));
+    let dialog = await screen.findByRole("dialog", { name: /לקבוע את מסלול האבחון/ });
+    await within(dialog).findByRole("list", { name: "פגישות המסלול" });
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: /לקבוע את מסלול האבחון/ })).toBeNull());
+
+    await user.click(screen.getByRole("button", { name: "לקבוע את כל המסלול" }));
+    dialog = await screen.findByRole("dialog", { name: /לקבוע את מסלול האבחון/ });
+    const rows = await within(dialog).findByRole("list", { name: "פגישות המסלול" });
+    const second = within(rows).getAllByRole("group")[1] as HTMLElement;
+    const date = within(second).getByLabelText("תאריך");
+    await user.clear(date);
+    // 05.12.2026 is a Saturday; the demo clinic works Sunday to Thursday.
+    await user.type(date, "05.12.2026");
+    expect(await within(second).findByText("שבת אינה יום עבודה בהגדרות הקליניקה.")).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    expect(within(dialog).getByRole("alertdialog", { name: "לסגור בלי לשמור" })).toBeInTheDocument();
+  });
+
+  it("a step moved and put back as it was is not a change: closing does not ask", async () => {
+    const { user } = await openCard("עומר");
+    await user.click(await screen.findByRole("button", { name: "לקבוע את כל המסלול" }));
+    const dialog = await screen.findByRole("dialog", { name: /לקבוע את מסלול האבחון/ });
+    const rows = await within(dialog).findByRole("list", { name: "פגישות המסלול" });
+    const second = within(rows).getAllByRole("group")[1] as HTMLElement;
+    const date = within(second).getByLabelText("תאריך");
+    const was = (date as HTMLInputElement).value;
+    await user.clear(date);
+    await user.type(date, "05.12.2026");
+    await user.clear(date);
+    await user.type(date, was);
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: /לקבוע את מסלול האבחון/ })).toBeNull());
+  });
+
   it("asks for a start day when the box is empty, and offers nothing to save", async () => {
     const { user } = await openCard("עומר");
     await user.click(await screen.findByRole("button", { name: "לקבוע את כל המסלול" }));

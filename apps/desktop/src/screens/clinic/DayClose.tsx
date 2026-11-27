@@ -15,6 +15,7 @@ import type { VisitView } from "../../ipc/generated/VisitView";
 import { useDiary } from "./clinicData";
 import { formatDateLong, formatMoney, formatTime, ownVisit, visitEnded, VISIT_KIND_LABEL } from "./format";
 import { ConfirmDialog, PatientName, Section, useClinicNav } from "./parts";
+import { visitCharge } from "./PaymentDialog";
 
 export interface DayCloseFacts {
   /** Visits with a family today that were not cancelled. */
@@ -63,6 +64,10 @@ export function DayClose({ overview, now, onHoldAll }: {
   const received = diary.data?.days.find((d) => d.date === now.date)?.received ?? (diary.data ? 0 : null);
   const closed = facts.unmarked === 0 && facts.noNote === 0;
   const left = unmarkedToday(overview, now);
+  // Families may pay later, so a day without a payment can still close; but it is not said to
+  // be "all recorded" in silence: the line says how many visits charged and nothing came in.
+  const charged = overview.visits.filter((v) => !ownVisit(v.visit) && v.visit.patient_id !== null && visitCharge(v.visit) > 0).length;
+  const unpaid = received === 0 && charged > 0;
   return (
     <Section title="סגירת היום" aside={<span className={closed ? "chip chip-ok" : "chip chip-sand"}>{closed ? "היום סגור" : "נשאר לסגור"}</span>}>
       <ul className="clinic-list clinic-dayclose">
@@ -73,9 +78,13 @@ export function DayClose({ overview, now, onHoldAll }: {
         <Line done={facts.noNote === 0}
           text={facts.noNote === 0 ? "אין פגישה שהתקיימה היום בלי סיכום" : count(facts.noNote, "פגישה אחת שהתקיימה היום בלי סיכום", "פגישות שהתקיימו היום בלי סיכום")} />
         {received !== null && (
-          <li className="clinic-dayclose-line">
+          <li className={unpaid ? "clinic-dayclose-line clinic-dayclose-open" : "clinic-dayclose-line"}>
             <span className="clinic-dayclose-mark" aria-hidden="true">₪</span>
-            <span className="grow">{received > 0 ? <>התקבל היום: <span className="num">{formatMoney(received)}</span></> : "לא נרשם תקבול היום"}</span>
+            <span className="grow">
+              {received > 0 ? <>התקבל היום: <span className="num">{formatMoney(received)}</span></>
+                : unpaid ? count(charged, "פגישה אחת חויבה היום, ולא נרשם תקבול", "פגישות חויבו היום, ולא נרשם תקבול")
+                : "לא נרשם תקבול היום"}
+            </span>
             <button type="button" className="link-btn" onClick={() => nav.openTab("money")}>ליומן ההכנסות</button>
           </li>
         )}
@@ -89,7 +98,12 @@ export function DayClose({ overview, now, onHoldAll }: {
           </li>
         )}
       </ul>
-      {closed && <p className="muted clinic-quiet clinic-dayclose-end">הכול רשום ושמור בכספת. אפשר לנעול ולסיים את היום.</p>}
+      {closed && (
+        <p className="muted clinic-quiet clinic-dayclose-end">
+          {unpaid ? "הפגישות סומנו והסיכומים שמורים בכספת. תקבול שיגיע אחר כך נרשם ביומן ההכנסות. אפשר לנעול ולסיים את היום."
+            : "הפגישות סומנו והסיכומים שמורים בכספת. אפשר לנעול ולסיים את היום."}
+        </p>
+      )}
       {asking && onHoldAll && (
         <ConfirmDialog title="לסמן את הפגישות של היום" action={`לסמן ${left.length} פגישות כ"התקיימה"`} onClose={() => setAsking(false)}
           onConfirm={async () => {
@@ -106,7 +120,7 @@ export function DayClose({ overview, now, onHoldAll }: {
               </li>
             ))}
           </ul>
-          <p className="muted">פגישה שבוטלה או שלא הגיעו אליה: סוגרים את החלון ומסמנים אותה קודם בשורה שלה. סימון שנעשה בטעות אפשר לתקן אחר כך מהפגישה.</p>
+          <p className="muted">פגישה שלא הגיעו אליה: סוגרים את החלון ומסמנים אותה קודם ב"לא הגיעו", בתפריט "⋯" שבשורה שלה. פגישה שבוטלה: פותחים אותה ומסמנים בה "בוטלה". סימון שנעשה בטעות אפשר לתקן אחר כך מהפגישה.</p>
         </ConfirmDialog>
       )}
     </Section>

@@ -10,7 +10,7 @@ import { Dialog, ErrorLine, Skeleton } from "../../components/ui";
 import type { Visit } from "../../ipc/generated/Visit";
 import { useClinicSettings, useProposedPathway, useSavePathway, useToday } from "./clinicData";
 import { HolidayLine } from "./FreeTimes";
-import { addDays, formatDateLong, formatTime, parseTime, VISIT_KIND_LABEL } from "./format";
+import { addDays, dayName, formatDateLong, formatTime, parseTime, VISIT_KIND_LABEL, weekday } from "./format";
 import { CheckField, Field, Money, PatientName, TimeField } from "./parts";
 
 interface Row {
@@ -73,8 +73,21 @@ export function PathwayDialog({ patientId, patientName, onClose }: { patientId: 
   const loading = !noStart && (proposal.isFetching || rows === null || proposal.data !== shownFor);
   const refused = !noStart && proposal.error && !proposal.isFetching ? proposal.error.message : null;
   const shown = !noStart && !loading && !refused && rows !== null && rows.length > 0;
+  // Only what she changed asks before closing: the proposal as it came is not "typed".
+  // Compared field by field (a row she changed is rebuilt with its keys in another order).
+  const dirty = packaged || (rows !== null && rows.length > 0 && (shownFor === null || rows.length !== shownFor.length
+    || rows.some((r, i) => {
+      const as = shownFor[i];
+      return as === undefined || r.visit.date !== as.date || r.start !== formatTime(as.start);
+    })));
+  const workDays = settings.data?.work_days ?? null;
+  /** "יום שישי אינו …" ("שבת אינה …"): a step moved to a day she does not work, said beside it (saved if she wishes). */
+  const offDay = (date: string) => {
+    const w = weekday(date);
+    return workDays !== null && w !== null && !workDays.includes(w) ? (w === 6 ? "שבת אינה יום עבודה בהגדרות הקליניקה." : `יום ${dayName(date)} אינו יום עבודה בהגדרות הקליניקה.`) : null;
+  };
   return (
-    <Dialog help="pathway" wide title="לקבוע את מסלול האבחון" subtitle={<PatientName name={patientName} />} onClose={onClose} dirty={rows !== null && rows.length > 0}
+    <Dialog help="pathway" wide title="לקבוע את מסלול האבחון" subtitle={<PatientName name={patientName} />} onClose={onClose} dirty={dirty}
       footer={(close) => <>
         <span className="grow" />
         <button type="button" className="btn" onClick={close}>ביטול</button>
@@ -105,7 +118,10 @@ export function PathwayDialog({ patientId, patientName, onClose }: { patientId: 
                   <DateField id={`pathway-${i}-date`} value={r.visit.date} onChange={(date) => set(i, { date })} />
                 </Field>
                 <TimeField id={`pathway-${i}-start`} label="שעה" value={r.start} onChange={(start) => set(i, { start })} />
-                <div className="pathway-holiday"><HolidayLine date={r.visit.date} enabled={settings.data?.holidays === true} /></div>
+                <div className="pathway-holiday">
+                  <HolidayLine date={r.visit.date} enabled={settings.data?.holidays === true} />
+                  {offDay(r.visit.date) !== null && <p className="note-warn clinic-holiday-line" role="status"><span>{offDay(r.visit.date)}</span></p>}
+                </div>
               </div></li>
             ))}
           </ol>

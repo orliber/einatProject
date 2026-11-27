@@ -359,7 +359,7 @@ export const ALERT_KIND_LABEL: Record<AlertKind, string> = {
   waiting: "המתנה ארוכה",
   report_due: "דוח מתעכב",
   no_next_visit: "אין פגישה הבאה",
-  task_overdue: "משימה שמועדה עבר",
+  task_overdue: "מעקב שמועדו עבר",
   feedback_soon: "שיחת משוב קרובה",
   materials_missing: "חסרים שאלונים או מסמכים",
   unreadable: "רישום שלא נקרא",
@@ -398,4 +398,33 @@ export function greeting(minute: number): string {
   if (minute < 17 * 60) return "צהריים טובים";
   if (minute < 22 * 60) return "ערב טוב";
   return "לילה טוב";
+}
+
+/** A phone the messages can reach (as the core's `international_phone`, channels.rs): digits,
+ *  `+ - ( ) .` and spaces, a local Israeli number or one with its country code. */
+export function phoneReachable(raw: string): boolean {
+  const t = raw.trim();
+  const plus = t.startsWith("+");
+  if (!/^[0-9+\-() .]*$/.test(t) || (t.match(/\+/g)?.length ?? 0) > (plus ? 1 : 0)) return false;
+  const digits = t.replace(/\D/g, "");
+  let full: string;
+  if (plus) full = digits;
+  else if (digits.startsWith("00")) full = digits.slice(2);
+  else if (digits.startsWith("0")) full = `972${digits.slice(1)}`;
+  else if (digits.startsWith("972")) full = digits;
+  else return false;
+  const israeliOk = !full.startsWith("972") || (full.length >= 11 && full.length <= 12);
+  return full.length >= 8 && full.length <= 15 && !full.startsWith("0") && israeliOk;
+}
+
+/** An email the messages can reach (as the core's `plain_email`, channels.rs). */
+export function emailReachable(raw: string): boolean {
+  const email = raw.trim();
+  const at = email.indexOf("@");
+  if (at < 0) return false;
+  const local = email.slice(0, at);
+  const domain = email.slice(at + 1);
+  const part = (s: string, extra: string) => s !== "" && !s.startsWith(".") && !s.endsWith(".") && !s.includes("..")
+    && [...s].every((c) => /[A-Za-z0-9.-]/.test(c) || extra.includes(c));
+  return email.length <= 254 && part(local, "_+") && part(domain, "") && domain.includes(".");
 }

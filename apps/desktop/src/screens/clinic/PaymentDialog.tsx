@@ -11,7 +11,7 @@ import type { PayMethod } from "../../ipc/generated/PayMethod";
 import type { Visit } from "../../ipc/generated/Visit";
 import { usePatientCard, useSavePayment } from "./clinicData";
 import { formatDate, formatMoney, parseMoney, PAY_METHOD_LABEL, PAY_METHODS, VISIT_KIND_LABEL } from "./format";
-import { Field, MoneyField, moneyText, SelectField, TextAreaField, TextField, useShownName } from "./parts";
+import { ConfirmDialog, Field, MoneyField, moneyText, SelectField, TextAreaField, TextField, useShownName } from "./parts";
 
 const messageOf = (e: unknown, fallback: string) => (e as { message?: string }).message ?? fallback;
 
@@ -32,8 +32,10 @@ export function lastMethod(payments: readonly Payment[]): PayMethod {
 
 /** "תקבול חדש": money that was received. The amount starts from what is still owed, or from
  *  `amount` (the fee of the visit it was opened from); then the box says what the family owes. */
-export function PaymentDialog({ patientId, today, due, amount, about, method, onClose }: {
+export function PaymentDialog({ patientId, today, due, amount, about, method, dueKnown = true, onClose }: {
   patientId: string; today: string; due: number; amount?: number | undefined;
+  /** `due` is the family's balance as read (not a stand-in): an amount above it asks first. */
+  dueKnown?: boolean;
   /** The method the box opens on: the family's last one. */
   method?: PayMethod | undefined;
   /** Away from the card: whose payment this is, said first in the dialog. */
@@ -44,13 +46,24 @@ export function PaymentDialog({ patientId, today, due, amount, about, method, on
   const [first] = useState({ amount: moneyText(amount !== undefined && amount > 0 ? amount : due > 0 ? due : null), method: method ?? ("transfer" as PayMethod), receipt: "", payer: "", date: today, note: "" });
   const [form, setForm] = useState(first);
   const [error, setError] = useState<string | null>(null);
+  /** An amount above what the family owes, waiting for her word (a zero too many is a typo). */
+  const [over, setOver] = useState<number | null>(null);
   const set = (patch: Partial<typeof first>) => setForm((f) => ({ ...f, ...patch }));
+  const owed = Math.max(due, 0);
 
   async function submit() {
     const agorot = parseMoney(form.amount);
     if (agorot === null || agorot === 0) return setError("צריך לכתוב סכום גדול מאפס, בשקלים. למשל 450.");
     if (form.date === "") return setError("צריך לכתוב את תאריך התקבול: יום.חודש.שנה.");
     setError(null);
+    if (dueKnown && agorot > owed) {
+      setOver(agorot);
+      return;
+    }
+    await record(agorot);
+  }
+
+  async function record(agorot: number) {
     try {
       await save.mutateAsync({
         id: "", patient_id: patientId, date: form.date, amount: agorot, method: form.method, receipt: form.receipt, payer: form.payer, note: form.note,
@@ -62,6 +75,12 @@ export function PaymentDialog({ patientId, today, due, amount, about, method, on
       setError(messageOf(e, "התקבול לא נרשם. אפשר לנסות שוב."));
     }
   }
+  /** What the box says about the family's balance, when it is not the sum in the box. */
+  const balanceHint = amount === undefined || due === amount ? undefined
+    : due > 0 ? `היתרה של המשפחה: ${formatMoney(due)}.`
+    : !dueKnown ? undefined
+    : due === 0 ? "למשפחה אין יתרה פתוחה: הכול כבר שולם."
+    : `למשפחה כבר יש זכות של ${formatMoney(-due)}.`;
   return (
     <Dialog help="payment" narrow title="תקבול חדש" dirty={JSON.stringify(form) !== JSON.stringify(first)} onClose={onClose}
       footer={(close) => <>
@@ -73,7 +92,7 @@ export function PaymentDialog({ patientId, today, due, amount, about, method, on
         {about !== undefined && <p className="clinic-quiet">{about}</p>}
         <div className="clinic-form-row">
           <MoneyField id="payment-amount" label="סכום" value={form.amount} onChange={(text) => set({ amount: text })}
-            {...(amount !== undefined && due > 0 && due !== amount ? { hint: `היתרה של המשפחה: ${formatMoney(due)}.` } : {})} />
+            {...(balanceHint !== undefined ? { hint: balanceHint } : {})} />
           <SelectField<PayMethod> id="payment-method" label="אמצעי תשלום" value={form.method} onChange={(method) => set({ method })}
             options={PAY_METHODS.map((m) => ({ value: m, label: PAY_METHOD_LABEL[m] }))} />
           <Field id="payment-date" label="תאריך"><DateField id="payment-date" value={form.date} onChange={(date) => set({ date })} /></Field>
@@ -87,6 +106,18 @@ export function PaymentDialog({ patientId, today, due, amount, about, method, on
         <TextAreaField id="payment-note" label="הערה (לא חובה)" value={form.note} rows={2} maxLength={4000} onChange={(note) => set({ note })} />
         <ErrorLine error={error} />
       </div>
+      {over !== null && (
+        <ConfirmDialog title="הסכום גבוה מהיתרה" action={`לרשום ${formatMoney(over)}`} onClose={() => setOver(null)}
+          onConfirm={async () => {
+            setOver(null);
+            await record(over);
+          }}>
+          <p>
+            {due < 0 ? `למשפחה כבר יש זכות של ${formatMoney(-due)}.` : due === 0 ? "למשפחה אין יתרה פתוחה." : `היתרה של המשפחה היא ${formatMoney(due)}.`}
+            {" "}אחרי הרישום תהיה למשפחה זכות של {formatMoney(over - due)}. לרשום את הסכום כמו שהוא?
+          </p>
+        </ConfirmDialog>
+      )}
     </Dialog>
   );
 }
@@ -101,5 +132,5 @@ export function VisitPaymentDialog({ patientId, visit, today, onClose }: { patie
   // The name as the screen may show it now (initials in discreet mode).
   const who = card.data ? shown(card.data.patient.name) : "";
   const about = `${who === "" ? "תקבול" : `תקבול מהמשפחה של ${who}`}, על ${VISIT_KIND_LABEL[visit.kind]} מיום ${formatDate(visit.date)}.`;
-  return <PaymentDialog patientId={patientId} today={today} due={card.data?.balance.due ?? 0} amount={visitCharge(visit)} about={about} method={lastMethod(card.data?.payments ?? [])} onClose={onClose} />;
+  return <PaymentDialog patientId={patientId} today={today} due={card.data?.balance.due ?? 0} dueKnown={card.data !== undefined} amount={visitCharge(visit)} about={about} method={lastMethod(card.data?.payments ?? [])} onClose={onClose} />;
 }

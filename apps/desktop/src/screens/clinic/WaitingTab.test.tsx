@@ -71,7 +71,7 @@ describe("the waiting list", () => {
     await pick(user, "שירה", "לסמן כדחוף");
     expect(within(familyOf("שירה")).getByText("דחוף")).toBeInTheDocument();
     await waitFor(() => expect(requests().some((r) => r.op === "save_patient" && r.patient.name === "שירה" && r.patient.urgent)).toBe(true));
-    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("2 מהן דחופות"));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("2 משפחות ממתינות, ושתיהן דחופות"));
     // Both urgent: whoever waits longer is still first.
     expect(within((await families())[0] as HTMLElement).getByRole("button", { name: "עומר" })).toBeInTheDocument();
 
@@ -108,7 +108,7 @@ describe("the waiting list", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 
     await waitFor(() => expect(screen.queryByRole("button", { name: "שירה" })).toBeNull());
-    expect(screen.getByRole("status")).toHaveTextContent("משפחה אחת ממתינה, אחת מהן דחופה");
+    expect(screen.getByRole("status")).toHaveTextContent("משפחה אחת ממתינה, והיא דחופה");
     // The core made the card active.
     expect((await rowsOf(served)).find((r) => r.patient.name === "שירה")?.patient.status).toBe("active");
   });
@@ -213,5 +213,17 @@ describe("the words and the order of the waiting list", () => {
     });
     const rows = [sample("ג", false, "2026-10-01", "2026-10-01"), sample("ב", true, "2026-11-01", "2026-11-01"), sample("א", false, null, "2026-09-01"), sample("ד", true, "2026-10-20", "2026-10-20")];
     expect(rows.sort(waitingOrder).map((r) => r.patient.name)).toEqual(["ד", "ב", "א", "ג"]);
+  });
+});
+
+describe("how many of the families waiting are urgent", () => {
+  it("in words that fit how many wait", async () => {
+    const { urgentWords } = await import("./WaitingTab");
+    expect(urgentWords(0, 3)).toBe("");
+    expect(urgentWords(1, 1)).toBe(", והיא דחופה");
+    expect(urgentWords(2, 2)).toBe(", ושתיהן דחופות");
+    expect(urgentWords(3, 3)).toBe(", וכולן דחופות");
+    expect(urgentWords(1, 3)).toBe(", אחת מהן דחופה");
+    expect(urgentWords(2, 3)).toBe(", 2 מהן דחופות");
   });
 });

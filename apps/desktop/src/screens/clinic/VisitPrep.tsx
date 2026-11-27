@@ -48,7 +48,7 @@ export function VisitPrep({ patientId, visit, today }: { patientId: string; visi
       <h3 id="visit-prep-title" className="clinic-prep-title">לקראת הפגישה</h3>
       {reason !== "" && (
         <div className="stack clinic-prep-part">
-          <span className="label">פגישה ראשונה עם המשפחה. סיבת הפנייה</span>
+          <span className="label">פגישה ראשונה עם המשפחה. סיבת הפנייה:</span>
           {discreet ? <p className="muted small clinic-quiet">מוסתרת במצב דיסקרטי.</p> : <p className="pcard-note-text">{reason}</p>}
         </div>
       )}

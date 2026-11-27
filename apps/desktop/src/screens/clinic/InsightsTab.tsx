@@ -559,7 +559,7 @@ function Referrals({ i }: { i: Insights }) {
             value: r.count,
             figure: <><Num n={r.count} /> <span className="muted">(<span className="num" dir="ltr">{percentText(Math.round((r.count * 1000) / Math.max(1, total)))}</span>)</span></>,
           }))} />
-          <p className="hint">לפי השדה "הופנו על ידי" בכרטיסים שנפתחו בתקופה.</p>
+          <p className="hint">לפי השדה "מי הפנה" בכרטיסים שנפתחו בתקופה.</p>
         </>
       )}
     </Section>

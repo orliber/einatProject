@@ -235,6 +235,8 @@ function QuickAdd({ today }: { today: string }) {
   const [title, setTitle] = useState("");
   const [kind, setKind] = useState<TaskKind>("follow_up");
   const [due, setDue] = useState("");
+  /** A date typed wrong: never saved as "no date". */
+  const [dueBad, setDueBad] = useState(false);
   /** A new key gives the date box its text again after a suggestion or a save. */
   const [dueKey, setDueKey] = useState(0);
   const [patientId, setPatientId] = useState<string | null>(null);
@@ -246,6 +248,7 @@ function QuickAdd({ today }: { today: string }) {
 
   function setDate(iso: string) {
     setDue(iso);
+    setDueBad(false);
     setDueKey((k) => k + 1);
   }
 
@@ -264,6 +267,10 @@ function QuickAdd({ today }: { today: string }) {
     if (title.trim() === "") {
       setError("צריך לכתוב מה המעקב.");
       titleBox.current?.focus();
+      return;
+    }
+    if (dueBad) {
+      setError("תאריך היעד לא תקין. אפשר לתקן אותו, או למחוק אותו כדי לשמור בלי תאריך.");
       return;
     }
     sending.current = true;
@@ -296,7 +303,7 @@ function QuickAdd({ today }: { today: string }) {
         </div>
         <SelectField<TaskKind> id="task-new-kind" label="סוג" value={kind} options={KIND_OPTIONS} onChange={setKind} />
         <Field id="task-new-due" label="עד מתי (לא חובה)">
-          <DateField key={dueKey} id="task-new-due" value={due} onChange={setDue} />
+          <DateField key={dueKey} id="task-new-due" value={due} checked={dueBad && error !== null} onChange={(iso, bad) => { setDue(iso); setDueBad(bad); }} />
         </Field>
         <button type="submit" className="btn btn-primary clinic-quick-go" disabled={busy}><PlusIcon /> הוספה</button>
       </div>
@@ -393,15 +400,20 @@ function TaskDialog({ task, onClose }: { task: ClinicTask; onClose: () => void }
   const [title, setTitle] = useState(task.title);
   const [kind, setKind] = useState(task.kind);
   const [due, setDue] = useState(task.due ?? "");
+  const [dueBad, setDueBad] = useState(false);
   const [patientId, setPatientId] = useState(task.patient_id);
   const [note, setNote] = useState(task.note);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const dirty = title !== task.title || kind !== task.kind || due !== (task.due ?? "") || patientId !== task.patient_id || note !== task.note;
+  const dirty = title !== task.title || kind !== task.kind || due !== (task.due ?? "") || patientId !== task.patient_id || note !== task.note || dueBad;
 
   async function submit() {
     if (title.trim() === "") {
       setError("צריך לכתוב מה המעקב.");
+      return;
+    }
+    if (dueBad) {
+      setError("תאריך היעד לא תקין. אפשר לתקן אותו, או למחוק אותו כדי לשמור בלי תאריך.");
       return;
     }
     setBusy(true);
@@ -429,7 +441,7 @@ function TaskDialog({ task, onClose }: { task: ClinicTask; onClose: () => void }
           <SelectField<TaskKind> id="task-edit-kind" label="סוג" value={kind} options={optionsWith(TASK_KINDS, TASK_KIND_LABEL, kind)} onChange={setKind}
             hint={kind === "unknown" ? "הסוג שנשמר לא מוכר לגרסה הזו של התוכנה. כדי לשמור צריך לבחור סוג מהרשימה." : undefined} />
           <Field id="task-edit-due" label="עד מתי (לא חובה)" hint="ריק: בלי תאריך.">
-            <DateField id="task-edit-due" value={due} onChange={setDue} />
+            <DateField id="task-edit-due" value={due} checked={dueBad && error !== null} onChange={(iso, bad) => { setDue(iso); setDueBad(bad); }} />
           </Field>
         </div>
         <PatientPicker id="task-edit-patient" value={patientId} onChange={setPatientId} />

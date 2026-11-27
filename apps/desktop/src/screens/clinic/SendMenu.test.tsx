@@ -33,7 +33,7 @@ describe("a message to the family", () => {
     await user.click(screen.getByRole("button", { name: "תזכורת" }));
     await user.click(await screen.findByRole("menuitem", { name: "לשלוח בוואטסאפ" }));
     await waitFor(() => expect(notes).toHaveLength(1));
-    expect(notes[0]).toBe("וואטסאפ נפתח מול י. ל. התזכורת בלוח המוגן: מדביקים (Ctrl+V) ושולחים. יימחק מהלוח בעוד 20 שניות.");
+    expect(notes[0]).toBe("וואטסאפ נפתח מול י. ל. התזכורת בלוח המוגן: מדביקים (Ctrl+V) ושולחים. הלוח יתנקה בעוד 20 שניות.");
     expect(notes[0]).not.toContain("יעל");
     expect(notes[0]).not.toContain("לדוגמה");
     // The window asked for the chat only: it never read the message, nor copied it itself.
@@ -46,7 +46,7 @@ describe("a message to the family", () => {
     await user.click(screen.getByRole("button", { name: "תזכורת" }));
     await user.click(await screen.findByRole("menuitem", { name: "לשלוח בוואטסאפ" }));
     await waitFor(() => expect(notes).toHaveLength(1));
-    expect(notes[0]).toBe("וואטסאפ נפתח מול יעל לדוגמה. התזכורת בלוח המוגן: מדביקים (Ctrl+V) ושולחים. יימחק מהלוח בעוד 20 שניות.");
+    expect(notes[0]).toBe("וואטסאפ נפתח מול יעל לדוגמה. התזכורת בלוח המוגן: מדביקים (Ctrl+V) ושולחים. הלוח יתנקה בעוד 20 שניות.");
   });
 
   it("a contact with no name is “איש הקשר” in the toast, never initials, in discreet mode and out of it", async () => {
@@ -58,7 +58,7 @@ describe("a message to the family", () => {
       await user.click(screen.getByRole("button", { name: "תזכורת" }));
       await user.click(await screen.findByRole("menuitem", { name: "לשלוח בוואטסאפ" }));
       await waitFor(() => expect(notes).toHaveLength(1));
-      expect(notes[0], String(discreet)).toBe("וואטסאפ נפתח מול איש הקשר. התזכורת בלוח המוגן: מדביקים (Ctrl+V) ושולחים. יימחק מהלוח בעוד 20 שניות.");
+      expect(notes[0], String(discreet)).toBe("וואטסאפ נפתח מול איש הקשר. התזכורת בלוח המוגן: מדביקים (Ctrl+V) ושולחים. הלוח יתנקה בעוד 20 שניות.");
       view.unmount();
     }
   });
