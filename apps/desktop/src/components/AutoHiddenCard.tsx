@@ -85,8 +85,14 @@ export function AutoHiddenCard(props: {
   const ai = useAi();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** "להחזיר" lets a word out as written for the whole case, with no way back here: asked
+   *  once, in its row. */
+  const [asking, setAsking] = useState<string | null>(null);
+  /** What was let out last, said after the row is gone. */
+  const [restored, setRestored] = useState<string | null>(null);
   const rows = cardRows(props.items);
-  if (!rows.length) return null;
+  const restoredLine = restored && <p className="small" role="status">"{restored}" יישלח מעכשיו כמו שהוא, בכל התיק הזה.</p>;
+  if (!rows.length) return restoredLine || null;
   const look = rows.filter(needsLook);
   const sure = rows.filter((r) => !needsLook(r));
 
@@ -107,7 +113,29 @@ export function AutoHiddenCard(props: {
   const off = props.disabled === true || busy !== null;
   const words = (r: CardRow) => r.tokens.join(", ");
   const row = (r: CardRow) => {
-    const person = r.kind === "name" || r.kind === "other_case";
+    // UIC-9: a name kept in another case has no role here (the menu would change nothing).
+    const person = (r.kind === "name" || r.kind === "other_case") && r.tag !== OTHER_CASE_TAG;
+    if (caseId && asking === r.key) {
+      return (
+        <li key={r.key} className="auto-item auto-ask" role="group" aria-label={`להחזיר את ${words(r)}?`}>
+          <span className="grow small">
+            {r.tag === OTHER_CASE_TAG
+              ? `"${words(r)}" יישלח ל-${ai} כמו שהוא, וגם בתיק שבו הוא נשמר כשם הוא לא יוסתר עוד.`
+              : `"${words(r)}" יישלח ל-${ai} כמו שהוא, בכל התיק הזה.`}
+          </span>
+          <button type="button" className="btn btn-small" disabled={off} aria-label={`כן, להחזיר את ${words(r)}`}
+            onClick={() => void act(r.key, async () => {
+              // Every form of the word: keeping one and hiding another would make no sense.
+              for (const t of r.tokens) await ipc.restoreAutoHidden(caseId, t, r.tag);
+              setAsking(null);
+              setRestored(words(r));
+            })}>
+            {busy === r.key ? <Spinner /> : "כן, להחזיר"}
+          </button>
+          <button type="button" className="btn btn-small btn-ghost" disabled={off} onClick={() => setAsking(null)}>ביטול</button>
+        </li>
+      );
+    }
     return (
       <li key={r.key} className="auto-item">
         <div className="grow stack" style={{ gap: 2 }}>
@@ -140,11 +168,8 @@ export function AutoHiddenCard(props: {
         )}
         {caseId && (
           <button type="button" className="btn btn-small" disabled={off} aria-label={`להחזיר את ${words(r)}`}
-            onClick={() => void act(r.key, async () => {
-              // Every form of the word: keeping one and hiding another would make no sense.
-              for (const t of r.tokens) await ipc.restoreAutoHidden(caseId, t, r.tag);
-            })}>
-            {busy === r.key ? <Spinner /> : "להחזיר"}
+            onClick={() => { setRestored(null); setAsking(r.key); }}>
+            להחזיר
           </button>
         )}
       </li>
@@ -158,6 +183,7 @@ export function AutoHiddenCard(props: {
           ? `${ai} מקבל את מה שאחרי החץ. "להחזיר" משאיר את המילה, בכל התיק.`
           : "בשאלה כללית אי אפשר להחזיר מילה. שואלים מתוך תיק."}
       </span>
+      {restoredLine}
       {look.length > 0 && <ul className="auto-list">{look.map(row)}</ul>}
       {sure.length > 0 && (
         // What the filter is sure of is only counted; a short card shows it as is.

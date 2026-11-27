@@ -104,12 +104,21 @@ fn levels_in(text: &str) -> Vec<u8> {
         .filter(|w| !w.is_empty())
         .collect();
     let mut out = Vec::new();
-    for pair in words.windows(2) {
-        let [word, next] = pair else { continue };
+    for (i, word) in words.iter().enumerate() {
         let word = word.trim_start_matches(['ב', 'ו', 'ה', 'ש', 'ל']);
+        let construct = matches!(word, "דרגת" | "רמת");
         let named =
-            matches!(word, "דרגה" | "רמה" | "דרגת" | "רמת") || word.eq_ignore_ascii_case("level");
-        if let (true, Some(n)) = (named, level_of(next)) {
+            construct || matches!(word, "דרגה" | "רמה") || word.eq_ignore_ascii_case("level");
+        if !named {
+            continue;
+        }
+        // "רמת חומרה 3", "דרגת התמיכה 2": the construct form is followed by its noun first.
+        let mut next = words.get(i + 1);
+        if construct && next.is_some_and(|w| matches!(*w, "חומרה" | "החומרה" | "תמיכה" | "התמיכה"))
+        {
+            next = words.get(i + 2);
+        }
+        if let Some(n) = next.and_then(|w| level_of(w)) {
             out.push(n);
         }
     }
@@ -227,5 +236,19 @@ mod tests {
         assert_eq!(severity_request(None), UNSET_REQUEST);
         // A number that is not a level is not one.
         assert!(check_dsm_severity("בגיל 5 נצפו 3 התנהגויות.", Some(&s)).is_empty());
+        // DOMAIN-6: "רמת חומרה 3", the usual wording, is read too.
+        assert_eq!(
+            check_dsm_severity("האבחנה היא ברמת חומרה 3 בתחום התקשורת החברתית.", Some(&s)),
+            vec!["בפסקה כתובה דרגה 3, ואת קבעת דרגה 2. כדאי לבדוק.".to_owned()]
+        );
+        assert_eq!(
+            check_dsm_severity("דרגת התמיכה 3 בתחום התקשורת החברתית.", Some(&s)).len(),
+            1
+        );
+        assert!(check_dsm_severity("ברמת חומרה 2 בתחום התקשורת החברתית.", Some(&s)).is_empty());
+        assert_eq!(
+            check_dsm_severity("רמת חומרה 2", None),
+            vec!["בפסקה כתובה דרגה 2, ועוד לא קבעת רמת חומרה. כדאי לבדוק.".to_owned()]
+        );
     }
 }

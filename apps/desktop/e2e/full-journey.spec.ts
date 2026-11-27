@@ -31,7 +31,7 @@ async function openSettings(page: Page, pane: string): Promise<void> {
 async function addIntake(page: Page, child: string): Promise<void> {
   await stage(page, /חומרים/).click();
   await page.getByRole("button", { name: "אינטייק עם ההורים (רישום אינטייק)" }).click();
-  const write = page.getByRole("dialog", { name: "הוספת טקסט" });
+  const write = page.getByRole("dialog", { name: /^(הוספת טקסט|רישום .+)$/ });
   await expect(write).toBeVisible();
   await write.getByLabel("כותרת").fill("אינטייק בדוי");
   await write.getByLabel("הטקסט").fill(
@@ -245,6 +245,9 @@ test("two sections are written and approved, a paragraph is edited by hand, and 
   await expect(focused).toHaveCount(1);
   const firstId = await focused.getAttribute("id");
   await focused.getByRole("button", { name: "✦ לנסח את הסעיף" }).click();
+  // A section written from her diagnoses asks first while they are not approved (D-218).
+  const early = focused.getByRole("group", { name: "לנסח לפני הזמן?" });
+  if (await early.isVisible()) await early.getByRole("button", { name: "להמשיך בכל זאת" }).click();
   const approve = report.getByRole("button", { name: "✓ לאשר" });
   await expect(approve).toBeVisible({ timeout: 20_000 });
   await expect(report.locator(".a4-section.has-pending")).toHaveAttribute("id", firstId ?? "");
@@ -261,6 +264,8 @@ test("two sections are written and approved, a paragraph is edited by hand, and 
   // Out of focus, "✦ לנסח" brings the section into focus (D-140); its "✦ לנסח את הסעיף" sends.
   await gap.click();
   await report.locator(`#${secondId}`).getByRole("button", { name: "✦ לנסח את הסעיף" }).click();
+  const early2 = report.locator(`#${secondId}`).getByRole("group", { name: "לנסח לפני הזמן?" });
+  if (await early2.isVisible()) await early2.getByRole("button", { name: "להמשיך בכל זאת" }).click();
   await expect(approve).toBeVisible({ timeout: 20_000 });
   await expect(report.locator(".a4-section.has-pending")).toHaveAttribute("id", secondId);
   await approve.click();
@@ -315,7 +320,7 @@ test("the finish page checks the report, and the Word, PDF and parents' versions
   await stage(page, /הוצאת הדוח/).click();
   await expect(stage(page, /הוצאת הדוח/)).toHaveAttribute("aria-current", "step");
   const side = page.getByRole("region", { name: "לפני שהקובץ יוצא" });
-  await expect(side.getByRole("heading", { level: 1 })).toHaveText(/הדוח מוכן להוצאה\.|אפשר להוציא\./);
+  await expect(side.getByRole("heading", { level: 1 })).toHaveText(/הדוח מוכן להוצאה\.|אפשר להוציא[.,]/);
   await expect(side.locator(".finish-file").first()).toContainText(/\d+ סעיפים מאושרים ייכנסו לקובץ/);
   await expect(side.locator(".finish-file").first()).toContainText("השמות חוזרים למקומם בקובץ.");
   // The page beside it is the file: the name back in place, the sections as they will print.

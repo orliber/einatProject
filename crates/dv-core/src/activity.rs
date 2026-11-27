@@ -29,6 +29,8 @@ const INTERNAL_SETTINGS: &[&str] = &[
     // An open edit kept at lock and given back at the next entry.
     "unsaved_edit",
     REVIEWED_KEY,
+    // Which case is the made-up one; vaults that opened it before CORE-9 logged it as a setting.
+    crate::cases::SAMPLE_KEY,
 ];
 
 /// Her words for a reason the vault's integrity check gives. The vault keeps the reason in
@@ -101,6 +103,9 @@ fn describe(
         }
         "lock" if text("reason") == "computer_locked" => {
             ("access", "נעילה (המחשב ננעל)".to_owned(), false)
+        }
+        "lock" if text("reason") == "app_closed" => {
+            ("access", "נעילה (התוכנה נסגרה)".to_owned(), false)
         }
         "lock" => ("access", "נעילה".to_owned(), false),
         "password_changed" => ("security", "הסיסמה הוחלפה".to_owned(), false),

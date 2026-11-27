@@ -34,7 +34,7 @@ test("home → new case → materials → review before sending → report page"
 
   // Materials: an intake written with the real (invented) names.
   await page.getByRole("button", { name: "אינטייק עם ההורים (רישום אינטייק)" }).click();
-  const write = page.getByRole("dialog", { name: "הוספת טקסט" });
+  const write = page.getByRole("dialog", { name: /^(הוספת טקסט|רישום .+)$/ });
   await expect(write).toBeVisible();
   // The text box has the focus: she can start typing at once.
   await expect(write.getByLabel("הטקסט")).toBeFocused();

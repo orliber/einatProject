@@ -39,7 +39,8 @@ export function TurnOnDialog({ onClose, onTurnedOn }: { onClose: () => void; onT
 
   async function turnOn(e?: FormEvent) {
     e?.preventDefault();
-    if (!password) return;
+    // Enter pressed again while it is under way is not a second request (UIA-10).
+    if (busy || !password) return;
     setBusy(true);
     setError(null);
     try {
@@ -96,7 +97,8 @@ function TurnOffDialog({ onClose }: { onClose: () => void }) {
 
   async function turnOff(e?: FormEvent) {
     e?.preventDefault();
-    if (!password) return;
+    // Enter pressed again while it is under way is not a second request (UIA-10).
+    if (busy || !password) return;
     setBusy(true);
     setError(null);
     try {

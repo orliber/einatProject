@@ -14,6 +14,7 @@ import type { ClinicTask } from "../../ipc/generated/ClinicTask";
 import type { Overview } from "../../ipc/generated/Overview";
 import type { TaskView } from "../../ipc/generated/TaskView";
 import type { Visit } from "../../ipc/generated/Visit";
+import type { VisitStatus } from "../../ipc/generated/VisitStatus";
 import type { VisitView } from "../../ipc/generated/VisitView";
 import { clinicKeys, useOptimistic, useOverview, useReloadClinic, useToday } from "./clinicData";
 import { formatDate, formatDateLong, formatMoney, formatTime, greeting, nowIndex, ownVisit, TASK_KIND_LABEL, todayCountWords, untilWords } from "./format";
@@ -22,7 +23,7 @@ import { NoteDialog } from "./NoteDialog";
 import { AlertGroups, EmptyState, PatientName, ReadError, Section, useClinicNav, VisitRow } from "./parts";
 import { PatientDialog } from "./PatientDialog";
 import { VisitPaymentDialog } from "./PaymentDialog";
-import { VisitActions } from "./VisitActions";
+import { MARKED, VisitActions } from "./VisitActions";
 import { VisitDialog } from "./VisitDialog";
 
 /** What is open over the tab: one dialog at a time. */
@@ -33,7 +34,8 @@ type Open =
   | { kind: "payment"; patientId: string; visit: Visit }
   | null;
 
-const markHeld = (v: VisitView, id: string): VisitView => (v.visit.id === id ? { ...v, visit: { ...v.visit, status: "held" } } : v);
+const markAs = (v: VisitView, id: string, status: VisitStatus): VisitView => (v.visit.id === id ? { ...v, visit: { ...v.visit, status } } : v);
+
 
 export function TodayTab() {
   const now = useToday();
@@ -43,18 +45,28 @@ export function TodayTab() {
   const reload = useReloadClinic();
   const { notify } = useApp();
 
-  // A visit marked "held" shows so at once, on today's list and on the next day's, and its
-  // "פגישה שלא סומנה" leaves "מה דורש אותי". The "בלי סיכום" that follows comes with the next read.
-  const hold = useOptimistic<Overview, Visit>(
+  // A visit marked "held" (or "לא הגיעו") shows so at once, on today's list and on the next
+  // day's, and its "פגישה שלא סומנה" leaves "מה דורש אותי". The "בלי סיכום" that follows comes
+  // with the next read. "ביטול" in the toast puts the visit back as it was ("planned").
+  const mark = useOptimistic<Overview, { visit: Visit; status: VisitStatus }>(
     clinicKeys.overview(now.date),
-    (o, visit) => ({
+    (o, { visit, status }) => ({
       ...o,
-      visits: o.visits.map((v) => markHeld(v, visit.id)),
-      next_visits: o.next_visits.map((v) => markHeld(v, visit.id)),
-      alerts: o.alerts.filter((a) => !(a.kind === "unmarked" && a.visit_id === visit.id)),
+      visits: o.visits.map((v) => markAs(v, visit.id, status)),
+      next_visits: o.next_visits.map((v) => markAs(v, visit.id, status)),
+      alerts: status === "planned" ? o.alerts : o.alerts.filter((a) => !(a.kind === "unmarked" && a.visit_id === visit.id)),
     }),
-    (visit) => clinicApi.saveVisit({ ...visit, status: "held", status_note: "", charge_missed: false }),
+    ({ visit, status }) => clinicApi.saveVisit(status === "planned" ? visit : { ...visit, status, status_note: "", charge_missed: false }),
   );
+  /** Marks a visit from its row; the toast offers to take the mark back. */
+  async function markVisit(visit: Visit, status: "held" | "no_show") {
+    if (!(await mark({ visit, status }))) return;
+    notify(MARKED[status], {
+      label: "ביטול",
+      run: () => void mark({ visit, status: "planned" }).then((ok) => { if (ok) notify("הסימון בוטל"); }),
+    });
+  }
+  const hold = (visit: Visit) => markVisit(visit, "held");
   // "כולן התקיימו" in the day's closing: one visit after the other, so a refusal names the one
   // that stopped it and the ones before it stay marked; the page is read again either way.
   const holdAll = async (visits: Visit[]) => {
@@ -113,7 +125,7 @@ export function TodayTab() {
             <VisitRow view={view} quietPlanned {...(ahead?.id === v.id ? { soon: ahead.text } : {})}
               onOpen={() => setOpen({ kind: "visit", view })}
               actions={pid !== null
-                ? <VisitActions view={view} patientId={pid} now={now} onHold={(x) => void hold(x)}
+                ? <VisitActions view={view} patientId={pid} now={now} onHold={(x) => void hold(x)} onNoShow={(x) => void markVisit(x, "no_show")}
                     onNote={(x, record) => setOpen({ kind: "note", patientId: pid, visit: x, record })} onOpen={() => setOpen({ kind: "visit", view })}
                     onPay={(x) => setOpen({ kind: "payment", patientId: pid, visit: x })} />
                 : undefined} />
@@ -189,9 +201,9 @@ export function TodayTab() {
               <Section title="מה דורש אותי" aside={o.alerts.length > 0 ? <span className="muted small">{o.alerts.length === 1 ? "דבר אחד" : `${o.alerts.length} דברים`}</span> : undefined}>
                 <AlertGroups alerts={o.alerts} onVisit={openAlertVisit} holdOf={holdOf} empty="אין כרגע שום דבר שמחכה לטיפול." />
               </Section>
-              <Section title="משימות פתוחות" aside={<button type="button" className="link-btn" onClick={() => nav.openTab("tasks")}>לכל המעקבים</button>}>
+              <Section title="מעקבים פתוחים" aside={<button type="button" className="link-btn" onClick={() => nav.openTab("tasks")}>לכל המעקבים</button>}>
                 {o.tasks.length === 0
-                  ? <p className="muted clinic-quiet">אין משימות פתוחות.</p>
+                  ? <p className="muted clinic-quiet">אין מעקבים פתוחים.</p>
                   : (
                     <ul className="clinic-list clinic-tasks">
                       {o.tasks.map((t) => <TaskLine key={t.task.id} view={t} onDone={() => void finish(t.task)} />)}

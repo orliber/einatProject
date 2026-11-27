@@ -15,16 +15,14 @@ pub(crate) async fn download_name_model(state: tauri::State<'_, AppState>) -> Re
     let models = state.models.clone();
     let progress = Arc::clone(&state.model_progress);
     tauri::async_runtime::spawn_blocking(move || {
-        let Ok(mut slot) = progress.try_lock() else {
+        if !claim_download(&progress) {
             return Err(UiError {
                 code: "refused".to_owned(),
                 message: "ההורדה כבר רצה.".to_owned(),
                 details: Vec::new(),
                 action: dv_core::ErrorAction::Dismiss,
             });
-        };
-        *slot = Some((0, 0));
-        drop(slot);
+        }
         let report = |done: u64, total: u64| {
             if let Ok(mut p) = progress.lock() {
                 *p = Some((done, total));
@@ -39,6 +37,39 @@ pub(crate) async fn download_name_model(state: tauri::State<'_, AppState>) -> Re
     .await
     .map_err(|_| internal("task"))??;
     with_core(&state, |c| c.set_name_model(true)).await
+}
+
+/// Mark a download as running, unless one already is (OPS-2). The mark stays from the click
+/// until the download ends, also between the progress reports; a second download beside the
+/// first would write into the same `.part` files.
+fn claim_download(progress: &Mutex<Option<(u64, u64)>>) -> bool {
+    let mut slot = progress
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if slot.is_some() {
+        return false;
+    }
+    *slot = Some((0, 0));
+    true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_second_download_is_refused_while_one_runs() {
+        let progress = Mutex::new(None);
+        assert!(claim_download(&progress));
+        assert!(!claim_download(&progress), "the first is still running");
+        *progress.lock().unwrap() = Some((10, 100));
+        assert!(!claim_download(&progress), "still running, between reports");
+        *progress.lock().unwrap() = None;
+        assert!(
+            claim_download(&progress),
+            "the first ended: a new one may start"
+        );
+    }
 }
 
 /// Bytes downloaded so far and the total, while a download runs.

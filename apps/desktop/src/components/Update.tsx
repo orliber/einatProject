@@ -159,12 +159,18 @@ export function useDailyUpdateCheck() {
         return;
       }
       if (!autoCheckOn()) return;
+      const last = Number(read(CHECKED_KEY) ?? 0);
+      const due = Date.now() - last >= DAY_MS;
       if (found) {
-        prepareInBackground();
+        // A version remembered for more than a day is asked about again: a newer one may have
+        // come out since (or the notice was withdrawn), and the installer prepared in the
+        // background is always the one the notice names now, so the chip and the window must
+        // name that one too (OPS-9).
+        if (due) checkNow().catch(() => prepareInBackground());
+        else prepareInBackground();
         return;
       }
-      const last = Number(read(CHECKED_KEY) ?? 0);
-      if (Date.now() - last < DAY_MS) return;
+      if (!due) return;
       checkNow().catch(() => undefined);
     };
     look();

@@ -28,19 +28,22 @@ export function heToIso(text: string): string | null {
 /**
  * A date typed as day.month.year. The native date picker lays its parts out in a mixed order
  * inside right-to-left text ("2026/28/09"), so dates are typed the way they are written.
- * `value` and `onChange` use ISO dates; an unfinished or impossible date reports "".
+ * `value` and `onChange` use ISO dates; an unfinished or impossible date reports "", with
+ * `bad` set, so a form can tell a date left empty from one typed wrong (and not save the
+ * wrong one as "no date"). `checked` shows the problem at once, as a form does on saving.
  */
 export function DateField(props: {
   id: string;
   value: string;
-  onChange: (iso: string) => void;
+  onChange: (iso: string, bad: boolean) => void;
   notAfterToday?: boolean;
+  checked?: boolean;
 }) {
   const [text, setText] = useState(() => isoToHe(props.value));
   const [touched, setTouched] = useState(false);
   const iso = heToIso(text);
   const future = iso !== null && props.notAfterToday === true && iso > todayIso();
-  const problem = touched && text.trim() !== "" ? (iso === null ? "תאריך לא תקין. כותבים יום.חודש.שנה" : future ? "התאריך עוד לא הגיע" : null) : null;
+  const problem = (touched || props.checked === true) && text.trim() !== "" ? (iso === null ? "תאריך לא תקין. כותבים יום.חודש.שנה" : future ? "התאריך עוד לא הגיע" : null) : null;
 
   return (
     <span className="date-field">
@@ -50,7 +53,8 @@ export function DateField(props: {
         onChange={(e) => {
           setText(e.target.value);
           const next = heToIso(e.target.value);
-          props.onChange(next !== null && !(props.notAfterToday === true && next > todayIso()) ? next : "");
+          const ok = next !== null && !(props.notAfterToday === true && next > todayIso());
+          props.onChange(ok ? next : "", !ok && e.target.value.trim() !== "");
         }}
         onBlur={() => setTouched(true)} />
       {problem && <span id={`${props.id}-err`} className="error small">{problem}</span>}

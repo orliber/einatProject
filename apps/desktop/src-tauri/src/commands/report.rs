@@ -197,27 +197,71 @@ pub(crate) async fn export_report(
         .filter(|p| !p.is_empty())
         .map(zeroize::Zeroizing::new);
     // Rendering, encrypting and writing the file run with the core free (F2).
-    let (bytes, check) = off_lock(
+    let (bytes, check, record) = off_lock(
         &state,
         move |c| {
             c.begin_export_report_as(&case_id, password.as_deref().map(String::as_str), parents)
         },
         |job| job.run(),
-        |c, exported| c.finish_export(exported),
+        |c, exported| c.take_export(exported),
     )
     .await?;
-    save_export(dir, check.file_name, bytes).await
+    save_and_record(&state, dir, check.file_name, bytes, record).await
 }
 
 /// Write an exported file into `dir` under a free name, off the core.
 async fn save_export(dir: PathBuf, file_name: String, bytes: Vec<u8>) -> Res<String> {
+    write_file(dir, file_name, bytes)
+        .await
+        .map(|path| path.display().to_string())
+}
+
+async fn write_file(dir: PathBuf, file_name: String, bytes: Vec<u8>) -> Res<PathBuf> {
     tauri::async_runtime::spawn_blocking(move || {
-        let path =
-            write_new(&dir, &file_name, &bytes).map_err(|e| dv_core::file_error(e).to_ui())?;
-        Ok(path.display().to_string())
+        write_new(&dir, &file_name, &bytes).map_err(|e| dv_core::file_error(e).to_ui())
     })
     .await
     .map_err(|_| internal("task"))?
+}
+
+/// A report or a letter: the file is written first, and only then is the export recorded in
+/// the vault (the audit log with its fingerprint, and her style learning from it). A write
+/// that fails records nothing (EXPORT-6, JOBS-5).
+async fn save_and_record(
+    state: &AppState,
+    dir: PathBuf,
+    file_name: String,
+    bytes: Vec<u8>,
+    record: dv_core::ExportRecord,
+) -> Res<String> {
+    // Counted while the file is written and recorded: closing the program waits for it (D-218),
+    // so it never ends between the two and leaves a report the vault does not know of.
+    let _writing = crate::Exporting::start(&state.exporting);
+    write_then_record(dir, file_name, bytes, || {
+        with_core(state, move |c| c.record_export(record))
+    })
+    .await
+}
+
+/// Write the file, then `record` it. When the record is refused (the vault locked while the
+/// file was written), the file just written is removed again: no report with the names in it
+/// is left that the vault does not know of.
+async fn write_then_record<F, Fut>(
+    dir: PathBuf,
+    file_name: String,
+    bytes: Vec<u8>,
+    record: F,
+) -> Res<String>
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = Res<()>>,
+{
+    let path = write_file(dir, file_name, bytes).await?;
+    if let Err(e) = record().await {
+        let _ = std::fs::remove_file(&path);
+        return Err(e);
+    }
+    Ok(path.display().to_string())
 }
 
 /// EX-3: the report as a locked PDF, into the same folder as the Word file.
@@ -233,18 +277,18 @@ pub(crate) async fn export_pdf(
     let password = password
         .filter(|p| !p.is_empty())
         .map(zeroize::Zeroizing::new);
-    let (bytes, check) = off_lock(
+    let (bytes, check, record) = off_lock(
         &state,
         move |c| c.begin_export_pdf_as(&case_id, password.as_deref().map(String::as_str), parents),
         |job| job.run(),
-        |c, exported| c.finish_export(exported),
+        |c, exported| c.take_export(exported),
     )
     .await?;
     let stem = check
         .file_name
         .rsplit_once('.')
         .map_or(check.file_name.as_str(), |(s, _)| s);
-    save_export(dir, format!("{stem}.pdf"), bytes).await
+    save_and_record(&state, dir, format!("{stem}.pdf"), bytes, record).await
 }
 
 /// L6: the protection layers on paper, for the parents and the institute (nothing about a
@@ -337,16 +381,17 @@ pub(crate) async fn export_letter(
     } else {
         "הורים"
     };
-    let (bytes, check) = off_lock(
+    let (bytes, check, record) = off_lock(
         &state,
         move |c| {
             c.begin_export_letter(&case_id, &audience, password.as_deref().map(String::as_str))
         },
         |job| job.run(),
-        |c, exported| c.finish_export(exported),
+        |c, exported| c.take_export(exported),
     )
     .await?;
-    save_export(dir, format!("מכתב-{who}-{}", check.file_name), bytes).await
+    let name = format!("מכתב-{who}-{}", check.file_name);
+    save_and_record(&state, dir, name, bytes, record).await
 }
 
 #[cfg(test)]
@@ -383,6 +428,50 @@ mod tests {
         );
         // A folder that is not there: an error, and nothing written anywhere.
         assert!(write_new(&dir.join("אין"), "a.docx", b"x").is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// EXPORT-6, JOBS-5: an export is recorded only once its file is written, and a file
+    /// whose record is refused does not stay.
+    #[test]
+    fn an_export_is_recorded_only_after_its_file_is_written() {
+        let dir = scratch("record");
+        let recorded = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let mark = |r: &std::sync::Arc<std::sync::atomic::AtomicBool>| {
+            let r = std::sync::Arc::clone(r);
+            move || async move {
+                r.store(true, std::sync::atomic::Ordering::SeqCst);
+                Ok(())
+            }
+        };
+        // A folder that is not there: nothing is recorded.
+        let failed = tauri::async_runtime::block_on(write_then_record(
+            dir.join("אין"),
+            "דוח.docx".to_owned(),
+            b"x".to_vec(),
+            mark(&recorded),
+        ));
+        assert!(failed.is_err());
+        assert!(!recorded.load(std::sync::atomic::Ordering::SeqCst));
+        // Written, then recorded.
+        let saved = tauri::async_runtime::block_on(write_then_record(
+            dir.clone(),
+            "דוח.docx".to_owned(),
+            b"x".to_vec(),
+            mark(&recorded),
+        ))
+        .unwrap();
+        assert!(recorded.load(std::sync::atomic::Ordering::SeqCst));
+        assert!(PathBuf::from(&saved).is_file());
+        // The record refused (locked meanwhile): the file is removed.
+        let refused = tauri::async_runtime::block_on(write_then_record(
+            dir.clone(),
+            "מכתב.docx".to_owned(),
+            b"y".to_vec(),
+            || async { Err(CoreError::Locked.to_ui()) },
+        ));
+        assert!(refused.is_err());
+        assert!(!dir.join("מכתב.docx").exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

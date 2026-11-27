@@ -15,6 +15,7 @@ import {
   ALERT_KIND_LABEL, formatDate, formatSpan, initials, ownVisit, moneyInput, moneyNumber, parseMoney, parseTime, PATIENT_STATUS_LABEL,
   VISIT_KIND_LABEL, VISIT_STATUS_LABEL,
 } from "./format";
+import { searchForm } from "../../searchForm";
 import { rememberLine } from "./RememberList";
 import type { ClinicTab } from "./tabs";
 import "./ClinicScreen.css";
@@ -582,6 +583,28 @@ export function RecordHistory({ recordId }: { recordId: string }) {
 const PICKER_ROWS = 8;
 
 /**
+ * The patients whose name holds what she typed, as the patients' search reads it (a final
+ * letter is its regular form: "שלומ" finds "שלום"). A name that starts with it comes first,
+ * then one with a word that starts with it, then the rest: "ת" lists תמר before איתי. In
+ * discreet mode, where only initials are shown, this order is what tells them apart.
+ */
+export function pickerMatches<R extends { patient: { name: string; status: string } }>(all: readonly R[], typed: string): R[] {
+  const query = searchForm(typed.trim());
+  if (query === "") return all.filter((r) => r.patient.status !== "closed");
+  const rank = (name: string) => {
+    const at = searchForm(name).indexOf(query);
+    if (at < 0) return -1;
+    if (at === 0) return 0;
+    return /[\s\-־'"׳]/.test(name.charAt(at - 1)) ? 1 : 2;
+  };
+  return all
+    .map((r, i) => ({ r, i, rank: rank(r.patient.name) }))
+    .filter((x) => x.rank >= 0)
+    .sort((a, b) => a.rank - b.rank || a.i - b.i)
+    .map((x) => x.r);
+}
+
+/**
  * Chooses a patient by name: a field the size of a name, and under it a short list that opens
  * when she types, clicks the field or presses the down arrow, and closes once she chose, pressed
  * Escape or moved on (Einat, 2026-11-17: the list as wide as the window was heavy on the eye).
@@ -613,9 +636,7 @@ export function PatientPicker({ id, value, onChange, autoFocus = false, locked =
   const all = rows.data ?? [];
   const chosenName = value === null ? undefined : all.find((r) => r.patient.id === value)?.patient.name;
   const query = text.trim();
-  const matches = all
-    .filter((r) => (query === "" ? r.patient.status !== "closed" : r.patient.name.includes(query)))
-    .slice(0, PICKER_ROWS);
+  const matches = pickerMatches(all, query).slice(0, PICKER_ROWS);
   const marked = open && active >= 0 && active < matches.length ? active : -1;
   const optionId = (at: number) => `${id}-option-${at}`;
   // The list floats over what is under the field: inside a short window that scrolls, the window

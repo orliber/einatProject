@@ -11,7 +11,7 @@ import { holdNow } from "../../components/Unsaved";
 import type { ImportPreview } from "../../ipc/client";
 import { a11yViolations } from "../../test/a11y";
 import { appApi, CaseHost, Host, serve, type Override } from "../../test/host";
-import { MaterialsView } from "./MaterialsView";
+import { MaterialsView, passagesLine } from "./MaterialsView";
 
 configure({ asyncUtilTimeout: 5000 });
 vi.setConfig({ testTimeout: 20_000 });
@@ -88,7 +88,7 @@ describe("the materials of a case", () => {
     // No window opened for a file that was read in full.
     expect(screen.queryByRole("dialog")).toBeNull();
 
-    await user.click(within(saved).getByRole("button", { name: "ביטול" }));
+    await user.click(within(saved).getByRole("button", { name: "ביטול הייבוא" }));
     await waitFor(() => expect(app.notify).toHaveBeenCalledWith("הייבוא בוטל."));
     expect(screen.queryByRole("status")).toBeNull();
     expect(within(list()).getByText("4 חומרים")).toBeInTheDocument();
@@ -220,6 +220,7 @@ describe("the materials of a case", () => {
     const { user, app } = await openMaterials();
     await user.click(within(list()).getByRole("button", { name: /מפגש שני/ }));
     await user.click(within(await screen.findByRole("dialog", { name: "מפגש שני" })).getByRole("button", { name: "מחיקה" }));
+    await user.click(within(await screen.findByRole("dialog", { name: "מחיקת החומר" })).getByRole("button", { name: "מחיקה" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(app.notify).toHaveBeenCalledWith("החומר נמחק מהתיק.", expect.objectContaining({ label: "ביטול" }));
     expect(within(list()).queryByText("מפגש שני")).toBeNull();
@@ -240,6 +241,7 @@ describe("the materials of a case", () => {
     await user.click(within(list()).getByRole("button", { name: /שיחה עם הגננת/ }));
     const window = await screen.findByRole("dialog", { name: "שיחה עם הגננת" });
     await user.click(within(window).getByRole("button", { name: "מחיקה" }));
+    await user.click(within(await screen.findByRole("dialog", { name: "מחיקת החומר" })).getByRole("button", { name: "מחיקה" }));
     expect(await within(window).findByRole("alert")).toHaveTextContent("לא הצלחתי לשמור את השינוי בכספת.");
     expect(screen.getAllByRole("alert")).toHaveLength(1);
     expect(within(list()).getByText("שיחה עם הגננת")).toBeInTheDocument();
@@ -310,5 +312,118 @@ describe("the materials of a case", () => {
     await user.click(within(pick).getByRole("button", { name: "שמירה" }));
     await waitFor(() => expect(app.notify).toHaveBeenCalledWith("הסעיפים של החומר עודכנו."));
     expect(calls.find((c) => c.cmd === "set_input_sections")?.args.sections).toEqual(["kindergarten", "appearance"]);
+  });
+
+  it("a material is deleted only after she says yes; “ביטול” there keeps it (walk: high)", async () => {
+    const { user, calls } = await openMaterials();
+    await user.click(within(list()).getByRole("button", { name: /מפגש שני/ }));
+    await user.click(within(await screen.findByRole("dialog", { name: "מפגש שני" })).getByRole("button", { name: "מחיקה" }));
+    const ask = await screen.findByRole("dialog", { name: "מחיקת החומר" });
+    expect(ask).toHaveTextContent('"מפגש שני" יימחק מהתיק.');
+    expect(calls.some((c) => c.cmd === "delete_input")).toBe(false);
+    await user.click(within(ask).getByRole("button", { name: "ביטול" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "מחיקת החומר" })).toBeNull());
+    expect(calls.some((c) => c.cmd === "delete_input")).toBe(false);
+    expect(screen.getByRole("dialog", { name: "מפגש שני" })).toBeInTheDocument();
+    expect(within(list()).getByText("מפגש שני")).toBeInTheDocument();
+  });
+
+  it("deleting the file just saved takes its “נשמר בתיק” band away too", async () => {
+    const { user } = await openMaterials((cmd) => (cmd === "import_document" ? read() : undefined));
+    await user.upload(upload(), file());
+    await user.click(within(await screen.findByRole("status")).getByRole("button", { name: "לבדיקה" }));
+    // "לבדיקה" closes the band; save another to keep a band while deleting.
+    const window = await screen.findByRole("dialog", { name: "סיכום טיפול בדוי" });
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(window).not.toBeInTheDocument());
+    await user.upload(upload(), file());
+    const band = await screen.findByRole("status");
+    expect(band).toHaveTextContent('"סיכום טיפול בדוי" נשמר בתיק.');
+    const rows = within(list()).getAllByRole("button", { name: /סיכום טיפול בדוי/ });
+    await user.click(rows[0] as HTMLElement);
+    const opened = await screen.findByRole("dialog", { name: "סיכום טיפול בדוי" });
+    await user.click(within(opened).getByRole("button", { name: "מחיקה" }));
+    await user.click(within(await screen.findByRole("dialog", { name: "מחיקת החומר" })).getByRole("button", { name: "מחיקה" }));
+    await waitFor(() => expect(screen.queryByText('"סיכום טיפול בדוי" נשמר בתיק.')).toBeNull());
+  });
+
+  it("the window of a material does not repeat its title and kind, and counts its passages in words", async () => {
+    await openMaterials();
+    fireEvent.click(within(list()).getByRole("button", { name: /אינטייק עם ההורים/ }));
+    const window = await screen.findByRole("dialog", { name: "אינטייק עם ההורים" });
+    // Once, as the window's title (the kind is its subtitle, "אינטייק").
+    expect(within(window).getAllByText("אינטייק עם ההורים")).toHaveLength(1);
+    expect(within(window).getAllByRole("heading", { name: "אינטייק עם ההורים" })).toHaveLength(1);
+  });
+
+  it("says how much of a material the sorting uses in words", () => {
+    expect(passagesLine(1, 1)).toBe("הקטע היחיד בחומר נכנס לדוח");
+    expect(passagesLine(0, 1)).toBe("הקטע היחיד בחומר לא נכנס לדוח");
+    expect(passagesLine(0, 3)).toBe("אף אחד מ-3 הקטעים לא נכנס לדוח");
+    expect(passagesLine(1, 3)).toBe("קטע אחד מתוך 3 נכנס לדוח");
+    expect(passagesLine(2, 3)).toBe("2 מתוך 3 הקטעים נכנסים לדוח");
+    expect(passagesLine(3, 3)).toBe("כל 3 הקטעים נכנסים לדוח");
+  });
+
+  it("the second click of a double click never opens a request to the AI", async () => {
+    await openMaterials();
+    const chips = screen.getByRole("group", { name: /בקשה ל-/ });
+    const chip = within(chips).getAllByRole("button")[0] as HTMLElement;
+    fireEvent.click(chip, { detail: 2 });
+    expect(screen.queryByRole("dialog", { name: /^בקשה ל-/ })).toBeNull();
+    fireEvent.click(chip, { detail: 1 });
+    expect(await screen.findByRole("dialog", { name: /^בקשה ל-/ })).toBeInTheDocument();
+  });
+
+  it("a title changed alone is not lost on Escape: the window asks first (UIC-11)", async () => {
+    const { user } = await openMaterials();
+    await user.click(within(list()).getByRole("button", { name: /שיחה עם הגננת/ }));
+    await user.click(within(await screen.findByRole("dialog", { name: "שיחה עם הגננת" })).getByRole("button", { name: "עריכה" }));
+    const editor = await screen.findByRole("dialog", { name: "עריכת חומר" });
+    const title = within(editor).getByLabelText("כותרת");
+    await user.clear(title);
+    await user.type(title, "שיחה בדויה אחרת");
+    await user.keyboard("{Escape}");
+    expect(await screen.findByRole("button", { name: /בלי לשמור/ })).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "עריכת חומר" })).toBeInTheDocument();
+  });
+
+  it("the write window is titled by its slot, as the slot's menu says (רישום אינטייק)", async () => {
+    const { user } = await openMaterials((cmd, args, core) => {
+      if (cmd !== "case_detail") return undefined;
+      return core.handle(cmd, args).then((d) => ({ ...(d as object), inputs: [], routing: [] }));
+    });
+    await user.click(screen.getByRole("button", { name: "הוספה לאינטייק עם ההורים" }));
+    await user.click(await screen.findByRole("menuitem", { name: "רישום אינטייק" }));
+    expect(await screen.findByRole("dialog", { name: "רישום אינטייק" })).toBeInTheDocument();
+  });
+
+  it("a second file dropped while the first is read waits its turn: two windows, one after the other, each with its own text (UIC-3)", async () => {
+    let release: (() => void) | null = null;
+    let n = 0;
+    const { user, calls } = await openMaterials(async (cmd) => {
+      if (cmd !== "import_document") return undefined;
+      n += 1;
+      if (n === 1) {
+        await new Promise<void>((r) => { release = r; });
+        return read({ title: "סיכום א בדוי", body: "טקסט א בדוי.", left_out: ["עמוד בדוי"] });
+      }
+      return read({ title: "סיכום ב בדוי", body: "טקסט ב בדוי.", left_out: ["עמוד בדוי"] });
+    });
+    const zone = screen.getByText(/גוררים לכאן/).closest(".dropzone") as HTMLElement;
+    fireEvent.drop(zone, { dataTransfer: { files: [file("א.pdf")] } });
+    await waitFor(() => expect(release).not.toBeNull());
+    fireEvent.drop(screen.getByText(/קוראת את א.pdf/).closest(".dropzone") as HTMLElement, { dataTransfer: { files: [file("ב.pdf")] } });
+    expect(await screen.findByText("עוד קובץ אחד מחכה לתורו.")).toBeInTheDocument();
+    (release as unknown as () => void)();
+    let window = await screen.findByRole("dialog", { name: "ייבוא מסמך" });
+    expect(within(window).getByLabelText("כותרת")).toHaveValue("סיכום א בדוי");
+    await user.click(within(window).getByRole("button", { name: "שמירה בתיק" }));
+    await waitFor(() => expect(within(screen.getByRole("dialog", { name: "ייבוא מסמך" })).getByLabelText("כותרת")).toHaveValue("סיכום ב בדוי"));
+    window = screen.getByRole("dialog", { name: "ייבוא מסמך" });
+    await user.click(within(window).getByRole("button", { name: "שמירה בתיק" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    const adds = calls.filter((c) => c.cmd === "add_input").map((c) => c.args.content);
+    expect(adds).toEqual(["טקסט א בדוי.", "טקסט ב בדוי."]);
   });
 });

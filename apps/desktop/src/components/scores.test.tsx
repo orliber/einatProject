@@ -153,6 +153,24 @@ describe("ScoresView", () => {
     expect(saved).toEqual([]);
   });
 
+  it("a save with an impossible score says why beside the button, takes the keyboard to the first one, and counts only possible scores", async () => {
+    mount();
+    await screen.findByRole("radio", { name: "WISC-V" });
+    fireEvent.change(field("מידע"), { target: { value: "9" } });
+    fireEvent.change(field("אוצר מילים"), { target: { value: "25" } });
+    const foot = document.querySelector(".scores-foot") as HTMLElement;
+    // "25" is not a score: one is counted, not two.
+    expect(foot).toHaveTextContent("ציון אחד הוזן");
+    await userEvent.setup().click(screen.getByRole("button", { name: "שמירה בתיק" }));
+    expect(within(foot).getByRole("alert")).toHaveTextContent(/יש ציונים שלא אפשריים/);
+    expect(field("אוצר מילים")).toHaveFocus();
+    expect(saved).toEqual([]);
+    // Fixing it puts the count back.
+    fireEvent.change(field("אוצר מילים"), { target: { value: "12" } });
+    expect(within(foot).queryByRole("alert")).toBeNull();
+    expect(foot).toHaveTextContent("2 ציונים הוזנו");
+  });
+
   it("a score off its scale's grid is said at entry, as the core would refuse it later (regression)", async () => {
     mount();
     await screen.findByRole("radio", { name: "WISC-V" });

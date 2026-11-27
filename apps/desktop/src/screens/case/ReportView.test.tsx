@@ -1230,3 +1230,54 @@ describe("a sub-section inside a section (D-214)", () => {
     expect(page.querySelectorAll("strong.a4-subhead")).toHaveLength(1);
   });
 });
+
+describe("report page fixes (walkthrough of the report stage)", () => {
+  it("a second Escape in the paragraph editor takes back the question and keeps her text", async () => {
+    const { page, user } = await openReport();
+    const first = focused(page);
+    if (!first) throw new Error("no section in focus");
+    await user.click(await within(first).findByRole("button", { name: "לכתוב בעצמי" }));
+    const box = await within(first).findByRole("textbox", { name: /פסקה חדשה בסעיף/ });
+    await user.type(box, "טקסט בדוי עם אותיות סופיות ךםןףץ");
+    await user.keyboard("{Escape}");
+    expect(within(first).getByRole("group", { name: "לבטל את העריכה?" })).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    expect(within(first).queryByRole("group", { name: "לבטל את העריכה?" })).toBeNull();
+    expect(within(first).getByRole("textbox", { name: /פסקה חדשה בסעיף/ })).toHaveValue("טקסט בדוי עם אותיות סופיות ךםןףץ");
+  });
+
+  it("Escape in the points box keeps the points she typed for when it opens again", async () => {
+    let key: string | null = null;
+    const { page, user } = await openReport((d) => {
+      key ??= firstFocus(d.sections);
+      const bare = d.sections.find((x) => x.key === key);
+      if (!bare) throw new Error("no section to write");
+      bare.source_count = 0;
+      d.routing = d.routing.map((r) => ({ ...r, feeds: r.feeds.filter((k) => k !== key) }));
+    });
+    const first = page.querySelector<HTMLElement>(`#sec-${key}`);
+    if (!first) throw new Error("no bare section");
+    await user.click(within(first).getByRole("heading", { level: 3 }));
+    await user.click(await within(first).findByRole("button", { name: "✦ לנסח מנקודות" }));
+    const box = await within(first).findByRole("textbox", { name: /מה לכתוב בסעיף/ });
+    await user.type(box, "נקודה בדויה ראשונה{Enter}נקודה בדויה שנייה");
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(within(first).queryByRole("textbox", { name: /מה לכתוב בסעיף/ })).toBeNull());
+    await user.click(within(first).getByRole("button", { name: "✦ לנסח מנקודות" }));
+    expect(await within(first).findByRole("textbox", { name: /מה לכתוב בסעיף/ })).toHaveValue("נקודה בדויה ראשונה\nנקודה בדויה שנייה");
+  });
+
+  it("the summary's own button asks before drafting while her diagnoses are not approved", async () => {
+    const { page, user, calls } = await openReport();
+    const summary = page.querySelector<HTMLElement>("#sec-summary");
+    if (!summary) throw new Error("no summary");
+    await user.click(within(summary).getByRole("heading", { level: 3 }));
+    await waitFor(() => expect(summary).toHaveClass("is-focus"));
+    await user.click(await within(summary).findByRole("button", { name: "✦ לנסח את הסעיף" }));
+    const ask = await within(summary).findByRole("group", { name: "לנסח לפני הזמן?" });
+    expect(ask).toHaveTextContent("האבחנות שלך עוד לא אושרו");
+    expect(calls.some((c) => c.cmd === "prepare_section")).toBe(false);
+    await user.click(within(ask).getByRole("button", { name: "להמשיך בכל זאת" }));
+    await waitFor(() => expect(calls.some((c) => c.cmd === "prepare_section" && c.args.sectionKey === "summary")).toBe(true));
+  });
+});

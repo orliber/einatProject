@@ -110,6 +110,17 @@ describe("on the front page", () => {
     await waitFor(() => expect(within(today).queryByRole("button", { name: "התקיימה" })).toBeNull());
     await waitFor(() => expect(box).not.toHaveTextContent(/עוד לא סומנ/));
     expect(within(box).queryByRole("button", { name: "כולן התקיימו" })).toBeNull();
+    // The visits charged and nothing came in today: the ₪ line says so, not a quiet "nothing".
+    expect(await within(box).findByText(/^\d+ פגישות חויבו היום, ולא נרשם תקבול$/)).toBeInTheDocument();
+    expect(box).not.toHaveTextContent("הכול רשום");
+  });
+
+  it("the confirmation tells where a visit nobody came to is marked, and where a cancelled one is", async () => {
+    const { user } = await open(20);
+    const box = await screen.findByRole("region", { name: "סגירת היום" });
+    await user.click(within(box).getByRole("button", { name: "כולן התקיימו" }));
+    const ask = await screen.findByRole("dialog", { name: "לסמן את הפגישות של היום" });
+    expect(ask).toHaveTextContent("מסמנים אותה קודם ב\"לא הגיעו\", בתפריט \"⋯\" שבשורה שלה. פגישה שבוטלה: פותחים אותה ומסמנים בה \"בוטלה\".");
   });
 
   it("closing the window marks nothing", async () => {

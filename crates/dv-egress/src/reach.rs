@@ -52,6 +52,9 @@ pub enum Reach {
     /// The certificate did not chain to a root the program trusts. Typical of an antivirus
     /// that scans encrypted traffic, or a proxy, standing in the middle.
     Intercepted(String),
+    /// The certificate was "expired" or "not valid yet" by this computer's clock: most often
+    /// the computer's date or time is wrong, not someone in the middle (EGRESS-5).
+    Clock(String),
     /// A valid certificate, but not from an authority this version is pinned to (D-077): a
     /// new version is needed.
     Pinned,
@@ -212,6 +215,12 @@ pub(crate) fn tls_failure(e: &rustls::Error) -> Reach {
             let _ = pinning::take_pin_refused();
             Reach::Pinned
         }
+        rustls::Error::InvalidCertificate(
+            c @ (CertificateError::Expired
+            | CertificateError::ExpiredContext { .. }
+            | CertificateError::NotValidYet
+            | CertificateError::NotValidYetContext { .. }),
+        ) => Reach::Clock(clip(&format!("certificate: {}", certificate_kind(c)))),
         rustls::Error::InvalidCertificate(c) => {
             Reach::Intercepted(clip(&format!("certificate: {}", certificate_kind(c))))
         }
@@ -493,6 +502,16 @@ mod tests {
             )),
             Reach::Intercepted(_)
         ));
+        // A wrong clock is not an interception (EGRESS-5).
+        for c in [CertificateError::Expired, CertificateError::NotValidYet] {
+            assert!(
+                matches!(
+                    tls_failure(&rustls::Error::InvalidCertificate(c.clone())),
+                    Reach::Clock(_)
+                ),
+                "{c:?}"
+            );
+        }
         assert_eq!(
             tls_failure(&rustls::Error::General(pinning::PIN_MARK.to_owned())),
             Reach::Pinned

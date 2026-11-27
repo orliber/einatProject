@@ -6,6 +6,7 @@ import { he } from "../i18n/he";
 import { CLINIC_TABS, type ClinicTab } from "../screens/clinic/tabs";
 import { MOD } from "../shortcuts";
 import { HelpIcon, LockIcon } from "./ui";
+import { useSendStopped } from "../sendStopped";
 import { StatusChip } from "./Update";
 import "./TopBar.css";
 
@@ -38,6 +39,20 @@ const EyeIcon = ({ shut }: { shut: boolean }) => (
  * discreet eye, the keyboard shortcuts, the settings, the lock), and under it the row of the
  * pages of the part she is in.
  */
+/** The emergency stop is on: said on every page (the top bar and the case's own bar), until
+ *  she turns sending back on. */
+export function SendStoppedSign() {
+  const { go } = useApp();
+  const stopped = useSendStopped();
+  if (!stopped) return null;
+  return (
+    <button type="button" className="topbar-status topbar-status-stop" title='עצירת החירום פעילה: שום דבר לא נשלח ל-AI. לחיצה פותחת את "סיסמה ואבטחה", שם מפעילים את השליחה מחדש.'
+      onClick={() => go({ name: "settings", pane: "security" })}>
+      <span className="topbar-status-dot" aria-hidden="true" />השליחה ל-AI כבויה
+    </button>
+  );
+}
+
 export function TopBar({ active }: { active: Route["name"] }) {
   const { go, lockNow, status, showHelp, route } = useApp();
   const discreet = useDiscreet();
@@ -57,6 +72,7 @@ export function TopBar({ active }: { active: Route["name"] }) {
           {part("clinic", <ClinicIcon />, <span className="topbar-beta">בטא</span>)}
         </nav>
         <span className="grow" />
+        <SendStoppedSign />
         <StatusChip demo={status.demo_mode} />
         <span className="topbar-safe"><span className="topbar-dot" aria-hidden="true" />{he.encrypted}</span>
         <div className="topbar-tools">

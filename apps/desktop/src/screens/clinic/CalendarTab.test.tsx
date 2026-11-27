@@ -500,13 +500,21 @@ describe("the day", () => {
     return { ...opened, agenda, row };
   };
 
+  it("the day's list counts her own time apart, and offers “לא הגיעו” under “⋯”", async () => {
+    const { user, row, agenda, saves, notes } = await openDay();
+    expect(agenda()).toHaveTextContent("3 פגישות וזמן שמור אחד");
+    await fromMenu(user, row("איתי"), "לא הגיעו");
+    await waitFor(() => expect(notes).toContain("הפגישה סומנה \"לא הגיעו\""));
+    expect(saves().at(-1)).toMatchObject({ visit: { status: "no_show", charge_missed: false } });
+  });
+
   it("“התקיימה” marks the visit at once, on the list and on the grid", async () => {
     const { user, row, saves } = await openDay();
     expect(within(row("תמר")).getByText("מתוכננת")).toBeInTheDocument();
     // At 08:00 her visit has not begun: its one step is "תזכורת", and "התקיימה" is under "⋯".
     expect(within(row("תמר")).queryByRole("button", { name: "התקיימה" })).toBeNull();
     expect(within(row("תמר")).getByRole("button", { name: "תזכורת" })).toBeInTheDocument();
-    expect(await menuOf(user, row("תמר"))).toEqual(["התקיימה", "לכתוב סיכום", "לפתוח את הפגישה"]);
+    expect(await menuOf(user, row("תמר"))).toEqual(["התקיימה", "לא הגיעו", "לכתוב סיכום", "לפתוח את הפגישה"]);
     await fromMenu(user, row("תמר"), "התקיימה");
     expect(within(row("תמר")).getByText("התקיימה")).toBeInTheDocument();
     expect(await screen.findByRole("button", { name: "09:00–10:30 תמר, מפגש אבחון, התקיימה" })).toBeInTheDocument();
@@ -529,7 +537,7 @@ describe("the day", () => {
     expect(held).toHaveClass("btn-primary");
     expect(within(row("תמר")).queryByRole("button", { name: "תזכורת" })).toBeNull();
     // A reminder no longer makes sense once it has begun: none in "⋯" either (D-204 §4).
-    expect(await menuOf(user, row("תמר"))).toEqual(["לכתוב סיכום", "להקליט לעצמך", "לפתוח את הפגישה"]);
+    expect(await menuOf(user, row("תמר"))).toEqual(["לא הגיעו", "לכתוב סיכום", "להקליט לעצמך", "לפתוח את הפגישה"]);
     await user.click(held);
     await waitFor(() => expect(saves()[0]).toMatchObject({ visit: { status: "held" } }));
     await waitFor(() => expect(within(row("תמר")).getByRole("button", { name: "לכתוב סיכום" })).toHaveFocus());
@@ -555,14 +563,14 @@ describe("the day", () => {
     await fromMenu(user, row("איתי"), "התקיימה");
     await waitFor(() => expect(notes).toContain("הפגישה לא נשמרה."));
     await waitFor(() => expect(within(row("איתי")).getByText("מתוכננת")).toBeInTheDocument());
-    expect(await menuOf(user, row("איתי"))).toEqual(["התקיימה", "לכתוב סיכום", "לפתוח את הפגישה"]);
+    expect(await menuOf(user, row("איתי"))).toEqual(["התקיימה", "לא הגיעו", "לכתוב סיכום", "לפתוח את הפגישה"]);
   });
 
   it("“לכתוב סיכום” opens the visit's note, and “תזכורת” copies through the protected clipboard only", async () => {
     const { user, row, calls, notes } = await openDay();
     await user.click(within(row("תמר")).getByRole("button", { name: "תזכורת" }));
     await user.click(await screen.findByRole("menuitem", { name: "רק להעתיק" }));
-    await waitFor(() => expect(notes).toEqual(["התזכורת הועתקה ללוח המוגן, ואפשר להדביק אותה בהודעה. יימחק מהלוח בעוד דקה."]));
+    await waitFor(() => expect(notes).toEqual(["התזכורת הועתקה ללוח המוגן, ואפשר להדביק אותה בהודעה. הלוח יתנקה בעוד דקה."]));
     const copied = calls.filter((c) => c.cmd === "copy_secret");
     expect(copied).toHaveLength(1);
     expect(String(copied[0]?.args.text)).toContain("15.11.2026, בשעה 09:00");
@@ -603,9 +611,10 @@ describe("the month", () => {
     expect(within(table).getAllByRole("cell")).toHaveLength(35);
     expect(asked()).toEqual(["2026-11-15 2026-11-21", "2026-11-01 2026-12-05"]);
 
-    const today = within(table).getByRole("button", { name: `${SUNDAY}, 4 פגישות` }).closest("td") as HTMLElement;
+    // Her own time is not counted as a visit.
+    const today = within(table).getByRole("button", { name: `${SUNDAY}, 3 פגישות וזמן שמור אחד` }).closest("td") as HTMLElement;
     expect(within(today).getAllByRole("listitem").map((li) => li.textContent)).toEqual(["09:00תמר", "11:30איתי", "13:00כתיבת דוחות"]);
-    expect(today).toHaveTextContent("+1 פגישות נוספות");
+    expect(today).toHaveTextContent("+1 נוספת");
     expect(within(today).getByText("היום")).toBeInTheDocument();
     expect(within(table).getByRole("button", { name: "יום רביעי, 18.11.2026, אין פגישות" })).toBeInTheDocument();
     expect(within(table).getByRole("button", { name: "יום שני, 16.11.2026, פגישה אחת" })).toBeInTheDocument();
@@ -667,7 +676,7 @@ describe("discreet mode on the calendar", () => {
     hidden();
     await user.click(viewRadio("חודש"));
     const table = await screen.findByRole("table", { name: "נובמבר 2026" });
-    expect(within(within(table).getByRole("button", { name: `${SUNDAY}, 4 פגישות` }).closest("td") as HTMLElement).getAllByRole("listitem")[0]).toHaveTextContent("09:00ת.");
+    expect(within(within(table).getByRole("button", { name: `${SUNDAY}, 3 פגישות וזמן שמור אחד` }).closest("td") as HTMLElement).getAllByRole("listitem")[0]).toHaveTextContent("09:00ת.");
     hidden();
   });
 });

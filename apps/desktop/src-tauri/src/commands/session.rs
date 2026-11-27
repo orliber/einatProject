@@ -121,6 +121,20 @@ pub(crate) async fn lock(
 ) -> Res<()> {
     state.clipboard.clear_now();
     protect(&window, true);
+    // The lock the page asks for as the window closes ends the program (D-218).
+    if state.closing.load(std::sync::atomic::Ordering::SeqCst) {
+        // A report between its file and its record finishes first (off the async runtime).
+        let exporting = Arc::clone(&state.exporting);
+        let _ =
+            tauri::async_runtime::spawn_blocking(move || crate::wait_for_exports(&exporting)).await;
+        with_core(&state, |c| {
+            c.lock_on_close();
+            Ok(())
+        })
+        .await?;
+        window.app_handle().exit(0);
+        return Ok(());
+    }
     with_core(&state, |c| {
         c.lock();
         Ok(())

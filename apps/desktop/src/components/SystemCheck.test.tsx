@@ -3,7 +3,9 @@ import { mockIPC } from "@tauri-apps/api/mocks";
 import type { CheckLine, SystemCheck, SystemCheckResult } from "../ipc/client";
 import { fakeSystemCheck } from "../web/fakeCore";
 import { a11yViolations } from "../test/a11y";
-import { CHECKS, SystemCheckSettings, systemCheckSummary } from "./SystemCheck";
+import { CHECKS, forgetSystemCheck, SystemCheckSettings, systemCheckSummary } from "./SystemCheck";
+
+beforeEach(() => forgetSystemCheck());
 
 const line = (over: Partial<CheckLine> = {}): CheckLine => ({
   key: "docx", label: "קריאת קובץ Word", state: "ok", reason: "קובץ הבדיקה נקרא כמו שצריך.", next_step: null, detail: "docx: ok (docx)", ...over,
@@ -79,6 +81,33 @@ describe("בדיקת מערכת", () => {
     fireEvent.click(busy);
     release();
     await screen.findByRole("button", { name: "העתקה לאור" });
+    expect(calls).toEqual(CHECKS.map((c) => c.id));
+  });
+
+  it("goes on while she is elsewhere, and the pane shows where it is, then what it found, when she comes back (UIA-8)", async () => {
+    let release: () => void = () => undefined;
+    const calls: string[] = [];
+    mockIPC(async (_cmd, args) => {
+      const check = (args as { check: SystemCheck }).check;
+      calls.push(check);
+      if (check === "ocr") await new Promise<void>((r) => { release = r; });
+      return fakeSystemCheck(check, false);
+    });
+    const first = render(<SystemCheckSettings />);
+    fireEvent.click(screen.getByRole("button", { name: "בדיקת מערכת" }));
+    await waitFor(() => expect(calls).toContain("ocr"));
+    first.unmount();
+    // Back while it runs: the same run, at the same check.
+    const again = render(<SystemCheckSettings />);
+    expect(screen.getByRole("button", { name: "בודקת…" })).toBeDisabled();
+    expect(screen.getByRole("status")).toHaveTextContent("בודקת 2 מתוך 5");
+    again.unmount();
+    release();
+    await waitFor(() => expect(calls).toHaveLength(5));
+    // Back after it ended: what it found, ready to copy for Or.
+    render(<SystemCheckSettings />);
+    expect(await screen.findByRole("button", { name: "העתקה לאור" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "לבדוק שוב" })).toBeEnabled();
     expect(calls).toEqual(CHECKS.map((c) => c.id));
   });
 

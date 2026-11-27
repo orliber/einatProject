@@ -161,7 +161,27 @@ impl Core {
     }
 
     /// Delete a folder; what is inside moves one level up. Nothing inside is deleted.
+    /// A subfolder that would land next to a folder of the same name is refused first, as
+    /// create, rename and move refuse it (CORE-7): two such folders cannot be told apart.
     pub fn delete_folder(&mut self, id: &str) -> Result<(), CoreError> {
+        let all = self.vault_ref()?.folders()?;
+        if let Some(gone) = all.iter().find(|f| f.id == id) {
+            let same = |a: &str, b: &str| a.trim().to_lowercase() == b.trim().to_lowercase();
+            let clash = all
+                .iter()
+                .filter(|c| c.parent_id.as_deref() == Some(id))
+                .find(|c| {
+                    all.iter().any(|f| {
+                        f.parent_id == gone.parent_id && f.id != gone.id && same(&f.name, &c.name)
+                    })
+                });
+            if let Some(c) = clash {
+                return Err(CoreError::Refused(format!(
+                    "אי אפשר למחוק את התיקייה עכשיו: התיקייה \"{}\" שבתוכה תעבור רמה אחת למעלה, ושם כבר יש תיקייה בשם הזה. אפשר לשנות קודם את השם של אחת מהן.",
+                    c.name
+                )));
+            }
+        }
         Ok(self.vault_mut()?.delete_folder(id)?)
     }
 

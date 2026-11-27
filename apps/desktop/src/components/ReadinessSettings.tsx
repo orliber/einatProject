@@ -12,7 +12,7 @@ import type { SettingsPane } from "../screens/settingsPanes";
 const ITEMS: Record<string, { label: string; hint: string; jump?: { pane: SettingsPane; label: string } }> = {
   zdr: {
     label: "אישור בכתב מספק ה-AI שהמידע לא נשמר אצלו (ZDR)",
-    hint: "נוסח הבקשה ל-Anthropic מוכן אצל המפתח.",
+    hint: "נוסח הבקשה ל-Anthropic מוכן אצל אור.",
   },
   consent_form: {
     label: "טופס הסכמת ההורים מעודכן ומזכיר את ספק ה-AI",
@@ -25,7 +25,7 @@ const ITEMS: Record<string, { label: string; hint: string; jump?: { pane: Settin
   },
   legal: {
     label: "התייעצתי עם יועץ משפטי או יועץ פרטיות",
-    hint: "רשימת שאלות מוכנה אצל המפתח.",
+    hint: "רשימת שאלות מוכנה אצל אור.",
   },
   api_key: {
     label: "מוגדר מפתח API",

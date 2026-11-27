@@ -88,7 +88,11 @@ describe("main screens", () => {
     await openCase(user);
     await user.click(screen.getByRole("button", { name: /הוצאת הדוח/ }));
     const side = await screen.findByRole("region", { name: "לפני שהקובץ יוצא" });
-    expect(await within(side).findByRole("button", { name: /כדאי לבדוק/ })).toHaveAttribute("aria-expanded", "true");
+    // A number unlike the score table has its own group above (open first); the rest of the
+    // advice is one click away.
+    const toCheck = await within(side).findByRole("button", { name: /כדאי לבדוק/ });
+    if (toCheck.getAttribute("aria-expanded") !== "true") await user.click(toCheck);
+    expect(toCheck).toHaveAttribute("aria-expanded", "true");
     expect(within(side).getByText(/כתוב 85, ובטבלה 95/)).toBeInTheDocument();
   });
 
@@ -161,7 +165,7 @@ describe("main screens", () => {
     const user = userEvent.setup();
     render(<App />);
     await openCase(user);
-    const chips = await screen.findAllByRole("button", { name: "קרוב לסגנון שלך: 82" });
+    const chips = await screen.findAllByRole("button", { name: "קרוב לסגנון שלך: 82 מתוך 100" });
     expect(chips).toHaveLength(1);
     // Her usual change is marked in the draft only, as text.
     const marks = Array.from(document.querySelectorAll("mark.habit"));
@@ -428,6 +432,7 @@ describe("writing the report", () => {
       await screen.findByRole("button", { name: "✓ לאשר" }, { timeout: 6000 });
     }
     await user.click(await screen.findByRole("button", { name: "✓ לאשר את כל הטיוטות (2)" }, { timeout: 6000 }));
+    await user.click(within(await screen.findByRole("group", { name: "לאשר את כל הטיוטות?" })).getByRole("button", { name: "כן, לאשר" }));
     await waitFor(() => expect(calls.filter((c) => c === "approve_clean_paragraphs").length).toBe(1));
     await waitFor(() => expect(screen.queryByRole("button", { name: "✓ לאשר" })).toBeNull());
   });
@@ -654,6 +659,7 @@ describe("writing the report", () => {
     const sections = Number(/(\d+) סעיפים/.exec(line.textContent ?? "")?.[1]);
     // The button counts drafts the way the line does: one per section.
     await user.click(screen.getByRole("button", { name: `✓ לאשר את כל הטיוטות (${sections})` }));
+    await user.click(within(await screen.findByRole("group", { name: "לאשר את כל הטיוטות?" })).getByRole("button", { name: "כן, לאשר" }));
     await waitFor(() => expect(calls).toContain("approve_clean_paragraphs"));
     await waitFor(() => expect(screen.queryByText(/מחכים לאישורך/)).toBeNull());
   });
@@ -721,8 +727,13 @@ describe("writing the report", () => {
     await user.click(within(ask).getByRole("button", { name: "להמשיך לערוך" }));
     expect(screen.queryByRole("group", { name: "לבטל את העריכה?" })).toBeNull();
     expect((screen.getByRole("textbox", { name: /עריכת פסקה בסעיף/ }) as HTMLTextAreaElement).value).toContain("ועוד מילה.");
-    // Esc twice: asked, then dropped.
+    // Esc twice: asked, then the question is taken back. A key never drops her text.
     await user.keyboard("{Escape}{Escape}");
+    expect(screen.queryByRole("group", { name: "לבטל את העריכה?" })).toBeNull();
+    expect((screen.getByRole("textbox", { name: /עריכת פסקה בסעיף/ }) as HTMLTextAreaElement).value).toContain("ועוד מילה.");
+    // Only "כן, לבטל" drops it.
+    await user.keyboard("{Escape}");
+    await user.click(within(await screen.findByRole("group", { name: "לבטל את העריכה?" })).getByRole("button", { name: "כן, לבטל" }));
     expect(screen.queryByRole("textbox", { name: /עריכת פסקה בסעיף/ })).toBeNull();
     expect(within(page).getByText(/הופנה לאבחון פסיכולוגי-התפתחותי על ידי הוריו/)).toBeInTheDocument();
     expect(within(page).queryByText(/ועוד מילה/)).toBeNull();

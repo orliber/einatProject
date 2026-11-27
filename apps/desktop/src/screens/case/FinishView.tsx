@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
-import { useApp } from "../../App";
+import { useApp, type Route } from "../../App";
 import { STALE_EDIT_KEPT } from "../../i18n/he";
 import { ipc, type CaseDetail, type ExportCheck, type ReportSettings } from "../../ipc/client";
 import { useKept } from "../../kept";
@@ -9,11 +9,13 @@ import { noteTitle, noteWhy, needlesOf, Quote } from "./finishNotes";
 import { ageWords } from "../../components/AgeField";
 import { ErrorLine } from "../../components/ui";
 import { timed, WaitLine } from "../../components/Progress";
-import { useHoldUnsaved } from "../../components/Unsaved";
+import { editRoute, editSectionTitle, openEdits, useHoldUnsaved } from "../../components/Unsaved";
 import { LocalText, type LocalTextHandle } from "../../components/LocalText";
 import { REPORT_NOTE_TITLE, ReportCheckItem, useReportCheckResult } from "../../components/ReportCheck";
 import type { CaseApi } from "../CaseScreen";
 import { LetterCard } from "./LetterCard";
+import { childLabel } from "./ReportView";
+import type { NoteKind } from "../../ipc/generated/NoteKind";
 import "./FinishView.css";
 
 type Section = CaseDetail["sections"][number];
@@ -28,7 +30,13 @@ function Marked({ text }: { text: string }) {
   return <>{parts.map((p, i) => (p.startsWith("[חסר") ? <mark key={i} className="a4-mark">{p}</mark> : <Fragment key={i}>{p}</Fragment>))}</>;
 }
 
-type GroupId = "must" | "check" | "polish";
+type GroupId = "must" | "scores" | "check" | "polish";
+
+/** A number in the text against the score table: said in its own group, above the advice. */
+const SCORE_KINDS: readonly NoteKind[] = ["score_mismatch", "band_word", "percentile"];
+
+/** Where the finish page's own editor is held for a lock (and so for the export, `openEdits`). */
+const FINISH_PLACE = "פסקה בשלב הסיום";
 
 /** One thing said about a paragraph. */
 interface CardNote {
@@ -60,6 +68,9 @@ interface LineCard {
   open: string | null;
   /** Advice she may leave as it is. A state of the report (an empty section) is not. */
   leave: boolean;
+  /** Where "לעבור לסעיף" goes when it is not the report page on `open`: an edit left open on
+   *  the section's own page is there, not on the report page. */
+  to?: Route;
 }
 
 type Card = ParagraphCard | LineCard;
@@ -78,7 +89,7 @@ interface Group {
   count: number;
 }
 
-const GROUP_TITLE: Record<GroupId, string> = { must: "חייבים לתקן", check: "כדאי לבדוק", polish: "ליטוש ניסוח" };
+const GROUP_TITLE: Record<GroupId, string> = { must: "חייבים לתקן", scores: "מספרים שלא תואמים את טבלת הציונים", check: "כדאי לבדוק", polish: "ליטוש ניסוח" };
 
 const names = (sections: Section[]) => sections.map((s) => s.title).join(", ");
 
@@ -87,6 +98,24 @@ function polishWords(text: string): { title: string; why: string } {
   const at = text.indexOf(": ");
   const rest = at > 0 ? noteWhy(text.slice(at + 2)) : "";
   return at > 0 && at <= 30 && rest ? { title: text.slice(0, at), why: rest } : { title: noteTitle("polish"), why: noteWhy(text) };
+}
+
+/** What a "leave it" is remembered by: the paragraph, its words as they are now, and the note. */
+const noteKey = (p: Paragraph, kind: string, text: string) => JSON.stringify([p.id, p.text, kind, text]);
+
+/** The kept key of what she left on the finish page (D-193), read by the export dialog too. */
+export const leftNotesKey = (caseId: string) => `case:${caseId}:finish:left`;
+
+/** The sections whose approved text still has a number unlike the score table that she did not
+ *  leave as it is: the export dialog names them before the file is made. */
+export function scoreNotesOpen(sections: readonly Section[], leftKeys: readonly string[]): string[] {
+  const titles: string[] = [];
+  for (const s of sections) {
+    const open = (s.paragraphs ?? []).some((p) => p.status === "approved"
+      && heldNotes(p).some((n) => n.kind !== null && SCORE_KINDS.includes(n.kind) && !leftKeys.includes(noteKey(p, n.kind, n.text))));
+    if (open) titles.push(s.title);
+  }
+  return titles;
 }
 
 /** Takes what she left out of the cards; what is left is counted. */
@@ -108,10 +137,11 @@ function group(id: GroupId, all: Card[], leftKeys: readonly string[]): Group {
 }
 
 /** The state of the report and the one next step, in plain words. */
-function statusLine(s: { loaded: boolean; nothing: boolean; must: number; check: number; complete: boolean }): string {
+function statusLine(s: { loaded: boolean; nothing: boolean; must: number; scores: number; check: number; complete: boolean }): string {
   if (!s.loaded) return "הוצאת הדוח";
   if (s.nothing) return "עוד אין מה להוציא.";
   if (s.must > 0) return s.must === 1 ? "נשאר דבר אחד שחייבים לתקן לפני ההוצאה." : `נשארו ${s.must} דברים שחייבים לתקן לפני ההוצאה.`;
+  if (s.scores > 0) return s.scores === 1 ? "אפשר להוציא, אבל מספר אחד בדוח לא תואם את טבלת הציונים. כדאי לבדוק אותו קודם." : `אפשר להוציא, אבל ${s.scores} מספרים בדוח לא תואמים את טבלת הציונים. כדאי לבדוק אותם קודם.`;
   if (s.check > 0) return s.check === 1 ? "אפשר להוציא. דבר אחד שכדאי לבדוק קודם." : `אפשר להוציא. ${s.check} דברים שכדאי לבדוק קודם.`;
   return s.complete ? "הדוח מוכן להוצאה." : "אפשר להוציא.";
 }
@@ -124,7 +154,7 @@ function statusLine(s: { loaded: boolean; nothing: boolean; must: number; check:
  * stops the file ever holds the file back.
  */
 export function FinishView({ api, onExport, onOpen }: { api: CaseApi; onExport: () => void; onOpen: (key: string) => void }) {
-  const { fail, notify } = useApp();
+  const { fail, notify, go } = useApp();
   const { detail, caseId, reload } = api;
   const [check, setCheck] = useState<ExportCheck | null>(null);
   const [settings, setSettings] = useState<ReportSettings | null>(null);
@@ -134,7 +164,7 @@ export function FinishView({ api, onExport, onOpen }: { api: CaseApi; onExport: 
   /** The notes she left as they are. Only this list reads it: the check before the file, the
    *  export and "approve all" never do. Kept with the case in the vault (D-193), so a lock or a
    *  restore brings them back: the core is asked which of the notes shown now she left. */
-  const [leftKeys, setLeftKeys] = useKept<string[]>(`case:${caseId}:finish:left`, []);
+  const [leftKeys, setLeftKeys] = useKept<string[]>(leftNotesKey(caseId), []);
   /** The core answered which notes she left (or could not say: then every note shows). */
   const [leftAnswered, setLeftAnswered] = useState(false);
   /** A group she opened or folded herself; otherwise the first one with something in it is open. */
@@ -146,7 +176,13 @@ export function FinishView({ api, onExport, onOpen }: { api: CaseApi; onExport: 
   const fade = useRef<ReturnType<typeof setTimeout> | null>(null);
   const editBox = useRef<LocalTextHandle>(null);
   const [error, setError] = useState<string | null>(null);
-  const holdLive = useHoldUnsaved(caseId, "פסקה בשלב הסיום", editing?.text ?? null);
+  const holdLive = useHoldUnsaved(caseId, FINISH_PLACE, editing?.text ?? null);
+  /** "שמירה" was pressed and the core has not answered: a second click saves nothing (UIC-7). */
+  const [saving, setSaving] = useState(false);
+  // A paragraph editor left open on the report page or a section's page, with her text not
+  // saved: the file must not go out without it (nor with it unseen). This page's own editor is
+  // `editing`, right here.
+  const unsaved = openEdits(caseId).filter((e) => e.place !== FINISH_PLACE);
   const reportCheck = useReportCheckResult(caseId);
 
   useEffect(() => {
@@ -173,7 +209,7 @@ export function FinishView({ api, onExport, onOpen }: { api: CaseApi; onExport: 
   const nothing = check !== null && check.included_sections === 0;
   // Round 26: what is left to complete is listed, and never stops the file. The core also marks
   // a tag it could not put words back into; those sections are listed by name.
-  const ready = check !== null && !blocked && !nothing;
+  const ready = check !== null && !blocked && !nothing && unsaved.length === 0;
   // Sections that have materials and nothing approved yet: the file can go out without them,
   // but the report is not ready, and the export dialog says so in orange too.
   const emptyWithMaterial = check ? content.filter((s) => s.source_count > 0 && check.empty_sections.includes(s.title)) : [];
@@ -183,28 +219,45 @@ export function FinishView({ api, onExport, onOpen }: { api: CaseApi; onExport: 
   const complete = ready && emptyWithMaterial.length === 0 && closingEmpty.length === 0;
   const markedElsewhere = (check?.to_complete ?? []).filter((t) => !toComplete.some(({ section }) => t.startsWith(`${section.title}:`)));
 
-  const noteKey = (p: Paragraph, kind: string, text: string) => JSON.stringify([p.id, p.text, kind, text]);
-
   // What really stops the file, and nothing else.
-  const mustCards: Card[] = (check?.blocking ?? []).map((b): LineCard => {
-    const section = content.find((s) => b.startsWith(`${s.title}:`));
-    return {
-      type: "line", key: `must:${b}`, title: "עוצר את הקובץ", where: section?.title ?? "",
-      text: section ? b.slice(section.title.length + 1).trim() : b, open: section?.key ?? "", leave: false,
-    };
-  });
+  const mustCards: Card[] = [
+    ...unsaved.map((e): LineCard => {
+      const title = editSectionTitle(e);
+      const section = content.find((s) => s.title === title);
+      const route = section ? editRoute(caseId, section.key) : null;
+      return {
+        ...(route && route.name === "case" && route.view !== "report" ? { to: route } : {}),
+        type: "line", key: `unsaved:${e.place}`, title: "עריכה שלא נשמרה", where: section?.title ?? title ?? "",
+        text: "יש כאן פסקה שהתחלת לערוך ולא שמרת. שומרים אותה או מבטלים, ואז מפיקים.", open: section?.key ?? null, leave: false,
+      };
+    }),
+    ...(check?.blocking ?? []).map((b): LineCard => {
+      const section = content.find((s) => b.startsWith(`${s.title}:`));
+      return {
+        type: "line", key: `must:${b}`, title: "עוצר את הקובץ", where: section?.title ?? "",
+        text: section ? b.slice(section.title.length + 1).trim() : b, open: section?.key ?? "", leave: false,
+      };
+    }),
+  ];
 
   // Worth a look (D-161): what the core keeps about an approved paragraph (a number unlike the
   // score table, a name left in the text, a sentence from an old report, what the check
   // against the materials said) and a place marked to complete. None of these stops the file.
+  // A number unlike the score table is its own group, above the rest of the advice.
+  const scoreCards: Card[] = [];
   const checkCards: Card[] = [];
   for (const { section, p } of approved) {
-    const notes: CardNote[] = heldNotes(p).map((n) => ({
+    const held = heldNotes(p);
+    const card = (n: (typeof held)[number]): CardNote => ({
       key: noteKey(p, n.kind ?? "", n.text), title: noteTitle(n.kind), why: noteWhy(n.text), needles: needlesOf(n.text),
-    }));
+    });
+    const scoreNotes = held.filter((n) => n.kind !== null && SCORE_KINDS.includes(n.kind)).map(card);
+    const notes: CardNote[] = held.filter((n) => n.kind === null || !SCORE_KINDS.includes(n.kind)).map(card);
     for (const m of new Set(p.text.match(MARKS) ?? [])) {
-      notes.push({ key: noteKey(p, "missing", m), title: "מקום שסומן להשלמה", why: "הקובץ יוצא גם כך: הסימון נשאר בו, ואפשר להשלים אותו בוורד.", needles: [m] });
+      // Only a Word file can be completed afterwards: a PDF goes out with the mark as it is.
+      notes.push({ key: noteKey(p, "missing", m), title: "מקום שסומן להשלמה", why: "הקובץ יוצא גם כך, עם הסימון. בקובץ Word אפשר להשלים אותו אחר כך, ב-PDF אי אפשר.", needles: [m] });
     }
+    if (scoreNotes.length > 0) scoreCards.push({ type: "paragraph", section, p, notes: scoreNotes });
     if (notes.length > 0) checkCards.push({ type: "paragraph", section, p, notes });
   }
   if (markedElsewhere.length > 0) {
@@ -258,7 +311,7 @@ export function FinishView({ api, onExport, onOpen }: { api: CaseApi; onExport: 
 
   // D-193: of the notes she may leave, the ones she left, as the case keeps them. Asked again
   // whenever the notes shown change (an edit, a new check of the whole report).
-  const leavable = JSON.stringify([...checkCards, ...polishCards].flatMap((c) => (c.type === "line" ? (c.leave ? [c.key] : []) : c.notes.map((n) => n.key))));
+  const leavable = JSON.stringify([...scoreCards, ...checkCards, ...polishCards].flatMap((c) => (c.type === "line" ? (c.leave ? [c.key] : []) : c.notes.map((n) => n.key))));
   useEffect(() => {
     const keys = JSON.parse(leavable) as string[];
     if (keys.length === 0) return;
@@ -274,8 +327,8 @@ export function FinishView({ api, onExport, onOpen }: { api: CaseApi; onExport: 
   }, [caseId, leavable, setLeftKeys]);
   const leftKnown = leftAnswered || leavable === "[]";
 
-  const groups = [group("must", mustCards, leftKeys), group("check", checkCards, leftKeys), group("polish", polishCards, leftKeys)];
-  const [must, toCheck] = groups;
+  const groups = [group("must", mustCards, leftKeys), group("scores", scoreCards, leftKeys), group("check", checkCards, leftKeys), group("polish", polishCards, leftKeys)];
+  const [must, scores, toCheck] = groups;
   const firstOpen = groups.find((g) => g.count > 0)?.id ?? null;
   const isOpen = (g: Group) => (editing?.at === g.id && g.cards.some((c) => c.type === "paragraph" && c.p.id === editing.id)) || (folds[g.id] ?? g.id === firstOpen);
   /** An editor is open on a card: no other card opens one over it and loses her text. */
@@ -315,15 +368,18 @@ export function FinishView({ api, onExport, onOpen }: { api: CaseApi; onExport: 
   };
 
   async function save() {
-    if (!editing) return;
+    if (!editing || saving) return;
     const text = editBox.current?.value() ?? editing.text;
     setError(null);
+    setSaving(true);
     try {
       if (await ipc.editParagraph(caseId, editing.id, text, editing.original ?? null)) notify(STALE_EDIT_KEPT);
       setEditing(null);
       await reload();
     } catch (e) {
       setError(fail(e as never));
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -347,8 +403,8 @@ export function FinishView({ api, onExport, onOpen }: { api: CaseApi; onExport: 
             <LocalText key={p.id} ref={editBox} className="textarea serif" rows={4} autoFocus initial={editing.text} onLive={holdLive} aria-label="תיקון הפסקה"
               onText={(text) => setEditing((e) => (e?.id === p.id ? { ...e, text } : e))} />
             <div className="row">
-              <button type="button" className="btn btn-primary btn-small" onClick={() => void save()}>שמירה</button>
-              <button type="button" className="btn btn-small" onClick={() => setEditing(null)}>ביטול</button>
+              <button type="button" className="btn btn-primary btn-small" disabled={saving} onClick={() => void save()}>{saving ? "בשמירה…" : "שמירה"}</button>
+              <button type="button" className="btn btn-small" disabled={saving} onClick={() => setEditing(null)}>ביטול</button>
             </div>
           </div>
         )}
@@ -394,7 +450,7 @@ export function FinishView({ api, onExport, onOpen }: { api: CaseApi; onExport: 
         </div>
         {(c.open !== null || c.leave) && (
           <div className="fin-actions">
-            {c.open !== null && <button type="button" className="fin-link" onClick={() => onOpen(c.open ?? "")}>לעבור לסעיף</button>}
+            {c.open !== null && <button type="button" className="fin-link" onClick={() => (c.to ? go(c.to) : onOpen(c.open ?? ""))}>לעבור לסעיף</button>}
             {c.leave && <button type="button" className="fin-link" onClick={() => leave(g.id, c.key, null)}>בסדר, להשאיר</button>}
           </div>
         )}
@@ -448,7 +504,7 @@ export function FinishView({ api, onExport, onOpen }: { api: CaseApi; onExport: 
       <div className="finish-body">
         <section className="finish-side" aria-label="לפני שהקובץ יוצא">
           <div className="stack" style={{ gap: 4 }}>
-            <h1>{statusLine({ loaded: check !== null && leftKnown, nothing, must: must?.count ?? 0, check: toCheck?.count ?? 0, complete })}</h1>
+            <h1>{statusLine({ loaded: check !== null && leftKnown, nothing, must: must?.count ?? 0, scores: scores?.count ?? 0, check: toCheck?.count ?? 0, complete })}</h1>
             <span className="muted small">{anyCard ? "לחיצה על הערה מראה אותה בדוח שמשמאל." : "משמאל: הדוח כמו שייצא."}</span>
           </div>
           {(!check || !leftKnown) && !error && <WaitLine task="check" label="בודקת שהדוח מוכן להוצאה" />}
@@ -463,13 +519,14 @@ export function FinishView({ api, onExport, onOpen }: { api: CaseApi; onExport: 
           <section className="card finish-file">
             <b>קובץ Word או PDF</b>
             <span className="muted small">נשמר בתיקיית ההורדות, ונפתח בלי סיסמה.</span>
-            <button type="button" className="btn btn-primary btn-big" disabled={!ready} onClick={onExport}>הפקת הקובץ</button>
+            <button type="button" className="btn btn-primary btn-big" disabled={!ready || editing !== null} onClick={onExport}>הפקת הקובץ</button>
             {!ready && check && (
               <span className="small muted">
                 {nothing ? "צריך לפחות סעיף מאושר אחד." : "קודם מתקנים את מה שמסומן למעלה."}
               </span>
             )}
-            {ready && (
+            {ready && editing !== null && <span className="small muted">קודם שומרים או מבטלים את התיקון שפתוח ברשימה.</span>}
+            {ready && editing === null && (
               <span className="small muted">
                 {included === 1 ? "סעיף מאושר אחד ייכנס לקובץ." : `${included} סעיפים מאושרים ייכנסו לקובץ.`} השמות חוזרים למקומם בקובץ.
               </span>
@@ -483,7 +540,7 @@ export function FinishView({ api, onExport, onOpen }: { api: CaseApi; onExport: 
             <header className="a4-header">{settings?.confidentiality}</header>
             <h1 className="a4-title">{settings?.title ?? "דוח אבחון פסיכולוגי"}</h1>
             <dl className="a4-info">
-              {child && <><dt>שם הילד/ה</dt><dd>{child}</dd></>}
+              {child && <><dt>{childLabel(detail.meta.child_gender)}</dt><dd>{child}</dd></>}
               {detail.meta.age && <><dt>גיל בזמן האבחון</dt><dd>{ageWords(detail.meta.age)}</dd></>}
               <dt>תאריך הדוח</dt><dd>{new Date().toLocaleDateString("he-IL")}</dd>
             </dl>

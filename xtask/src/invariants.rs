@@ -622,18 +622,136 @@ fn advisory_expiry(root: &Path) -> Vec<String> {
 
 /// Calls that would write case data where it should not go: the console (a log file, a
 /// terminal history) or the shared temp folder (plain files that outlive the program).
-const STRAY_OUTPUT: &[&str] = &["println!", "eprintln!", "dbg!", "temp_dir("];
+const STRAY_OUTPUT: &[&str] = &[
+    "println!",
+    "eprintln!",
+    "dbg!",
+    "temp_dir(",
+    "tempdir(",
+    "NamedTempFile",
+];
 
-/// The offending lines of one production source file; test code (from `#[cfg(test)]` on) and
-/// comments are not looked at.
+/// Where brace counting is inside a line: code, a string, a raw string with `n` hashes, or a
+/// block comment. Carried from one line to the next.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Lexed {
+    Code,
+    Str,
+    Raw(usize),
+    Block,
+}
+
+/// The change in brace depth over `line` (strings, char literals and comments left out), and
+/// whether a `;` closed something at depth 0 relative to the start of the line.
+/// Returns whether a `;` was met at depth 0, and whether a `{` opened on this line (also one
+/// that closed again on it: `fn helper() {}`).
+fn braces(line: &str, state: &mut Lexed, depth: &mut i64) -> (bool, bool) {
+    let b = line.as_bytes();
+    let mut semi_at_zero = false;
+    let mut opened = false;
+    let mut i = 0;
+    while let Some(&c) = b.get(i) {
+        match *state {
+            Lexed::Str => match c {
+                b'\\' => i += 1,
+                b'"' => *state = Lexed::Code,
+                _ => {}
+            },
+            Lexed::Raw(n) => {
+                let close = b
+                    .get(i + 1..i + 1 + n)
+                    .is_some_and(|h| h.iter().all(|x| *x == b'#'));
+                if c == b'"' && close {
+                    *state = Lexed::Code;
+                    i += n;
+                }
+            }
+            Lexed::Block => {
+                if c == b'*' && b.get(i + 1) == Some(&b'/') {
+                    *state = Lexed::Code;
+                    i += 1;
+                }
+            }
+            Lexed::Code => match c {
+                b'/' if b.get(i + 1) == Some(&b'/') => break,
+                b'/' if b.get(i + 1) == Some(&b'*') => {
+                    *state = Lexed::Block;
+                    i += 1;
+                }
+                b'"' => *state = Lexed::Str,
+                // `r"…"`, `r#"…"#` and the byte forms `br"…"`, `br#"…"#`.
+                b'r' if {
+                    let word = |k: usize| {
+                        b.get(k)
+                            .is_some_and(|p| p.is_ascii_alphanumeric() || *p == b'_')
+                    };
+                    let before = i.wrapping_sub(1);
+                    !word(before) || (b.get(before) == Some(&b'b') && !word(before.wrapping_sub(1)))
+                } =>
+                {
+                    let hashes = b
+                        .get(i + 1..)
+                        .unwrap_or_default()
+                        .iter()
+                        .take_while(|x| **x == b'#')
+                        .count();
+                    if b.get(i + 1 + hashes) == Some(&b'"') {
+                        *state = Lexed::Raw(hashes);
+                        i += 1 + hashes;
+                    }
+                }
+                // A char literal: '{', '}', '"' or '\''.
+                b'\'' if b.get(i + 2) == Some(&b'\'') => i += 2,
+                b'\'' if b.get(i + 1) == Some(&b'\\') && b.get(i + 3) == Some(&b'\'') => i += 3,
+                b'{' => {
+                    *depth += 1;
+                    opened = true;
+                }
+                b'}' => *depth -= 1,
+                b';' if *depth == 0 => semi_at_zero = true,
+                _ => {}
+            },
+        }
+        i += 1;
+    }
+    (semi_at_zero, opened)
+}
+
+/// The offending lines of one production source file. An item under `#[cfg(test)]` (a test
+/// module, or one gated function or `use` in the middle of the file) and comments are not
+/// looked at; the code after that item is.
 pub fn stray_output(text: &str) -> Vec<(usize, &'static str)> {
     let mut found = Vec::new();
+    // Inside a gated item: its brace depth, and whether its body has opened.
+    let mut gate: Option<(i64, bool)> = None;
+    let mut state = Lexed::Code;
     for (n, line) in text.lines().enumerate() {
         let trimmed = line.trim_start();
-        if trimmed.starts_with("#[cfg(test)]") {
-            break;
+        let mut code = line;
+        if gate.is_none() && state == Lexed::Code && trimmed.starts_with("#[cfg(test)]") {
+            gate = Some((0, false));
+            code = trimmed.trim_start_matches("#[cfg(test)]");
         }
-        if trimmed.starts_with("//") {
+        if let Some((mut depth, mut opened)) = gate {
+            let t = code.trim();
+            // More attributes, blank lines or comments before the item itself.
+            let before_item = !opened
+                && state == Lexed::Code
+                && (t.is_empty() || t.starts_with("//") || t.starts_with("#[") && t.ends_with(']'));
+            if !before_item {
+                let (semi, opened_here) = braces(code, &mut state, &mut depth);
+                opened |= opened_here || depth > 0;
+                gate = if (opened && depth <= 0) || (!opened && semi) {
+                    None
+                } else {
+                    Some((depth, opened))
+                };
+            }
+            continue;
+        }
+        let was = state;
+        braces(line, &mut state, &mut 0);
+        if trimmed.starts_with("//") || was != Lexed::Code {
             continue;
         }
         for what in STRAY_OUTPUT {
@@ -647,7 +765,7 @@ pub fn stray_output(text: &str) -> Vec<(usize, &'static str)> {
 
 /// No console output and no shared temp folder in production code (S1).
 fn no_stray_output(roots: &[PathBuf]) -> Vec<String> {
-    let mut problems = Vec::new();
+    let mut files = Vec::new();
     let mut stack: Vec<PathBuf> = roots.to_vec();
     while let Some(dir) = stack.pop() {
         let Ok(entries) = fs::read_dir(&dir) else {
@@ -666,17 +784,82 @@ fn no_stray_output(roots: &[PathBuf]) -> Vec<String> {
                 && !name.ends_with("_tests.rs")
                 && path.components().all(|c| c.as_os_str() != "bin")
             {
-                let text = fs::read_to_string(&path).unwrap_or_default();
-                for (line, what) in stray_output(&text) {
-                    problems.push(format!(
-                        "{}:{line}: `{what}` in production code",
-                        path.display()
-                    ));
-                }
+                files.push(path);
             }
         }
     }
+    let texts: Vec<(PathBuf, String)> = files
+        .into_iter()
+        .map(|p| {
+            let text = fs::read_to_string(&p).unwrap_or_default();
+            (p, text)
+        })
+        .collect();
+    // A module file that its parent declares under `#[cfg(test)]` (`mod flows;`) is test code.
+    let gated: Vec<PathBuf> = texts
+        .iter()
+        .flat_map(|(p, text)| {
+            gated_modules(text)
+                .into_iter()
+                .map(|m| module_dir(p).join(m))
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    let mut problems = Vec::new();
+    for (path, text) in &texts {
+        let is_gated = gated
+            .iter()
+            .any(|g| path.with_extension("") == *g || path.starts_with(g));
+        if is_gated {
+            continue;
+        }
+        for (line, what) in stray_output(text) {
+            problems.push(format!(
+                "{}:{line}: `{what}` in production code",
+                path.display()
+            ));
+        }
+    }
     problems
+}
+
+/// The folder a file's child modules live in: its own folder for `mod.rs`, `lib.rs` and
+/// `main.rs`, a folder of its name otherwise.
+fn module_dir(file: &Path) -> PathBuf {
+    let parent = file.parent().map(Path::to_path_buf).unwrap_or_default();
+    match file.file_name().and_then(|n| n.to_str()) {
+        Some("mod.rs" | "lib.rs" | "main.rs") => parent,
+        _ => parent.join(file.file_stem().unwrap_or_default()),
+    }
+}
+
+/// The modules a file declares in another file under `#[cfg(test)]` (`#[cfg(test)]\nmod x;`).
+fn gated_modules(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut gated = false;
+    for line in text.lines() {
+        let t = line.trim();
+        let rest = if let Some(r) = t.strip_prefix("#[cfg(test)]") {
+            gated = true;
+            r.trim()
+        } else {
+            t
+        };
+        if rest.is_empty() || rest.starts_with("#[") && rest.ends_with(']') {
+            continue;
+        }
+        if gated {
+            let decl = rest
+                .strip_prefix("pub(crate) ")
+                .or_else(|| rest.strip_prefix("pub "))
+                .unwrap_or(rest);
+            if let Some(name) = decl.strip_prefix("mod ").and_then(|m| m.strip_suffix(';')) {
+                out.push(name.trim().to_owned());
+            }
+        }
+        gated = false;
+    }
+    out
 }
 
 #[cfg(test)]
@@ -705,6 +888,52 @@ mod tests {
             vec![(1, "temp_dir(")]
         );
         assert!(stray_output("let ok = 1;").is_empty());
+    }
+
+    /// DOMAIN-11: only the item under `#[cfg(test)]` is skipped, not the rest of the file.
+    #[test]
+    fn code_after_a_gated_item_is_still_looked_at() {
+        assert_eq!(
+            stray_output("#[cfg(test)]\nuse x;\nfn a() { std::env::temp_dir(); }"),
+            vec![(3, "temp_dir(")]
+        );
+        let src = "#[cfg(test)]\n#[allow(dead_code)]\nfn helper() {\n    let s = \"}\";\n    let c = '{';\n    println!(\"{s}{c}\");\n}\n\nfn real() {\n    dbg!(1);\n}\n";
+        assert_eq!(stray_output(src), vec![(10, "dbg!")]);
+        let raw = "#[cfg(test)]\nmod t {\n    const J: &str = r#\"{ \"a\": 1 \"#;\n    fn b() { eprintln!(\"z\"); }\n}\nfn c() { tempfile::tempdir(); }\n";
+        assert_eq!(stray_output(raw), vec![(6, "tempdir(")]);
+        assert_eq!(
+            stray_output("#[cfg(test)] use y;\nfn d() { let f = tempfile::NamedTempFile::new(); }"),
+            vec![(2, "NamedTempFile")]
+        );
+        assert_eq!(
+            gated_modules("mod real;\n#[cfg(test)]\nmod flows;\n#[cfg(test)]\n#[path = \"x.rs\"]\npub(crate) mod more;\n"),
+            vec!["flows".to_owned(), "more".to_owned()]
+        );
+        assert_eq!(
+            module_dir(Path::new("a/style/mod.rs")),
+            Path::new("a/style")
+        );
+        assert_eq!(module_dir(Path::new("a/store.rs")), Path::new("a/store"));
+        // A byte raw string with quotes in it does not leave the rest of the file unread.
+        assert_eq!(
+            stray_output("const B: &[u8] = br#\"{\"a\"#;\nfn e() { dbg!(2); }\n"),
+            vec![(2, "dbg!")]
+        );
+        assert_eq!(
+            stray_output("#[cfg(test)]\nconst B: &[u8] = br#\"x\"}\"#;\nfn e() { dbg!(2); }\n"),
+            vec![(3, "dbg!")]
+        );
+        // A gated item whose body opens and closes on its own line ends the gate there.
+        assert_eq!(
+            stray_output("#[cfg(test)]\nfn helper() {}\n\nfn real() {\n    dbg!(1);\n}\n"),
+            vec![(5, "dbg!")]
+        );
+        assert_eq!(
+            stray_output("#[cfg(test)] fn a() { b(); }\nfn real() {\n    dbg!(1);\n}\n"),
+            vec![(3, "dbg!")]
+        );
+        // A test module at the end is still skipped whole.
+        assert!(stray_output("fn a() {}\n#[cfg(test)]\nmod tests {\n    fn b() {\n        println!(\"x\");\n    }\n}\n").is_empty());
     }
 
     fn graph(edges: &[(&str, &str)]) -> Graph {

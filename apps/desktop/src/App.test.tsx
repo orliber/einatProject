@@ -6,6 +6,8 @@ import { App, sameStatus } from "./App";
 import { status } from "./test/fixtures";
 
 describe("App", () => {
+  beforeEach(() => localStorage.removeItem("dv.setupUnfinished"));
+
   it("first run: password, then the backup step, with no printed kit (D-103)", async () => {
     let created = false;
     let confirmed = 0;
@@ -56,6 +58,48 @@ describe("App", () => {
     expect(screen.getByRole("heading", { name: "גיבוי לדיסק נייד" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "התיק הראשון" })).not.toBeInTheDocument();
     vi.useRealTimers();
+  });
+
+  it("first-run steps cut short by a lock: Ctrl+L does not cut them, and the next opening says where they wait (UIA-12)", async () => {
+    let created = false;
+    let locked = false;
+    mockIPC((cmd) => {
+      if (cmd === "app_status") return status({ vault_exists: created, unlocked: created && !locked });
+      if (cmd === "create_vault") {
+        created = true;
+        return null;
+      }
+      if (cmd === "lock") {
+        locked = true;
+        return null;
+      }
+      if (cmd === "unlock") {
+        locked = false;
+        return status();
+      }
+      if (cmd === "ping") return { ipc_version: 1, core_version: "0.1.0", build_commit: "t", fips_active: false, platform: "linux" };
+      if (cmd === "list_cases") return [];
+      return null;
+    });
+    const user = userEvent.setup();
+    const view = render(<App />);
+    await user.type(await screen.findByLabelText("סיסמה"), "כלב ירוק רץ מהר");
+    await user.type(screen.getByLabelText("שוב, לאימות"), "כלב ירוק רץ מהר");
+    await user.click(screen.getByRole("button", { name: "יצירת הכספת" }));
+    expect(await screen.findByRole("heading", { name: "גיבוי לדיסק נייד" })).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: "l", code: "KeyL", ctrlKey: true });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(locked).toBe(false);
+    expect(localStorage.getItem("dv.setupUnfinished")).toBe("1");
+    // The idle lock comes anyway, and the page starts afresh (as the built app reloads it).
+    locked = true;
+    view.unmount();
+    render(<App />);
+    await user.type(await screen.findByLabelText("סיסמה"), "כלב ירוק רץ מהר");
+    await user.click(screen.getByRole("button", { name: "פתיחה" }));
+    expect(await screen.findByText(/ההגדרה הראשונה נקטעה לפני הסוף/)).toBeInTheDocument();
+    expect(await screen.findByLabelText("השמות שלך")).toBeInTheDocument();
+    expect(localStorage.getItem("dv.setupUnfinished")).toBeNull();
   });
 
   it("a short password is refused before anything is created", async () => {
@@ -177,6 +221,26 @@ describe("App", () => {
       await emit("core", { kind: "locked" });
     });
     expect(await screen.findByLabelText("סיסמה")).toBeInTheDocument();
+  });
+
+  it("closing the window hands over what is typed and then locks (D-218)", async () => {
+    const calls: string[] = [];
+    mockIPC(
+      (cmd) => {
+        calls.push(cmd);
+        if (cmd === "app_status") return status({ unlocked: true });
+        if (cmd === "list_cases") return [];
+        if (cmd === "ping") return { ipc_version: 1, core_version: "0.1.0", build_commit: "t", fips_active: false, platform: "linux" };
+        return null;
+      },
+      { shouldMockEvents: true },
+    );
+    render(<App />);
+    expect(await screen.findByRole("heading", { name: "התיק הראשון" })).toBeInTheDocument();
+    await act(async () => {
+      await emit("core", { kind: "closing" });
+    });
+    await vi.waitFor(() => expect(calls).toContain("lock"));
   });
 
   it("when events cannot reach the window, a lock still shows within 15 seconds (D-060)", async () => {

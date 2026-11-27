@@ -193,6 +193,11 @@ fn is_terminator(c: char) -> bool {
     matches!(c, '%' | '°' | '₪' | '$' | '+' | '−' | '-')
 }
 
+/// A comparison sign that belongs to the number after it ("<0.1", ">99.9", "±3").
+fn is_comparison(c: char) -> bool {
+    matches!(c, '<' | '>' | '≤' | '≥' | '±' | '~')
+}
+
 /// A Hebrew point or accent: drawn on the letter before it, so it stays after that letter.
 fn is_mark(c: char) -> bool {
     matches!(c, '\u{0591}'..='\u{05C7}')
@@ -215,20 +220,37 @@ fn visual_pairs(line: &str) -> Vec<(char, char)> {
     let mut i = 0;
     while let Some(&c) = chars.get(i) {
         if is_ltr(c) {
-            let len = chars
+            let span: Vec<char> = chars
                 .iter()
                 .skip(i)
                 .take_while(|c| !is_rtl(**c) && !is_bracket(**c))
+                .copied()
+                .collect();
+            // Only digits and number punctuation ("8, 12, 5", "3.5.2026 – 10.5.2026"): each
+            // number is its own span, so the list reads right to left as in the Word file (the
+            // Unicode algorithm gives the comma and space between them the paragraph's
+            // direction). A span with a Latin letter ("FSIQ = 102") keeps its spaces.
+            let numbers_only = !span.iter().any(|c| is_ltr(*c) && !c.is_numeric());
+            let reach = if numbers_only {
+                span.iter()
+                    .position(|c| c.is_whitespace())
+                    .unwrap_or(span.len())
+            } else {
+                span.len()
+            };
+            let len = span
+                .iter()
+                .take(reach)
                 .enumerate()
-                .filter(|(_, c)| is_ltr(**c))
-                .last()
+                .rfind(|(_, c)| is_ltr(**c))
                 .map_or(1, |(j, _)| j + 1);
             let mut end = i + len;
             let at = |k: Option<usize>| k.and_then(|k| chars.get(k)).copied();
-            // "-3" at the start, after a space or after a bracket: the sign is the number's
-            // (after a letter, "ו-5", the hyphen is the word's).
+            // "-3" or "<0.1" at the start, after a space or after a bracket: the sign is the
+            // number's, kept on its left and not mirrored (after a letter, "ו-5", the hyphen
+            // is the word's).
             let signed = c.is_ascii_digit()
-                && at(i.checked_sub(1)).is_some_and(is_terminator)
+                && at(i.checked_sub(1)).is_some_and(|s| is_terminator(s) || is_comparison(s))
                 && at(i.checked_sub(2)).is_none_or(|b| b.is_whitespace() || is_bracket(b));
             let start = if signed { i.saturating_sub(1) } else { i };
             // "79%": the unit after the last digit.
@@ -560,7 +582,7 @@ impl<'a> Pages<'a> {
             self.ensure(row_h);
             let top = self.y;
             for i in 0..cells {
-                if start(i) + step > c.mean - c.sd && start(i) < c.mean + c.sd {
+                if c.in_band(start(i), step) {
                     self.rect(cell_x(i), top - row_h, cw, row_h, BAND_FILL);
                 }
             }
@@ -760,6 +782,11 @@ fn lay_out(report: &Report, p: &mut Pages<'_>) {
         p.y -= 18.0;
         p.ensure(report.signature.len() as f32 * 17.0);
         for line in &report.signature {
+            if line.trim().is_empty() {
+                // The empty line between her lines and the supervisor's, as in the Word file.
+                p.y -= 12.0 * 1.45;
+                continue;
+            }
             p.paragraph(line, 12.0, false, INK, Align::Right, 0.0, 0.0, 0.0);
         }
     }
@@ -1230,6 +1257,28 @@ mod tests {
         .find_map(|p| std::fs::read(p).ok())
     }
 
+    /// EXPORT-5: an empty signature line (before the supervisor's lines) takes one line.
+    #[test]
+    fn an_empty_signature_line_keeps_its_space() {
+        let Some(bytes) = system_font() else { return };
+        let font = Font::load(&bytes).unwrap();
+        let end = |signature: &[&str]| {
+            let mut r = sample();
+            r.tables.clear();
+            r.signature = signature.iter().map(|s| (*s).to_owned()).collect();
+            let mut p = Pages::new(&font, None);
+            lay_out(&r, &mut p);
+            (p.done.len(), p.y)
+        };
+        let (pages_a, joined) = end(&["א", "ב"]);
+        let (pages_b, apart) = end(&["א", "", "ב"]);
+        assert_eq!(pages_a, pages_b);
+        assert!(
+            (joined - apart - 12.0 * 1.45).abs() < 0.01,
+            "{joined} {apart}"
+        );
+    }
+
     #[test]
     fn right_to_left_with_latin_runs_kept() {
         assert_eq!(visual("שלום"), "םולש");
@@ -1321,6 +1370,21 @@ mod tests {
         assert_eq!(visual("(-3)"), "(-3)");
         assert_eq!(visual("ו-5 ילדים"), "םידלי 5-ו");
         assert_eq!(visual("טווח 85–99"), "85–99 חווט");
+        // EXPORT-1: a list of numbers reads right to left, each number left to right.
+        assert_eq!(visual("ציונים 8, 12, 5 בהתאמה"), "המאתהב 5 ,12 ,8 םינויצ");
+        assert_eq!(visual("בגילאי 3, 4 ו-5"), "5-ו 4 ,3 יאליגב");
+        assert_eq!(
+            visual("בתאריכים 3.5.2026 – 10.5.2026"),
+            "10.5.2026 – 3.5.2026 םיכיראתב"
+        );
+        assert_eq!(visual("בטווח 7–13"), "7–13 חווטב");
+        assert_eq!(visual("אחוזונים 8%, 12%"), "12% ,8% םינוזוחא");
+        // EXPORT-3: a comparison sign stays on the number's left, not mirrored.
+        assert_eq!(visual("<0.1"), "<0.1");
+        assert_eq!(visual(">99.9"), ">99.9");
+        assert_eq!(visual("אחוזון >99.9"), ">99.9 ןוזוחא");
+        assert_eq!(visual("אחוזון <0.1 בלבד"), "דבלב <0.1 ןוזוחא");
+        assert_eq!(visual("(<1)"), "(<1)");
     }
 
     /// Points and accents are drawn on the letter before them: they stay after it when the

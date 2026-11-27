@@ -251,10 +251,14 @@ export function Dialog(props: {
       else closeRef.current?.();
     };
     window.addEventListener("keydown", onKey);
+    // The page behind stays where it was while a dialog is open (UID-7): a class on <html>,
+    // not an inline style, so the Content-Security-Policy holds.
+    document.documentElement.classList.add("dialog-open");
     return () => {
       window.removeEventListener("keydown", onKey);
       const i = openDialogs.lastIndexOf(frame);
       if (i >= 0) openDialogs.splice(i, 1);
+      if (openDialogs.length === 0) document.documentElement.classList.remove("dialog-open");
     };
   }, [closable]);
   return (

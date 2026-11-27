@@ -141,7 +141,7 @@ test.describe("Hebrew typing (real keys and IME)", () => {
     await createCase(page, "יעל בדויה", { consent: false });
     await stage(page, /חומרים/).click();
     await page.getByRole("button", { name: "אינטייק עם ההורים (רישום אינטייק)" }).click();
-    const write = page.getByRole("dialog", { name: "הוספת טקסט" });
+    const write = page.getByRole("dialog", { name: /^(הוספת טקסט|רישום .+)$/ });
     const box = write.getByLabel("הטקסט");
     const typed = await typeAndCheck(page, box);
     await write.getByLabel("כותרת").fill("אינטייק בדוי");

@@ -44,6 +44,14 @@
   border: 1.5px solid var(--warn-line);
   background: var(--warn-paper);
 }
+/* A number unlike the score table: stronger than the advice, never a stop. */
+.fin-group.is-scores {
+  border: 1.5px solid var(--warn-line);
+}
+.is-scores .fin-count {
+  background: var(--warn-soft);
+  color: var(--warn-ink);
+}
 .fin-group h2 {
   margin: 0;
   font-size: var(--text-base);

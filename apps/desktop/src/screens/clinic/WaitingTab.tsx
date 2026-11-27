@@ -94,7 +94,7 @@ export function WaitingTab() {
           <h2>רשימת ההמתנה</h2>
           <span className="muted" role="status">
             {waiting.length === 0 ? "אין כרגע משפחות שממתינות"
-              : `${waiting.length === 1 ? "משפחה אחת ממתינה" : `${waiting.length} משפחות ממתינות`}${urgent > 0 ? `, ${urgent === 1 ? "אחת מהן דחופה" : `${urgent} מהן דחופות`}` : ""}`}
+              : `${waiting.length === 1 ? "משפחה אחת ממתינה" : `${waiting.length} משפחות ממתינות`}${urgentWords(urgent, waiting.length)}`}
           </span>
         </div>
         <span className="grow" />
@@ -174,4 +174,11 @@ export function WaitingTab() {
       )}
     </div>
   );
+}
+
+/** ", אחת מהן דחופה" after how many wait; when every family waiting is urgent, "והיא" / "ושתיהן" / "וכולן". */
+export function urgentWords(urgent: number, waiting: number): string {
+  if (urgent <= 0) return "";
+  if (urgent >= waiting) return waiting === 1 ? ", והיא דחופה" : waiting === 2 ? ", ושתיהן דחופות" : ", וכולן דחופות";
+  return urgent === 1 ? ", אחת מהן דחופה" : `, ${urgent} מהן דחופות`;
 }

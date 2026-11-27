@@ -2,7 +2,7 @@
 // another, and each line says ✓ or ✗, why, and what to do. Nothing from a case is read, and the
 // connection check is a secure handshake only, with nothing sent. "העתקה לאור" copies a short
 // technical summary in plain ASCII: no paths, no content, no keys.
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState, useSyncExternalStore } from "react";
 import { ipc, type CheckLine, type CheckState, type SystemCheck, type SystemCheckResult, type UiError } from "../ipc/client";
 import { Spinner } from "./ui";
 import "./SystemCheck.css";
@@ -70,36 +70,57 @@ function Line({ line }: { line: CheckLine }) {
   );
 }
 
-export function SystemCheckSettings() {
-  const [results, setResults] = useState<SystemCheckResult[]>([]);
+// The run belongs to the program, not to the pane (UIA-8): it goes on while she works
+// elsewhere, and the pane shows where it is, or what it found, when she comes back. In memory
+// only; a lock reloads the page and it is gone.
+interface Run {
+  results: SystemCheckResult[];
   /** The check running now, or null. */
-  const [running, setRunning] = useState<SystemCheck | null>(null);
+  running: SystemCheck | null;
+}
+let run: Run = { results: [], running: null };
+const listeners = new Set<() => void>();
+function setRun(next: Run) {
+  run = next;
+  listeners.forEach((l) => l());
+}
+function subscribe(l: () => void) {
+  listeners.add(l);
+  return () => listeners.delete(l);
+}
+
+/** For the tests: each starts with no run. */
+export function forgetSystemCheck() {
+  run = { results: [], running: null };
+}
+
+/** Runs the checks one after another; a second start while one runs does nothing. */
+async function runChecks(): Promise<void> {
+  if (run.running) return;
+  setRun({ results: [], running: CHECKS[0]?.id ?? null });
+  for (const c of CHECKS) {
+    setRun({ ...run, running: c.id });
+    let r: SystemCheckResult;
+    try {
+      r = await ipc.systemCheck(c.id);
+    } catch (e) {
+      r = notRun(c.id, e);
+    }
+    setRun({ ...run, results: [...run.results, r] });
+  }
+  setRun({ ...run, running: null });
+}
+
+export function SystemCheckSettings() {
+  const { results, running } = useSyncExternalStore(subscribe, () => run);
   const [copied, setCopied] = useState(false);
-  const live = useRef(true);
   const doneRef = useRef<HTMLParagraphElement>(null);
-  useEffect(() => {
-    live.current = true;
-    return () => { live.current = false; };
-  }, []);
 
   async function start() {
     if (running) return;
-    setResults([]);
     setCopied(false);
-    for (const c of CHECKS) {
-      if (!live.current) return;
-      setRunning(c.id);
-      let r: SystemCheckResult;
-      try {
-        r = await ipc.systemCheck(c.id);
-      } catch (e) {
-        r = notRun(c.id, e);
-      }
-      if (!live.current) return;
-      setResults((prev) => [...prev, r]);
-    }
-    setRunning(null);
-    // The result is said, and the keyboard lands on it.
+    await runChecks();
+    // The result is said, and the keyboard lands on it (when she is still here).
     requestAnimationFrame(() => doneRef.current?.focus());
   }
 
@@ -122,7 +143,7 @@ export function SystemCheckSettings() {
       <h2 id="s-syscheck">בדיקת מערכת</h2>
       <p className="hint">
         בודקת שהתוכנה יכולה לקרוא קבצים, לשמור בתיקיות ולהתחבר לשירות ה-AI במחשב הזה. היא לא נוגעת בתיקים
-        ולא שולחת שום מידע: בחיבור נבדקת רק לחיצת יד מאובטחת. אפשר להמשיך לעבוד בזמן הבדיקה.
+        ולא שולחת שום מידע: בחיבור נבדקת רק לחיצת יד מאובטחת. אפשר להמשיך לעבוד בזמן הבדיקה, והתוצאות מחכות כאן.
       </p>
       <div className="row syscheck-actions">
         <button type="button" className="btn" onClick={() => void start()} disabled={running !== null}>

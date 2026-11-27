@@ -87,6 +87,23 @@ export function closingSteps(sections: Section[]): ClosingStep[] {
   });
 }
 
+/** Why a closing section drafted from its own button now would be written too early (D-163):
+ *  the DSM section and the recommendations before her diagnoses, the summary before them or
+ *  before the recommendations. `null` when nothing holds it. The same order the strip keeps;
+ *  drafting anyway is her choice ("להמשיך בכל זאת"). */
+export function closingHold(sections: Section[], key: string): string | null {
+  const steps = closingSteps(sections);
+  const open = (id: ClosingStep["id"]) => steps.some((s) => s.id === id && s.state !== "done");
+  if (key === "dsm" || key === "recommendations") {
+    return open("diagnoses") ? "האבחנות שלך עוד לא אושרו, והסעיף הזה נכתב מתוכן: מה שינוסח עכשיו ייכתב בלעדיהן." : null;
+  }
+  if (key === "summary") {
+    if (open("diagnoses")) return "האבחנות שלך עוד לא אושרו: סיכום שינוסח עכשיו ייכתב בלעדיהן.";
+    if (open("dsm_recommendations")) return "ההמלצות עוד לא אושרו: סיכום שינוסח עכשיו לא יכלול אותן.";
+  }
+  return null;
+}
+
 /** Whether the strip has a place on the page now: she is on a closing section, or two thirds
  *  of the body (the sections with material or text, and her own) are approved; never once
  *  every step is done. */

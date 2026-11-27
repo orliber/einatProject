@@ -3,17 +3,19 @@
 // record, which the family may ask to see, and her personal note, which is hers alone. Only
 // the record can go to the patient's diagnostic case.
 import { useCallback, useState } from "react";
+import { flushSync } from "react-dom";
 import { useApp } from "../../App";
 import { DateField } from "../../components/DateField";
+import { useHoldUnsaved } from "../../components/Unsaved";
 import { Dialog, ErrorLine, Skeleton } from "../../components/ui";
 import type { PatientCard } from "../../ipc/generated/PatientCard";
 import type { SessionNote } from "../../ipc/generated/SessionNote";
 import type { Visit } from "../../ipc/generated/Visit";
 import { useClinicSettings, useNoteToCase, usePatientCard, useReloadClinic, useSaveNote, useToday } from "./clinicData";
-import { formatDate, formatTime, VISIT_KIND_LABEL } from "./format";
+import { formatDate, formatDateShort, formatTime, VISIT_KIND_LABEL } from "./format";
 import { Field, ReadError, RecordHistory, useDiscreet, useShownName } from "./parts";
 import { Recordings } from "./Recordings";
-import { NextVisitRemember, nextPlanned } from "./RememberList";
+import { lineWaits, NextVisitRemember, nextPlanned, useAddToNext } from "./RememberList";
 
 export interface NoteDialogProps {
   patientId: string;
@@ -76,8 +78,28 @@ function NoteForm(props: Omit<NoteDialogProps, "visit"> & {
   /** A recording under way or being saved: closing now would lose it. */
   const [recording, setRecording] = useState(false);
   const onRecordingBusy = useCallback((busy: boolean) => setRecording(busy), []);
+  /** A line typed for the next visit without "הוספה": saving the note adds it too. */
+  const [nextLine, setNextLine] = useState("");
+  const next = nextPlanned(card.visits.map((v) => v.visit),
+    visit ? { date: visit.date, start: visit.start, id: visit.id } : { date: props.today, start: props.minute, id: null });
+  const toNext = useAddToNext(next);
+  const pendingLine = lineWaits(next, nextLine);
 
-  const dirty = record !== (stored?.record ?? "") || personal !== (stored?.personal ?? "") || (visit === null && date !== (stored?.date ?? props.today));
+  const recordChanged = record !== (stored?.record ?? "");
+  const personalChanged = personal !== (stored?.personal ?? "");
+  const noteDirty = recordChanged || personalChanged || (visit === null && date !== (stored?.date ?? props.today));
+  const dirty = noteDirty || pendingLine;
+  // A lock (by hand, or when the computer is left) must not take what she typed with it: the
+  // core keeps it in the vault and offers it back at the next entry, as for a paragraph. The
+  // owner is the patient (the clinic has no case), and the view takes her back to the card.
+  // Closed by her (saved, or "לסגור בלי לשמור"): nothing is held any more.
+  const [done, setDone] = useState(false);
+  const letGo = () => flushSync(() => setDone(true));
+  // No name in the place: it is shown again after the next entry, perhaps with a family in the
+  // room and discreet mode on; "מעבר לכרטיס" opens the right card by its id.
+  const where = visit ? `פגישה ב-${formatDate(visit.date)}` : "סיכום שיחה";
+  useHoldUnsaved(card.patient.id, `רשומה בסיכום (${where})`, !done && recordChanged ? record : null, "clinic");
+  useHoldUnsaved(card.patient.id, `תרשומת אישית בסיכום (${where})`, !done && personalChanged ? personal : null, "clinic");
   const empty = record.trim() === "" && personal.trim() === "" && (stored?.recordings.length ?? 0) === 0;
   const linked = card.case !== null && !card.case.in_trash ? card.case : null;
   const sent = stored !== null && stored.case_input_id !== null;
@@ -118,10 +140,22 @@ function NoteForm(props: Omit<NoteDialogProps, "visit"> & {
 
   async function submit() {
     setBusy(true);
-    const saved = await persist();
+    // Only the line for the next visit was typed: that is what is saved.
+    const saved = noteDirty ? await persist() : null;
+    if (noteDirty && !saved) {
+      setBusy(false);
+      return;
+    }
+    const added = pendingLine && next !== null ? await toNext.add(nextLine) : false;
     setBusy(false);
-    if (!saved) return;
-    notify("הסיכום נשמר");
+    if (pendingLine && !added) {
+      setError("השורה של \"לא לשכוח\" לא נוספה לפגישה הבאה. אפשר לנסות שוב.");
+      return;
+    }
+    if (added) setNextLine("");
+    const line = added && next !== null ? `השורה נוספה ל"לא לשכוח" של הפגישה ב-${formatDateShort(next.date)}` : "";
+    notify(saved ? `הסיכום נשמר${line ? `. ${line}` : ""}` : line);
+    letGo();
     onClose();
   }
 
@@ -129,7 +163,7 @@ function NoteForm(props: Omit<NoteDialogProps, "visit"> & {
     setBusy(true);
     try {
       // What goes to the case is what is saved: first save, then copy.
-      const saved = dirty || stored === null ? await persist() : stored;
+      const saved = noteDirty || stored === null ? await persist() : stored;
       if (!saved) return;
       setError(null);
       setStored(await toCase.mutateAsync(saved.id));
@@ -148,7 +182,7 @@ function NoteForm(props: Omit<NoteDialogProps, "visit"> & {
   }
 
   return (
-    <Dialog help="visit-note" title={title} subtitle={subtitle} dirty={dirty || recording} onClose={onClose}
+    <Dialog help="visit-note" title={title} subtitle={subtitle} dirty={dirty || recording} onClose={() => { letGo(); onClose(); }}
       footer={(close) => <>
         <span className="grow" />
         <button type="button" className="btn" onClick={close}>ביטול</button>
@@ -181,8 +215,7 @@ function NoteForm(props: Omit<NoteDialogProps, "visit"> & {
             aria-describedby="note-record-hint" autoFocus onChange={(e) => setRecord(e.target.value)} />
         </div>
 
-        <NextVisitRemember next={nextPlanned(card.visits.map((v) => v.visit),
-          visit ? { date: visit.date, start: visit.start, id: visit.id } : { date: props.today, start: props.minute, id: null })} />
+        <NextVisitRemember next={next} text={nextLine} onText={setNextLine} />
 
         <div className="clinic-note-part clinic-note-personal">
           <header className="clinic-note-head">

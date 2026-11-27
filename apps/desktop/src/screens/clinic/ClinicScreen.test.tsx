@@ -10,6 +10,7 @@ import type { ClinicRequest } from "../../ipc/generated/ClinicRequest";
 import type { PatientCard } from "../../ipc/generated/PatientCard";
 import type { PatientRow } from "../../ipc/generated/PatientRow";
 import type { Visit } from "../../ipc/generated/Visit";
+import { holdNow } from "../../components/Unsaved";
 import { a11yViolations } from "../../test/a11y";
 import { appApi, Host, serve, type Override } from "../../test/host";
 import { ClinicScreen, forgetDiscreet } from "./ClinicScreen";
@@ -180,10 +181,10 @@ describe("the front page", () => {
   it("shows what needs her, the open tasks and the four figures", async () => {
     const { user, went } = await openClinic();
     const needs = await screen.findByRole("region", { name: "מה דורש אותי" });
-    for (const label of ["פגישה בלי סיכום", "חוב פתוח", "המתנה ארוכה", "שיחת משוב קרובה", "משימה שמועדה עבר"]) {
+    for (const label of ["פגישה בלי סיכום", "חוב פתוח", "המתנה ארוכה", "שיחת משוב קרובה", "מעקב שמועדו עבר"]) {
       expect(within(needs).getAllByText(label).length, label).toBeGreaterThan(0);
     }
-    const tasks = screen.getByRole("region", { name: "משימות פתוחות" });
+    const tasks = screen.getByRole("region", { name: "מעקבים פתוחים" });
     expect(within(tasks).getByLabelText("לחזור לרופאת הילדים")).not.toBeChecked();
     const figures = within(screen.getByRole("list", { name: "הקליניקה במספרים" }));
     expect(figures.getByRole("button", { name: /פגישות השבוע/ })).toHaveTextContent("5");
@@ -244,7 +245,7 @@ describe("the front page", () => {
 
   it("ticking a task shows it done at once and saves it as done today", async () => {
     const { user, requests } = await openClinic();
-    const tasks = await screen.findByRole("region", { name: "משימות פתוחות" });
+    const tasks = await screen.findByRole("region", { name: "מעקבים פתוחים" });
     await user.click(within(tasks).getByLabelText("לחזור לרופאת הילדים"));
     await waitFor(() => expect(requests().some((r) => r.op === "save_task" && r.task.title === "לחזור לרופאת הילדים" && r.task.done_on === "2026-11-15")).toBe(true));
     // The next read takes it off the list of what is open.
@@ -258,7 +259,7 @@ describe("the front page", () => {
     await user.click(within(rowOf("תמר")).getByRole("button", { name: "תזכורת" }));
     await user.click(await screen.findByRole("menuitem", { name: "רק להעתיק" }));
     await waitFor(() => expect(notes).toHaveLength(1));
-    expect(notes[0]).toBe("התזכורת הועתקה ללוח המוגן, ואפשר להדביק אותה בהודעה. יימחק מהלוח בעוד דקה.");
+    expect(notes[0]).toBe("התזכורת הועתקה ללוח המוגן, ואפשר להדביק אותה בהודעה. הלוח יתנקה בעוד דקה.");
     const copied = calls.filter((c) => c.cmd === "copy_secret");
     expect(copied).toHaveLength(1);
     expect(copied[0]?.args).toEqual({ text: "שלום יעל, תזכורת לפגישה ביום ראשון, 15.11.2026, בשעה 09:00. להתראות, ד\"ר רותם בדויה" });
@@ -272,7 +273,7 @@ describe("the front page", () => {
     await user.click(within(rowOf("תמר")).getByRole("button", { name: "תזכורת" }));
     await user.click(await screen.findByRole("menuitem", { name: "לשלוח בוואטסאפ" }));
     await waitFor(() => expect(notes).toHaveLength(1));
-    expect(notes[0]).toBe("וואטסאפ נפתח מול יעל. התזכורת בלוח המוגן: מדביקים (Ctrl+V) ושולחים. יימחק מהלוח בעוד דקה.");
+    expect(notes[0]).toBe("וואטסאפ נפתח מול יעל. התזכורת בלוח המוגן: מדביקים (Ctrl+V) ושולחים. הלוח יתנקה בעוד דקה.");
     const sent = calls.filter((c) => c.cmd === "send_message");
     expect(sent).toHaveLength(1);
     expect(sent[0]?.args).toMatchObject({ kind: "reminder", channel: "whatsapp", contact: null });
@@ -346,11 +347,34 @@ describe("the front page by the time (D-204)", () => {
 
     // What is not the step waits in "⋯", always ending with the visit itself; a visit that has
     // begun offers no reminder there either.
-    expect(await menuOf(user, rowOf("תמר"))).toEqual(["לכתוב סיכום", "להקליט לעצמך", "לפתוח את הפגישה"]);
-    expect(await menuOf(user, rowOf("מאיה"))).toEqual(["התקיימה", "לכתוב סיכום", "לפתוח את הפגישה"]);
+    // "לא הגיעו" is there too, as the day's closing tells her to mark it in the row.
+    expect(await menuOf(user, rowOf("תמר"))).toEqual(["לא הגיעו", "לכתוב סיכום", "להקליט לעצמך", "לפתוח את הפגישה"]);
+    expect(await menuOf(user, rowOf("מאיה"))).toEqual(["התקיימה", "לא הגיעו", "לכתוב סיכום", "לפתוח את הפגישה"]);
     await fromMenu(user, rowOf("מאיה"), "לפתוח את הפגישה");
     const dialog = await screen.findByRole("dialog", { name: "פרטי הפגישה" });
     expect(within(dialog).getByRole("group", { name: "מטופל" })).toHaveTextContent("מאיה");
+  });
+
+  it("“התקיימה” and “לא הגיעו” from a row say so in a toast whose “ביטול” puts the visit back", async () => {
+    afternoon();
+    const served = await serve(withClipboard);
+    const user = userEvent.setup();
+    const toasts: { text: string; action?: { label: string; run: () => void } | undefined }[] = [];
+    render(<Host app={appApi({ route: { name: "clinic" }, notify: (text, action) => void toasts.push({ text, action }) })}><ClinicScreen /></Host>);
+    await within(await screen.findByRole("region", { name: "הפגישות של היום" })).findByRole("button", { name: "תמר" });
+    const saves = () => served.calls.filter((c) => c.cmd === "clinic" && (c.args.request as ClinicRequest).op === "save_visit")
+      .map((c) => (c.args.request as { visit: Visit }).visit);
+    await user.click(within(rowOf("תמר")).getByRole("button", { name: "התקיימה" }));
+    await waitFor(() => expect(toasts.at(-1)?.text).toBe("הפגישה סומנה \"התקיימה\""));
+    expect(toasts.at(-1)?.action?.label).toBe("ביטול");
+    toasts.at(-1)?.action?.run();
+    await waitFor(() => expect(toasts.at(-1)?.text).toBe("הסימון בוטל"));
+    expect(saves().map((v) => v.status)).toEqual(["held", "planned"]);
+    expect(await within(rowOf("תמר")).findByRole("button", { name: "התקיימה" })).toBeInTheDocument();
+
+    await fromMenu(user, rowOf("איתי"), "לא הגיעו");
+    await waitFor(() => expect(toasts.at(-1)?.text).toBe("הפגישה סומנה \"לא הגיעו\""));
+    expect(saves().at(-1)).toMatchObject({ status: "no_show", charge_missed: false });
   });
 
   it("draws “עכשיו 15:12” between the visits, counts “4 בלוח · אחת אחרי עכשיו”, and says “בעוד 48 דקות” on the next one", async () => {
@@ -453,7 +477,7 @@ describe("the front page by the time (D-204)", () => {
     const bodyOf = (toggle: HTMLElement) => document.getElementById(toggle.getAttribute("aria-controls") ?? "") as HTMLElement;
     expect(within(needs).getByText("8 דברים")).toBeInTheDocument();
     // In the order she would deal with them, with the clinic's words and a count; the first open.
-    const topics = ["פגישה שלא סומנה: 2", "פגישה בלי סיכום: 2", "משימה שמועדה עבר: 1", "שיחת משוב קרובה: 1", "חוב פתוח: 1", "המתנה ארוכה: 1"];
+    const topics = ["פגישה שלא סומנה: 2", "פגישה בלי סיכום: 2", "מעקב שמועדו עבר: 1", "שיחת משוב קרובה: 1", "חוב פתוח: 1", "המתנה ארוכה: 1"];
     expect(toggles()).toHaveLength(topics.length);
     toggles().forEach((toggle, i) => {
       expect(toggle).toHaveAccessibleName(topics[i]);
@@ -553,7 +577,7 @@ describe("the front page by the time (D-204)", () => {
     await user.click(within(rowOf("מ.")).getByRole("button", { name: "תזכורת" }));
     await user.click(await screen.findByRole("menuitem", { name: "לשלוח בוואטסאפ" }));
     await waitFor(() => expect(notes).toHaveLength(1));
-    expect(notes[0]).toBe("וואטסאפ נפתח מול ה. התזכורת בלוח המוגן: מדביקים (Ctrl+V) ושולחים. יימחק מהלוח בעוד דקה.");
+    expect(notes[0]).toBe("וואטסאפ נפתח מול ה. התזכורת בלוח המוגן: מדביקים (Ctrl+V) ושולחים. הלוח יתנקה בעוד דקה.");
     expect(calls.filter((c) => c.cmd === "send_message").map((c) => c.args)).toEqual([expect.objectContaining({ kind: "reminder", channel: "whatsapp", contact: null })]);
     expect(calls.some((c) => c.cmd === "copy_secret")).toBe(false);
   });
@@ -669,9 +693,13 @@ describe("adding a patient", () => {
     const dialog = await screen.findByRole("dialog", { name: "מטופל חדש" });
     expect(await a11yViolations(dialog)).toEqual([]);
 
-    // Nothing typed: refused in her words, and nothing is sent.
+    // Nothing typed: refused in her words, by the name box (not at the foot of a long form,
+    // out of sight), and the focus goes there. Nothing is sent.
     await user.click(within(dialog).getByRole("button", { name: "הוספה" }));
-    expect(within(dialog).getByRole("alert")).toHaveTextContent("צריך לכתוב את שם הילד או הילדה.");
+    const nameBox = within(dialog).getByLabelText("שם הילד או הילדה");
+    expect(nameBox).toHaveAttribute("aria-invalid", "true");
+    expect(nameBox).toHaveAccessibleDescription("צריך לכתוב את שם הילד או הילדה.");
+    expect(nameBox).toHaveFocus();
     expect(requests().some((r) => r.op === "save_patient")).toBe(false);
 
     await user.type(within(dialog).getByLabelText("שם הילד או הילדה"), "אלה לדוגמה");
@@ -704,6 +732,32 @@ describe("adding a patient", () => {
     await user.click(await within(visit).findByRole("option", { name: "אלה לדוגמה" }));
     expect(within(visit).getByLabelText("מחיר")).toHaveValue("420");
     expect(within(visit).getByLabelText("משך (דקות)")).toHaveValue("90");
+  });
+
+  it("a birth date typed wrong is not saved as no date; a phone or an email that cannot be reached is pointed out", async () => {
+    const { user, requests, notes } = await openClinic();
+    await within(todays()).findByRole("button", { name: "תמר" });
+    await user.click(screen.getByRole("button", { name: "מטופל חדש" }));
+    const dialog = await screen.findByRole("dialog", { name: "מטופל חדש" });
+    await user.type(within(dialog).getByLabelText("שם הילד או הילדה"), "אלה לדוגמה");
+    const birth = within(dialog).getByLabelText("תאריך לידה");
+    await user.type(birth, "31.02.2020");
+    const mother = within(dialog).getByRole("group", { name: "איש קשר 1" });
+    await user.type(within(mother).getByLabelText("טלפון"), "050-12");
+    await user.type(within(mother).getByLabelText("מייל"), "dana@");
+    await user.tab();
+    expect(within(mother).getByLabelText("טלפון")).toHaveAccessibleDescription("המספר לא נראה תקין, ולא תהיה אפשרות לשלוח אליו הודעה.");
+    expect(within(mother).getByLabelText("מייל")).toHaveAccessibleDescription("הכתובת לא נראית תקינה, ולא תהיה אפשרות לשלוח אליה מייל.");
+    await user.click(within(dialog).getByRole("button", { name: "הוספה" }));
+    expect(birth).toHaveFocus();
+    expect(birth).toHaveAttribute("aria-invalid", "true");
+    expect(requests().some((r) => r.op === "save_patient")).toBe(false);
+    // Fixed: saved with the date. The phone and the email are warnings, not a refusal.
+    await user.clear(birth);
+    await user.type(birth, "28.02.2020");
+    await user.click(within(dialog).getByRole("button", { name: "הוספה" }));
+    await waitFor(() => expect(notes).toContain("המטופל נוסף"));
+    expect(requests().find((r) => r.op === "save_patient")).toMatchObject({ patient: { birth_date: "2020-02-28" } });
   });
 
   it("typed details are not lost by an accidental close", async () => {
@@ -838,6 +892,23 @@ describe("the session note", () => {
 });
 
 describe("the visit dialog", () => {
+  it("a new visit today starts after now, not at an hour already gone; an hour gone is pointed out", async () => {
+    afternoon();
+    const { user } = await openClinic();
+    await user.click(await screen.findByRole("button", { name: "פגישה חדשה" }));
+    const dialog = await screen.findByRole("dialog", { name: "פגישה חדשה" });
+    const start = await within(dialog).findByLabelText("שעת התחלה");
+    // 15:12: the next half hour.
+    expect(start).toHaveValue("15:30");
+    expect(dialog).not.toHaveTextContent("השעה הזו כבר עברה");
+    await user.clear(start);
+    await user.type(start, "9:00");
+    expect(within(dialog).getByText(/^השעה הזו כבר עברה\./)).toBeInTheDocument();
+    // Her own time is never marked: nothing is said of an hour gone.
+    await user.selectOptions(within(dialog).getByLabelText("סוג הפגישה"), "זמן שמור");
+    expect(dialog).not.toHaveTextContent("השעה הזו כבר עברה");
+  });
+
   it("a new visit takes its length and fee from the kind, and an overlap is said after it is saved", async () => {
     const { user, requests, notes } = await openClinic();
     await within(todays()).findByRole("button", { name: "תמר" });
@@ -1137,9 +1208,72 @@ describe("supervision, what not to forget, and recordings (D-207, D-208)", () =>
     });
     expect(await within(group).findByText("לדבר עם הגננת")).toBeInTheDocument();
     expect(within(group).getByLabelText("דבר שלא לשכוח בפגישה הבאה")).toHaveValue("");
-    expect(notes.some((n) => n.startsWith("נוסף לפגישה של "))).toBe(true);
+    expect(notes.some((n) => n.startsWith("השורה נוספה ל\"לא לשכוח\" של הפגישה ב-"))).toBe(true);
     // The note itself is untouched: nothing to save yet.
     expect(within(dialog).getByRole("button", { name: "שמירה" })).toBeDisabled();
+  });
+
+  it("a line for the next visit typed without “הוספה” is added on saving, and closing asks first", async () => {
+    const { user, requests, notes } = await openClinic();
+    await within(todays()).findByRole("button", { name: "תמר" });
+    await fromMenu(user, rowOf("תמר"), "לכתוב סיכום");
+    let dialog = await screen.findByRole("dialog", { name: "סיכום מפגש אבחון" });
+    let group = await within(dialog).findByRole("group", { name: "לא לשכוח לפגישה הבאה" });
+    // Only the line: Escape asks before it is dropped, and "שמירה" can save it.
+    await user.type(within(group).getByLabelText("דבר שלא לשכוח בפגישה הבאה"), "לשאול על השינה");
+    await user.keyboard("{Escape}");
+    expect(within(dialog).getByRole("alertdialog", { name: "לסגור בלי לשמור" })).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "להמשיך לערוך" }));
+    await user.type(within(dialog).getByLabelText("רשומה"), "רשומה בדויה.");
+    await user.click(within(dialog).getByRole("button", { name: "שמירה" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(requests().find((r) => r.op === "save_note")).toMatchObject({ note: { record: "רשומה בדויה." } });
+    expect(requests().find((r) => r.op === "save_visit")).toMatchObject({
+      scope: "one", visit: { kind: "observation", remember: [{ text: "לשאול על השינה", done: false }] },
+    });
+    expect(notes.some((n) => /^הסיכום נשמר\. השורה נוספה ל"לא לשכוח" של הפגישה ב-/.test(n))).toBe(true);
+    // Opened again, the next visit's list has it.
+    await fromMenu(user, rowOf("תמר"), "לפתוח את הסיכום");
+    dialog = await screen.findByRole("dialog", { name: "סיכום מפגש אבחון" });
+    group = await within(dialog).findByRole("group", { name: "לא לשכוח לפגישה הבאה" });
+    expect(await within(group).findByText("לשאול על השינה")).toBeInTheDocument();
+  });
+
+  it("a line under “לא לשכוח” typed without “הוספה” is saved with the visit, and Escape asks first", async () => {
+    const { user, requests } = await openClinic();
+    await within(todays()).findByRole("button", { name: "איתי" });
+    await user.click(within(rowOf("איתי")).getByRole("button", { name: /פתיחת הפגישה של איתי/ }));
+    const dialog = await screen.findByRole("dialog", { name: "פרטי הפגישה" });
+    const group = await within(dialog).findByRole("group", { name: "לא לשכוח לקראת הפגישה" });
+    await user.type(within(group).getByLabelText("דבר חדש שלא לשכוח"), "להביא את הקוביות");
+    await user.keyboard("{Escape}");
+    expect(within(dialog).getByRole("alertdialog", { name: "לסגור בלי לשמור" })).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "להמשיך לערוך" }));
+    await user.click(within(dialog).getByRole("button", { name: "שמירה" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(requests().find((r) => r.op === "save_visit")).toMatchObject({ visit: { remember: [{ text: "להביא את הקוביות", done: false }] } });
+  });
+
+  it("a session note being typed is held for a lock, and let go once saved or closed on purpose", async () => {
+    const { user, calls } = await openClinic();
+    const held = () => calls.filter((c) => c.cmd === "hold_unsaved").at(-1)?.args.edits as { case_id: string; place: string; view: string; text: string }[] | undefined;
+    await within(todays()).findByRole("button", { name: "תמר" });
+    await fromMenu(user, rowOf("תמר"), "לכתוב סיכום");
+    const dialog = await screen.findByRole("dialog", { name: "סיכום מפגש אבחון" });
+    await user.type(await within(dialog).findByLabelText("רשומה"), "רשומה בדויה ארוכה.");
+    await user.type(within(dialog).getByLabelText("תרשומת אישית"), "מחשבה בדויה.");
+    await holdNow();
+    expect(held()).toEqual([
+      expect.objectContaining({ view: "clinic", text: "רשומה בדויה ארוכה.", place: expect.stringMatching(/^רשומה בסיכום \(פגישה ב-/) as unknown }),
+      expect.objectContaining({ view: "clinic", text: "מחשבה בדויה.", place: expect.stringMatching(/^תרשומת אישית בסיכום/) as unknown }),
+    ]);
+    // The child's name is not in what is held: it is shown again after the next entry.
+    expect((held() ?? []).some((e) => e.place.includes("תמר"))).toBe(false);
+    await user.keyboard("{Escape}");
+    await user.click(within(dialog).getByRole("button", { name: "לסגור בלי לשמור" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await holdNow();
+    expect(held()).toEqual([]);
   });
 
   it("“להקליט לעצמך” in a visit's “⋯” opens its note and asks for the microphone at once", async () => {

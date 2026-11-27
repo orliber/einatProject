@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { useApp, type Route } from "../App";
 import { ipc, type UnsavedEdit } from "../ipc/client";
+import { getKept } from "../kept";
 import { Dialog } from "./ui";
 
 /** The open editors' texts, by owner, the latest written last. Kept here, not in a screen: a
@@ -52,6 +53,42 @@ function schedule() {
  *  the vault as it locks. A text typed without a pause is held too. */
 export function holdNow(): Promise<void> {
   return send();
+}
+
+/** The report's paragraph editors of a case that are open now, with the text in each not saved
+ *  yet: one on the report page or a section's page (also when she went to another stage with
+ *  it open: it stays held, and open, until she saves or cancels it there), and the one on the
+ *  finish page. The file must not go out without what she typed there, nor with it unseen
+ *  (fail closed): the export lists them as what stops it. Kept texts offered back after a lock
+ *  are not open editors, nor are her points, a guide or a note in the materials. */
+export function openEdits(caseId: string): UnsavedEdit[] {
+  return [...holds.entries()]
+    .filter(([owner, e]) => !owner.startsWith(OFFERED) && e.case_id === caseId && e.view === "report" && e.place.startsWith("פסקה") && e.text.trim())
+    .map(([, e]) => ({ ...e }));
+}
+
+/** Added to the place of the editor on a section's own page: the report page's editor of the
+ *  same section is another editor, and both are held (and stop the file) side by side, not one
+ *  in place of the other. */
+export const SECTION_PAGE = ", בעמוד הסעיף";
+
+/** The section an open editor is in, by its title ("פסקה בסעיף \"רקע\"" → "רקע"); `null` for
+ *  the finish page's own editor. */
+export function editSectionTitle(edit: UnsavedEdit): string | null {
+  const m = /^פסקה בסעיף "(.*)"(?:, בעמוד הסעיף)?$/.exec(edit.place);
+  return m ? (m[1] ?? null) : null;
+}
+
+/** Where an open paragraph editor of a section is, to take her back to it: the section's own
+ *  page when the editor open is there (an edit or a paragraph of her own, kept by that page),
+ *  else the report page on that section, where the report's editor is kept. */
+export function editRoute(caseId: string, sectionKey: string): Route {
+  const onReport = getKept<unknown>(`case:${caseId}:report:${sectionKey}:editing`, null) !== null;
+  const onPage = getKept<unknown>(`case:${caseId}:section:${sectionKey}:editing`, null) !== null
+    || getKept<unknown>(`case:${caseId}:section:${sectionKey}:own`, null) !== null;
+  return onPage && !onReport
+    ? { name: "case", id: caseId, view: sectionKey }
+    : { name: "case", id: caseId, view: "report", section: sectionKey };
 }
 
 /** After a lock: the core took what it held; nothing of it stays here. */
@@ -104,6 +141,8 @@ export function useHoldUnsaved(caseId: string | null, place: string, text: strin
 
 /** Where the kept text was being written. Edits kept by earlier versions have no view. */
 function placeOf(edit: UnsavedEdit): Route {
+  // A session note of the clinic: its case_id is the patient's id, and it goes to the card.
+  if (edit.view === "clinic") return { name: "clinic", tab: "patients", patientId: edit.case_id };
   if (edit.view === "consult") return { name: "consult", caseId: edit.case_id };
   return { name: "case", id: edit.case_id, view: edit.view || "report" };
 }
@@ -113,7 +152,7 @@ const OFFERED = "offered:";
 
 /** After entering: the texts that were being edited when the vault locked, one after another. */
 export function UnsavedNotice() {
-  const { go } = useApp();
+  const { go, notify } = useApp();
   const [kept, setKept] = useState<UnsavedEdit[]>([]);
   // How long the copy stays on the protected clipboard, once copied; `false` when it failed.
   const [copied, setCopied] = useState<number | false | null>(null);
@@ -139,26 +178,44 @@ export function UnsavedNotice() {
     schedule();
     setKept((k) => k.slice(1));
   };
-  async function copy() {
-    if (!edit) return;
+  /** Whether the text is on the protected clipboard now. */
+  async function copy(): Promise<number | false> {
+    if (!edit) return false;
     // The text may hold names: only the protected clipboard (out of the clipboard history and
     // of cloud sync, cleared after a while), as for an answer about a case. No fallback.
     try {
-      setCopied(await ipc.copySecret(edit.text));
+      const secs = await ipc.copySecret(edit.text);
+      setCopied(secs);
+      return secs;
     } catch {
       setCopied(false);
+      return false;
     }
+  }
+  const isCopied = typeof copied === "number";
+  const toCard = edit.view === "clinic";
+  /** "מעבר לתיק": the core erased the text when it gave it, and the editor there opens with the
+   *  saved paragraph, so it is copied first (UIA-3). If the copy fails she stays here, with the
+   *  text, and is told to copy it by hand. */
+  async function toCase() {
+    if (!edit) return;
+    const secs = isCopied ? copied : await copy();
+    if (secs === false) return;
+    if (!isCopied) notify(`הטקסט הועתק, ואפשר להדביק אותו ${toCard ? "בכרטיס" : "בתיק"}. הלוח יתנקה בעוד ${secs} שניות.`);
+    next();
+    go(placeOf(edit));
   }
   const more = kept.length - 1;
   return (
-    <Dialog title="טקסט שלא נשמר לפני הנעילה" subtitle={edit.place} onClose={next}
-      footer={
+    // Until it was copied, Escape, × and "סגירה" ask first: once closed it is gone for good.
+    <Dialog key={kept.length} title="טקסט שלא נשמר לפני הנעילה" subtitle={edit.place} onClose={next} dirty={!isCopied}
+      footer={(close) => (
         <div className="row">
-          <button type="button" className="btn btn-primary" onClick={() => void copy()}>{typeof copied === "number" ? "הועתק" : "העתקת הטקסט"}</button>
-          <button type="button" className="btn" onClick={() => { next(); go(placeOf(edit)); }}>מעבר לתיק</button>
-          <button type="button" className="btn" onClick={next}>{more > 0 ? `הבא (עוד ${more})` : "סגירה"}</button>
+          <button type="button" className="btn btn-primary" onClick={() => void copy()}>{isCopied ? "הועתק" : "העתקת הטקסט"}</button>
+          <button type="button" className="btn" onClick={() => void toCase()}>{toCard ? (isCopied ? "מעבר לכרטיס" : "העתקה ומעבר לכרטיס") : (isCopied ? "מעבר לתיק" : "העתקה ומעבר לתיק")}</button>
+          <button type="button" className="btn" onClick={close}>{more > 0 ? `הבא (עוד ${more})` : "סגירה"}</button>
         </div>
-      }>
+      )}>
       <p className="muted small">
         הכספת ננעלה באמצע העריכה של הטקסט הזה, והוא נשמר בתוכה, מוצפן. אפשר להעתיק אותו ולהדביק במקום. אחרי הסגירה הוא לא יוצג שוב.
       </p>

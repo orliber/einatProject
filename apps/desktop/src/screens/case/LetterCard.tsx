@@ -25,7 +25,9 @@ export function LetterCard({ api }: { api: CaseApi }) {
   const { fail, status, notify } = useApp();
   const ai = useAi();
   const [audience, setAudience] = useState<Audience>("parents");
-  const [note, setNote] = useState("");
+  // Kept while the vault is open, like her other words on this page: leaving and coming back
+  // finds it as she left it.
+  const [note, setNote] = useKept(`case:${api.caseId}:letter:note`, "");
   const [paragraphs, setParagraphs] = useState<ParagraphView[]>([]);
   const [review, setReview] = useState<Prepared | null>(null);
   const [busy, setBusy] = useState(false);
@@ -91,6 +93,9 @@ export function LetterCard({ api }: { api: CaseApi }) {
   // she unmarks it (D-083; review of stage 6, R2).
   const leftOut = api.detail.meta.letter_left_out ?? [];
   const isPicked = (id: string) => !leftOut.includes(id);
+  /** The school letter is written from the approved recommendations only: with none, the core
+   *  refuses, so the button waits and says why here, before the click. */
+  const noRecs = audience === "school" && recommendations.length === 0;
   const pick = (id: string, on: boolean) => void act(async () => {
     const next = recommendations.map((r) => r.id).filter((r) => (r === id ? !on : !isPicked(r)));
     await ipc.setLetterLeftOut(api.caseId, next.length ? next : null);
@@ -125,7 +130,8 @@ export function LetterCard({ api }: { api: CaseApi }) {
         <label htmlFor="letter-note" className="small">מה עוד חשוב שיהיה במכתב? (לא חובה)</label>
         <input id="letter-note" className="input" value={note} onChange={(e) => setNote(e.target.value)} />
       </div>
-      <button type="button" className="btn" disabled={busy}
+      {noRecs && <span className="small muted">המכתב לצוות נכתב מתוך ההמלצות שאישרת בדוח, ועוד אין המלצות מאושרות. מאשרים קודם את סעיף ההמלצות.</span>}
+      <button type="button" className="btn" disabled={busy || noRecs}
         onClick={() => void act(async () => {
           setStage("prepare");
           const prepared = await timed("prepare", ipc.prepareLetter(api.caseId, audience, note), "letter");
@@ -135,7 +141,7 @@ export function LetterCard({ api }: { api: CaseApi }) {
             await write(prepared.approval_id);
           } else setError(notSentMessage(prepared));
         })}>
-        {busy ? <><Spinner /> {stage === "write" ? "כותב…" : "מכינה…"}</> : paragraphs.length ? "ניסוח מחדש" : "ניסוח המכתב"}
+        {busy ? <><Spinner /> {stage === "write" ? "בכתיבה…" : "בהכנה…"}</> : paragraphs.length ? "ניסוח מחדש" : "ניסוח המכתב"}
       </button>
       {stage === "prepare" && <WaitLine task="prepare" speed="letter" label="מכינה את הבקשה: מסתירה שמות ובודקת מה יוצא" />}
       {stage === "write" && <WaitLine task="draft" speed={`letter:${status.speed}`} demo={status.demo_mode} delay={0} label={`${ai} כותב את המכתב`} />}
@@ -145,12 +151,13 @@ export function LetterCard({ api }: { api: CaseApi }) {
             <LocalText key={p.id} ref={editBox} className="textarea serif" rows={4} autoFocus initial={editing.text} onLive={holdLive} aria-label="עריכת הפסקה"
               onText={(text) => setEditing((e) => (e?.id === p.id ? { ...e, text } : e))} />
             <div className="row">
-              <button type="button" className="btn btn-primary btn-small"
+              <button type="button" className="btn btn-primary btn-small" disabled={busy}
                 onClick={() => {
+                  if (busy) return;
                   const text = editBox.current?.value() ?? editing.text;
                   void act(async () => { if (await ipc.editParagraph(api.caseId, editing.id, text, editing.original ?? null)) notify(STALE_EDIT_KEPT); setEditing(null); await load(); });
-                }}>שמירה</button>
-              <button type="button" className="btn btn-small" onClick={() => setEditing(null)}>ביטול</button>
+                }}>{busy ? "בשמירה…" : "שמירה"}</button>
+              <button type="button" className="btn btn-small" disabled={busy} onClick={() => setEditing(null)}>ביטול</button>
             </div>
           </div>
         ) : (
@@ -167,7 +174,11 @@ export function LetterCard({ api }: { api: CaseApi }) {
         ),
       )}
       {paragraphs.length > 0 && (
-        <button type="button" className="btn btn-primary" disabled={approved === 0} onClick={() => setExporting(true)}>הפקת המכתב</button>
+        <>
+          <button type="button" className="btn btn-primary" disabled={approved === 0 || editing !== null} onClick={() => setExporting(true)}>הפקת המכתב</button>
+          {/* The file must not go out without what she is typing, nor with it unseen. */}
+          {editing !== null && approved > 0 && <span className="small muted">קודם שומרים או מבטלים את העריכה שפתוחה.</span>}
+        </>
       )}
       <ErrorLine error={error} />
       {review && (

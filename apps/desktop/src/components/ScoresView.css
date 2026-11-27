@@ -265,3 +265,6 @@
   font-weight: 400;
   opacity: 0.8;
 }
+.scores-foot-error {
+  min-width: 0;
+}

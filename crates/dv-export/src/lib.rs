@@ -78,6 +78,18 @@ pub struct ScoreChart {
     pub note: String,
 }
 
+impl ScoreChart {
+    /// Whether the cell that starts at `start` (`step` wide) is tinted as within one standard
+    /// deviation of the mean. A cell that stands for one score (the scaled profile, step 1)
+    /// is in the band up to and including `mean + sd`, as the note says ("7–13"); a wider
+    /// cell (110 for 110–114) is in it only when it starts below `mean + sd`.
+    #[must_use]
+    pub fn in_band(&self, start: f64, step: f64) -> bool {
+        let (lo, hi) = (self.mean - self.sd, self.mean + self.sd);
+        start + step > lo && if step <= 1.0 { start <= hi } else { start < hi }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ChartBar {
     pub label: String,

@@ -17,7 +17,7 @@ test("markup in a material is shown as text, not run as HTML", async ({ page }) 
   await createCase(page, "גיל בדוי");
   await stage(page, /חומרים/).click();
   await page.getByRole("button", { name: "אינטייק עם ההורים (רישום אינטייק)" }).click();
-  const write = page.getByRole("dialog", { name: "הוספת טקסט" });
+  const write = page.getByRole("dialog", { name: /^(הוספת טקסט|רישום .+)$/ });
   await write.getByLabel("כותרת").fill("חומר עם תגיות");
   await write.getByLabel("הטקסט").fill(`גיל בונה מגדלים. ${PAYLOAD}`);
   await write.getByRole("button", { name: "שמירה בתיק" }).click();

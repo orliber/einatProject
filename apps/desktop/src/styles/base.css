@@ -204,7 +204,7 @@ select.select {
   /* One chevron, at the end of the field in RTL, the same on every machine. */
   appearance: none;
   padding-inline-end: 36px;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%234a5654' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-image: var(--select-chevron);
   background-repeat: no-repeat;
   background-position: left 12px center;
 }
@@ -440,6 +440,11 @@ select.select {
 }
 
 /* ---------- dialogs ---------- */
+/* While a dialog is open the page behind stays where it was (UID-7): the wheel over the dimmed
+   page, or past the end of the dialog, does not move it. The class is set by Dialog. */
+html.dialog-open {
+  overflow: hidden;
+}
 .overlay {
   position: fixed;
   inset: 0;
@@ -447,12 +452,15 @@ select.select {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 24px;
+  /* The top keeps room for a message (a toast), which shows there above a dialog and never
+     over its title. */
+  padding: var(--toast-room) 24px 24px;
   z-index: 20;
+  --toast-room: 76px;
 }
 .dialog {
   width: min(1040px, 100%);
-  max-height: calc(100vh / var(--zoom, 1) - 48px);
+  max-height: calc(100vh / var(--zoom, 1) - var(--toast-room) - 24px);
   background: var(--bg);
   border-radius: var(--radius-xl);
   display: flex;
@@ -480,6 +488,7 @@ select.select {
 .dialog-body {
   padding: 18px 26px;
   overflow: auto;
+  overscroll-behavior: contain;
   flex-grow: 1;
   min-height: 0;
 }
@@ -494,10 +503,11 @@ select.select {
 /* A low window (a laptop under its taskbar): the dialog keeps its buttons on screen. */
 @media (max-height: 700px) {
   .overlay {
-    padding: 12px;
+    padding: var(--toast-room) 12px 12px;
+    --toast-room: 64px;
   }
   .dialog {
-    max-height: calc(100vh / var(--zoom, 1) - 24px);
+    max-height: calc(100vh / var(--zoom, 1) - var(--toast-room) - 12px);
   }
   .dialog-head {
     padding: 14px 22px 12px;
@@ -545,6 +555,16 @@ select.select {
   z-index: 30;
   box-shadow: var(--shadow-dialog);
   max-width: 640px;
+}
+/* Above an open dialog the message goes up into the room the dialog leaves for it, so it never
+   covers the dialog's title. */
+html.dialog-open .toast {
+  top: 10px;
+}
+@media (max-height: 700px) {
+  html.dialog-open .toast {
+    top: 6px;
+  }
 }
 .toast-action {
   pointer-events: auto;

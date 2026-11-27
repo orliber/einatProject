@@ -30,7 +30,16 @@ export function KnownList({ o, running, onReadScores }: { o: StyleOverview; runn
   const qc = useQueryClient();
   // One open at a time: each editor holds the whole profile, so two open ones would overwrite each other.
   const [open, setOpen] = useState<Known | null>(null);
+  /** The open editor has changes not saved yet: it is not closed over them without asking. */
+  const [dirty, setDirty] = useState(false);
+  /** Where she asked to go while the open editor had changes (`null`: just fold it). */
+  const [asking, setAsking] = useState<{ to: Known | null } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const goTo = (to: Known | null) => {
+    setAsking(null);
+    setDirty(false);
+    setOpen(to);
+  };
   const items = o.active?.profile.items.filter((i) => i.enabled) ?? [];
   const count = (k: (typeof KNOWN)[number]) =>
     k.key === "order" ? o.skeletons.length
@@ -63,10 +72,27 @@ export function KnownList({ o, running, onReadScores }: { o: StyleOverview; runn
           return (
             <li key={k.key}>
               <button type="button" className="style-know" aria-expanded={on} aria-controls={`known-${k.key}`}
-                onClick={() => setOpen(on ? null : k.key)}>
+                onClick={() => {
+                  const to = on ? null : k.key;
+                  if (dirty && open !== null) setAsking({ to });
+                  else goTo(to);
+                }}>
                 <span className="style-know-text"><strong>{k.title}</strong><span className="muted">{k.line}</span></span>
                 <span className="style-know-count">{count(k)} <span aria-hidden="true">{on ? "↓" : "←"}</span></span>
               </button>
+              {asking && (asking.to ?? open) === k.key && (
+                <div className="row wrap-row style-known-ask" role="alert">
+                  <span className="small grow">מה ששינית ב"{KNOWN.find((x) => x.key === open)?.title}" עדיין לא נשמר.</span>
+                  <button type="button" className="btn btn-primary btn-small" onClick={() => {
+                    setAsking(null);
+                    // Back to her changes, with the keyboard on the save buttons.
+                    const foot = document.querySelector<HTMLElement>(`#known-${open ?? ""} .style-profile-foot`);
+                    foot?.scrollIntoView?.({ block: "nearest" });
+                    foot?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus();
+                  }}>חזרה לשמירה</button>
+                  <button type="button" className="btn btn-small" onClick={() => goTo(asking.to)}>לסגור בלי לשמור</button>
+                </div>
+              )}
               {on && (
                 <div id={`known-${k.key}`} className="style-known-open" role="region" aria-label={k.title}>
                   {k.key === "order" ? <Skeletons o={o} />
@@ -77,7 +103,7 @@ export function KnownList({ o, running, onReadScores }: { o: StyleOverview; runn
                           {o.active
                             ? o.draft
                               ? <ReadOnlyItems items={o.active.profile.items.filter((i) => k.kinds.includes(i.kind))} o={o} />
-                              : <ProfileEditor key={o.active.id} view={o.active} o={o} kinds={k.kinds} />
+                              : <ProfileEditor key={o.active.id} view={o.active} o={o} kinds={k.kinds} onDirtyChange={setDirty} />
                             : <p className="muted small">עוד אין פרופיל מאושר. מה שתאשרי בצד יופיע כאן.</p>}
                           {k.key === "writing" && <Learned o={o} />}
                         </>

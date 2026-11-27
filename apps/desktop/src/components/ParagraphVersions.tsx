@@ -47,7 +47,7 @@ export function ParagraphVersions({ caseId, draftId, onRestored }: { caseId: str
     <div className="versions">
       <b>גרסאות קודמות של הפסקה</b>
       <span className="small muted">החזרה של גרסה מאשרת אותה, והניסוח הנוכחי נשמר כאן כגרסה.</span>
-      {versions === null && !error && <span className="small muted"><Spinner /> טוענת…</span>}
+      {versions === null && !error && <span className="small muted"><Spinner /> בטעינה…</span>}
       {versions?.length === 0 && <span className="small muted">אין גרסאות קודמות.</span>}
       {versions && versions.length > 0 && (
         <ol className="versions-list">

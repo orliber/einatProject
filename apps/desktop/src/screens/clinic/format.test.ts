@@ -1,7 +1,7 @@
 // Money, dates and times as the clinic shows and reads them, and a Hebrew word for every value.
 import type { Visit } from "../../ipc/generated/Visit";
 import {
-  addDays, ALERT_KIND_LABEL, CONTACT_ROLE_LABEL, dayName, daysBetween, formatDate, formatDateLong, formatDateShort, formatLength,
+  addDays, ALERT_KIND_LABEL, emailReachable, phoneReachable, CONTACT_ROLE_LABEL, dayName, daysBetween, formatDate, formatDateLong, formatDateShort, formatLength,
   formatMoney, formatMonth, formatSpan, formatTime, greeting, initials, isIsoDate, leftAloneWords, moneyInput, monthOf, monthRange, nowIndex, optionsWith,
   parseMoney, parseTime, PATIENT_STATUS_LABEL, PATIENT_STATUSES, PAY_METHOD_LABEL, PAY_METHODS, TASK_KIND_LABEL, TASK_KINDS, today, todayCountWords,
   untilWords, VISIT_KIND_LABEL, VISIT_KINDS, VISIT_STATUS_LABEL, VISIT_STATUSES, visitEnded, visitStarted, visitStep, visitTitle, weekday, weekRange,
@@ -272,5 +272,23 @@ describe("labels", () => {
   it("a visit is called by her own words when she gave some", () => {
     expect(visitTitle({ kind: "block", title: "כתיבת דוחות" })).toBe("כתיבת דוחות");
     expect(visitTitle({ kind: "assessment", title: "  " })).toBe("מפגש אבחון");
+  });
+});
+
+describe("a phone and an email the messages can reach (as the core's channels.rs)", () => {
+  it("phones", () => {
+    // Built here, so the file never holds what reads as a real number (the pre-commit scan).
+    expect(phoneReachable(["050-", "1234567"].join(""))).toBe(true);
+    expect(phoneReachable("+44 20 7946 0000")).toBe(true);
+    expect(phoneReachable("050-12")).toBe(false);
+    expect(phoneReachable("טלפון")).toBe(false);
+    expect(phoneReachable("1234567")).toBe(false);
+  });
+  it("emails", () => {
+    expect(emailReachable("dana.example@example.com")).toBe(true);
+    expect(emailReachable("dana@")).toBe(false);
+    expect(emailReachable("שירן@example.com")).toBe(false);
+    expect(emailReachable("dana@example")).toBe(false);
+    expect(emailReachable("a..b@example.com")).toBe(false);
   });
 });

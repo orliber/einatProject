@@ -904,8 +904,14 @@ function TaskDialog({ patientId, task, onClose }: { patientId: string; task?: Cl
   const [error, setError] = useState<string | null>(null);
   const set = (patch: Partial<typeof first>) => setForm((f) => ({ ...f, ...patch }));
 
+  /** A date typed wrong: never saved as "no date" (it would erase the one the follow-up had). */
+  const [dueBad, setDueBad] = useState(false);
+  const [tried, setTried] = useState(false);
+
   async function submit() {
+    setTried(true);
     if (form.title.trim() === "") return setError("צריך לכתוב מה צריך לעשות.");
+    if (dueBad) return setError("תאריך היעד לא תקין. אפשר לתקן אותו, או למחוק אותו כדי לשמור בלי תאריך.");
     setError(null);
     try {
       await save.mutateAsync({
@@ -919,7 +925,7 @@ function TaskDialog({ patientId, task, onClose }: { patientId: string; task?: Cl
     }
   }
   return (
-    <Dialog help="task" narrow title={task ? "עריכת מעקב" : "מעקב חדש"} dirty={JSON.stringify(form) !== JSON.stringify(first)} onClose={onClose}
+    <Dialog help="task" narrow title={task ? "עריכת מעקב" : "מעקב חדש"} dirty={JSON.stringify(form) !== JSON.stringify(first) || dueBad} onClose={onClose}
       footer={(close) => <>
         <span className="grow" />
         <button type="button" className="btn" onClick={close}>ביטול</button>
@@ -931,7 +937,7 @@ function TaskDialog({ patientId, task, onClose }: { patientId: string; task?: Cl
         <div className="clinic-form-row">
           <SelectField<TaskKind> id="task-kind" label="סוג" value={form.kind} onChange={(kind) => set({ kind })}
             options={optionsWith(TASK_KINDS, TASK_KIND_LABEL, form.kind)} />
-          <Field id="task-due" label="עד מתי (לא חובה)"><DateField id="task-due" value={form.due} onChange={(due) => set({ due })} /></Field>
+          <Field id="task-due" label="עד מתי (לא חובה)"><DateField id="task-due" value={form.due} checked={tried} onChange={(due, bad) => { set({ due }); setDueBad(bad); }} /></Field>
         </div>
         <TextAreaField id="task-note" label="הערה (לא חובה)" value={form.note} rows={2} maxLength={4000} onChange={(note) => set({ note })} />
         <ErrorLine error={error} />

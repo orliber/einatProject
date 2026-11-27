@@ -26,7 +26,7 @@ import { useAi } from "../../ai";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { BriefBox, CHANGE_CHIPS, STYLE_CHIPS, type BriefLeft } from "./BriefBox";
 import { ParagraphNotes, SectionNotesFold } from "./notes";
-import { CLOSING_KEYS, ClosingFlow, closingAnchor, ownEmptyLine } from "./closing";
+import { CLOSING_KEYS, ClosingFlow, closingAnchor, closingHold, ownEmptyLine } from "./closing";
 
 type Section = CaseDetail["sections"][number];
 
@@ -98,7 +98,6 @@ export function ReportView({ api, current, focus, onPick }: {
   }, [current, detail.sections, focus, briefsRead]);
 
   const child = detail.identities.find((i) => i.role === "child")?.value ?? "";
-  const childLabel = detail.meta.child_gender === "female" ? "שם הילדה" : detail.meta.child_gender === "male" ? "שם הילד" : "שם הילד/ה";
   const parts = Array.from(new Set(detail.sections.map((s) => s.part)));
   const content = detail.sections.filter((s) => s.key !== "signature");
   const signature = detail.sections.find((s) => s.key === "signature");
@@ -114,7 +113,7 @@ export function ReportView({ api, current, focus, onPick }: {
           <header className="a4-header">{settings?.confidentiality}</header>
           <h1 className="a4-title">{settings?.title ?? "דוח אבחון פסיכולוגי"}</h1>
           <dl className="a4-info">
-            {child && <><dt>{childLabel}</dt><dd>{child}</dd></>}
+            {child && <><dt>{childLabel(detail.meta.child_gender)}</dt><dd>{child}</dd></>}
             {detail.meta.age && <><dt>גיל בזמן האבחון</dt><dd>{ageWords(detail.meta.age)}</dd></>}
             <dt>תאריך הדוח</dt><dd>{new Date().toLocaleDateString("he-IL")}</dd>
           </dl>
@@ -144,6 +143,12 @@ export function ReportView({ api, current, focus, onPick }: {
 }
 
 const hasDraft = (s: Section) => s.paragraphs.some((p) => p.status === "proposed");
+
+/** The label of the child's name in the report's header, by the case's grammatical gender:
+ *  the same on the report page and on the finish page. */
+export function childLabel(gender: CaseDetail["meta"]["child_gender"]): string {
+  return gender === "female" ? "שם הילדה" : gender === "male" ? "שם הילד" : "שם הילד/ה";
+}
 
 /** The section the focus starts on: the first draft waiting, else the first section to write. */
 export function firstFocus(sections: Section[]): string | null {
@@ -398,6 +403,15 @@ function A4Section({ api, section: s, focused, onPick, onNext }: {
   const unfed = !mine && s.sortable && s.source_count === 0;
   const [asking, setAsking] = useState(false);
   const busy = preparing || job !== undefined;
+  /** D-163: a closing section drafted from its own button before what it is written from is
+   *  approved: asked first, as the strip asks ("להמשיך בכל זאת"). */
+  const hold = closingHold(detail.sections, s.key);
+  const [early, setEarly] = useState(false);
+  const [holdAsk, setHoldAsk] = useState<(() => void) | null>(null);
+  const gated = (go: () => void) => {
+    if (hold && !early) setHoldAsk(() => go);
+    else go();
+  };
   const waiting = pending.length > 0;
   // D-204: with the brief folded, the section in focus may have nothing that takes the keyboard:
   // opened from the cases list, its "✦ לנסח" line pressed (it goes away under the click), or
@@ -681,7 +695,11 @@ function A4Section({ api, section: s, focused, onPick, onNext }: {
         placeholder="כותבים כאן, כמו בוורד. שמות מוסתרים לפני כל שליחה."
         onText={(text) => { const { id, at } = editing; setEditing((e) => (e && e.id === id && e.at === at ? { ...e, text } : e)); }}
         onEmptyChange={(empty) => { const { id, at } = editing; setEditing((e) => (e && e.id === id && e.at === at ? { ...e, empty } : e)); }}
-        onKeyDown={(e) => { if (e.key === "Escape") { if (leaving) close(); else cancel(); } if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void save(); }} />
+        onKeyDown={(e) => {
+          // A second Escape takes back the question, it never answers it: only "כן, לבטל" drops her text.
+          if (e.key === "Escape") { if (leaving) setLeaving(false); else cancel(); }
+          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void save();
+        }} />
       {leaving ? (
         <div className="row" role="group" aria-label="לבטל את העריכה?">
           <span className="small grow">לבטל את מה שכתבת כאן? הטקסט לא נשמר.</span>
@@ -741,7 +759,9 @@ function A4Section({ api, section: s, focused, onPick, onNext }: {
         const style = wish.slice(0, Math.max(0, wish.length - typed.length)).trim();
         void write(style ? `${typed}\n\n${style}` : typed, undefined, true);
       }}
-      onCancel={() => { setAsking(false); heading.current?.focus(); }} />
+      onCancel={() => { setAsking(false); heading.current?.focus(); }}
+      // Folded by Escape or "ביטול", or the section left: what she typed is there when it opens again.
+      onGone={(left, changed) => { if (changed) setPoints(left.text); }} />
   );
   const state = mine ? "mine" : pending.length > 0 ? "draft" : empty ? "empty" : "approved";
 
@@ -910,7 +930,7 @@ function A4Section({ api, section: s, focused, onPick, onNext }: {
                 picked={draft?.picked} keep={draft ? draft.keep : keptBrief !== ""}
                 describedBy={earlier ? `brief-${s.key}-earlier` : undefined}
                 sendLabel="✦ לנסח" busy={busy} autoFocus={briefAsked || briefFocus || s.key !== "diagnoses"}
-                onSend={sendBrief}
+                onSend={(wish, typed, keep, from) => gated(() => sendBrief(wish, typed, keep, from))}
                 // Whenever the box goes, what is in it then is what it opens with next time: her
                 // newest text (also emptied), styles and "לזכור", and nothing once it was sent.
                 // Taken as it goes, not on every key, so typing never re-renders the section (F1a).
@@ -965,12 +985,19 @@ function A4Section({ api, section: s, focused, onPick, onNext }: {
               // D-204 §3: folded, one row. "✦ לנסח את הסעיף" sends what an empty box sends (no
               // wish, the usual request), through the same review; nothing is kept or deleted.
               <div className="row wrap-row a4-brief-row a4-brief-closed">
-                <button id={`draft-${s.key}`} type="button" className="btn btn-primary" disabled={busy} onClick={() => void write()}>✦ לנסח את הסעיף</button>
+                <button id={`draft-${s.key}`} type="button" className="btn btn-primary" disabled={busy} onClick={() => gated(() => void write())}>✦ לנסח את הסעיף</button>
                 <button type="button" className="btn" onClick={() => edit(null, "", "end")}>לכתוב בעצמי</button>
                 <button ref={briefToggle} type="button" className="link-btn a4-brief-toggle" aria-expanded={false} onClick={() => setBriefAsked(true)}>איך לנסח? (לא חובה)</button>
               </div>
             )}
             {/* D-163: a closing section drafted now cannot reflect her own sections still empty. */}
+            {holdAsk && hold && !busy && (
+              <div className="row wrap-row a4-brief-row" role="group" aria-label="לנסח לפני הזמן?">
+                <span className="small grow">{hold} להמשיך בכל זאת?</span>
+                <button type="button" className="btn btn-small" onClick={() => { const go = holdAsk; setHoldAsk(null); setEarly(true); go(); }}>להמשיך בכל זאת</button>
+                <button type="button" className="btn btn-primary btn-small" autoFocus onClick={() => setHoldAsk(null)}>לא עכשיו</button>
+              </div>
+            )}
             {DERIVED.includes(s.key) && ownEmptyLine(detail.sections) && <span className="small muted a4-own-empty">{ownEmptyLine(detail.sections)}</span>}
             {(briefShown || briefWaiting) && (
               <div className="row a4-brief-row">

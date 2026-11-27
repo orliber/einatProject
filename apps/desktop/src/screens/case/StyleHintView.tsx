@@ -86,7 +86,7 @@ export function StyleHintView({ hint, busy, onCloser, onApply }: {
       {fit !== null && (
         <div className="row wrap-row style-hint-row">
           <button type="button" className={`${level(fit)} style-fit-chip`} aria-expanded={open} onClick={() => setOpen(!open)}>
-            קרוב לסגנון שלך: {fit}
+            קרוב לסגנון שלך: {fit} מתוך 100
           </button>
           {ask && (
             <button type="button" className="btn btn-small" disabled={busy} onClick={() => onCloser(ask)}>לקרב לסגנון שלי</button>

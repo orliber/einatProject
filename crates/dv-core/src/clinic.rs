@@ -411,6 +411,38 @@ fn unreadable_is_news(dir: &Path, rows: u32) -> bool {
     reported.insert(dir.to_owned(), rows) != Some(rows)
 }
 
+/// Whether a visit's saved states show an edit, not only its first mark: the date, time,
+/// length, patient, kind, fee or charging changed, or a status that was already marked
+/// changed again (held to cancelled). A state that cannot be read counts as an edit.
+fn visit_edited(states: &[dv_vault::StoredClinicHistory]) -> bool {
+    let Ok(states) = states
+        .iter()
+        .map(|state| from_json::<Visit>(&state.json))
+        .collect::<Result<Vec<_>, _>>()
+    else {
+        return true;
+    };
+    states.iter().zip(states.iter().skip(1)).any(|(a, b)| {
+        (
+            &a.date,
+            a.start,
+            a.minutes,
+            &a.patient_id,
+            a.kind,
+            a.fee,
+            a.charge_missed,
+        ) != (
+            &b.date,
+            b.start,
+            b.minutes,
+            &b.patient_id,
+            b.kind,
+            b.fee,
+            b.charge_missed,
+        ) || (a.status != b.status && a.status != VisitStatus::Planned)
+    })
+}
+
 /// The visits that ever left "planned" (D-176): by what they say now, and by every state
 /// of theirs that was saved. A state that cannot be read counts as a mark: nothing is
 /// removed on the strength of a history that cannot be checked.
@@ -1277,13 +1309,20 @@ impl Core {
         let visits: Vec<Visit> = between(v, &first, &last)?;
         let charges: Vec<Charge> = between(v, &first, &last)?;
         let payments: Vec<Payment> = between(v, &first, &last)?;
-        // Changed after it was first written: its history has more than one entry.
-        let changed: HashSet<String> = v
+        // Changed after it was first written: its history has more than one entry. A visit
+        // only marked (held, missed, cancelled from planned) is not changed: its status
+        // column says so already (walkthrough, clinic day).
+        let mut changed: HashSet<String> = v
             .clinic_history_counts()?
             .into_iter()
             .filter(|(_, entries)| *entries > 1)
             .map(|(id, _)| id)
             .collect();
+        for visit in &visits {
+            if changed.contains(&visit.id) && !visit_edited(&v.clinic_history(&visit.id)?) {
+                changed.remove(&visit.id);
+            }
+        }
         let diary = rules::diary_month(
             month,
             &visits,

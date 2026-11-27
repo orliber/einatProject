@@ -15,10 +15,16 @@ pub fn check_age(text: &str, age: Option<Age>) -> Vec<String> {
         return Vec::new();
     };
     let mut out = Vec::new();
-    for (years, months) in ages_in(text) {
+    for (years, months, past) in ages_in(text) {
         let written = i32::from(years) * 12 + i32::from(months);
         let entered = i32::from(age.years) * 12 + i32::from(age.months);
-        if (written - entered).abs() > 1 {
+        // "החל ללכת בגיל 1:2": a milestone, earlier than today. Only a later one is wrong.
+        let wrong = if past {
+            written - entered > 1
+        } else {
+            (written - entered).abs() > 1
+        };
+        if wrong {
             let line = format!("כתוב גיל {years}:{months}, ובפרטי התיק {}", age.display());
             if !out.contains(&line) {
                 out.push(line);
@@ -43,6 +49,10 @@ const AGE_WORDS: &[&str] = &[
     "כרונולוגי",
 ];
 
+/// Words for an age in the past ("החל ללכת בגיל 1:2", "מגיל 3:6", "עד גיל 2:0"): a
+/// milestone or an earlier assessment, never later than the child's age now.
+const PAST_AGE_WORDS: &[&str] = &["בגיל", "מגיל", "לגיל"];
+
 /// The clitic prefixes a word for an age may carry ("ובן", "שבגיל", "הגיל", "כשבת").
 const CLITICS: &[&str] = &["כש", "וש", "ו", "ש", "ה"];
 
@@ -51,12 +61,38 @@ const LABEL_WORDS: usize = 3;
 
 /// Whether `raw` is a word for an age, with or without a clitic prefix.
 fn age_word(raw: &str) -> bool {
+    bare_age_word(raw).is_some()
+}
+
+/// The word for an age in `raw` without its clitic prefix ("שבגיל" is "בגיל").
+fn bare_age_word(raw: &str) -> Option<&str> {
     let w = raw.trim_matches(|c: char| !c.is_alphanumeric());
-    AGE_WORDS.contains(&w)
-        || CLITICS.iter().any(|p| {
-            w.strip_prefix(p)
-                .is_some_and(|rest| AGE_WORDS.contains(&rest))
-        })
+    if AGE_WORDS.contains(&w) {
+        return Some(w);
+    }
+    CLITICS
+        .iter()
+        .filter_map(|p| w.strip_prefix(p))
+        .find(|rest| AGE_WORDS.contains(rest))
+}
+
+/// Whether the age word right before the figure at `i` points to the past ("בגיל 1:2",
+/// "עד גיל 2:0"). A label ("גיל האבחון: 6:2") and "בן 6:2" are the age now.
+fn past_age_word(words: &[&str], i: usize) -> bool {
+    let Some(prev) = i
+        .checked_sub(1)
+        .and_then(|j| words.get(j))
+        .and_then(|w| bare_age_word(w))
+    else {
+        return false;
+    };
+    PAST_AGE_WORDS.contains(&prev)
+        || prev == "גיל"
+            && i.checked_sub(2)
+                .and_then(|j| words.get(j))
+                .is_some_and(|w| {
+                    matches!(w.trim_matches(|c: char| !c.is_alphanumeric()), "עד" | "ועד")
+                })
 }
 
 /// Whether the figure at `i` follows a word for an age: right before it ("בן 6:2", "ובת 6;2",
@@ -85,7 +121,8 @@ fn after_age_word(words: &[&str], i: usize) -> bool {
         })
 }
 
-fn ages_in(text: &str) -> Vec<(u8, u8)> {
+/// The ages written in `text`: years, months, and whether it is an age in the past.
+fn ages_in(text: &str) -> Vec<(u8, u8, bool)> {
     let words: Vec<&str> = text.split_whitespace().collect();
     let mut found = Vec::new();
     for (i, raw) in words.iter().enumerate() {
@@ -97,7 +134,7 @@ fn ages_in(text: &str) -> Vec<(u8, u8)> {
             if after_age_word(&words, i) && !clock {
                 if let (Some(y), Some(m)) = (number(y), number(m)) {
                     if y <= 18 && m <= 11 {
-                        found.push((y, m));
+                        found.push((y, m, past_age_word(&words, i)));
                     }
                 }
             }
@@ -124,7 +161,7 @@ fn ages_in(text: &str) -> Vec<(u8, u8)> {
                 && y <= 18
                 && m <= 11
             {
-                found.push((y, m));
+                found.push((y, m, false));
             }
         }
     }
@@ -150,8 +187,9 @@ pub fn check_gender(text: &str, gender: Option<GrammaticalGender>) -> Vec<String
         GrammaticalGender::Female => (["בן", "כבן"], "הילד", "בת"),
         GrammaticalGender::Male => (["בת", "כבת"], "הילדה", "בן"),
     };
-    let words: Vec<&str> = text
-        .split_whitespace()
+    let raw: Vec<&str> = text.split_whitespace().collect();
+    let words: Vec<&str> = raw
+        .iter()
         .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()))
         .collect();
     let mut out = Vec::new();
@@ -159,7 +197,7 @@ pub fn check_gender(text: &str, gender: Option<GrammaticalGender>) -> Vec<String
         let age_after = words
             .get(i + 1)
             .is_some_and(|n| n.chars().next().is_some_and(|c| c.is_ascii_digit()));
-        let note = if wrong_age.contains(w) && age_after {
+        let note = if wrong_age.contains(w) && age_after && !about_someone_else(&raw, i) {
             Some(format!(
                 "כתוב «{w}», ובפרטי התיק הילד{} {right}",
                 if right == "בת" { "ה" } else { "" }
@@ -184,6 +222,121 @@ pub fn check_gender(text: &str, gender: Option<GrammaticalGender>) -> Vec<String
         }
     }
     out
+}
+
+/// Family members an age phrase may be about ("אח בן 8", "האם, בת 38").
+const FAMILY: &[&str] = &[
+    "אח",
+    "אחיו",
+    "אחיה",
+    "האח",
+    "אחים",
+    "אחות",
+    "אחותו",
+    "אחותה",
+    "האחות",
+    "אחיות",
+    "תאום",
+    "תאומה",
+    "התאום",
+    "התאומה",
+    "אב",
+    "האב",
+    "אביו",
+    "אביה",
+    "אבא",
+    "אם",
+    "האם",
+    "אמו",
+    "אמה",
+    "אמא",
+    "סב",
+    "הסב",
+    "סבא",
+    "סבו",
+    "סבה",
+    "סבתא",
+    "הסבתא",
+    "סבתו",
+    "סבתה",
+    "דוד",
+    "הדוד",
+    "דודו",
+    "דודה",
+    "הדודה",
+    "דודתו",
+    "דודתה",
+    "אחיין",
+    "אחיינית",
+    "תינוק",
+    "תינוקת",
+    "התינוק",
+    "התינוקת",
+];
+
+/// The tags the filter gives people other than the child (`Role::tag_base`), without a number.
+const PERSON_TAGS: &[&str] = &[
+    "ילד",
+    "אם",
+    "אב",
+    "אח",
+    "אחות",
+    "גננת",
+    "סייעת",
+    "רופא",
+    "קלינאית",
+    "פסיכולוגית",
+    "מטפלת",
+    "ילד_גן",
+    "אדם",
+    "קרוב_משפחה",
+    "מורה",
+    "איש_מקצוע",
+];
+
+/// Whether the age phrase at `i` ("בן 8") is about another person: within the three words
+/// before it (and in the same clause), a family word ("ואח בן 8", "האם, בת 38") or a tag
+/// other than the child's ("[אב], בן 40"). The child's own tag before it ends the look.
+fn about_someone_else(raw: &[&str], i: usize) -> bool {
+    for w in raw
+        .get(i.saturating_sub(3)..i)
+        .unwrap_or_default()
+        .iter()
+        .rev()
+    {
+        if w.ends_with(['.', '!', '?', ';', ':']) {
+            return false;
+        }
+        if let Some(open) = w.find('[') {
+            let tag = w.get(open..).unwrap_or_default();
+            if tag.starts_with("[ילד]") {
+                return false;
+            }
+            // A person's tag ("[אב]", "[אח_1]", "[ילד_2]"); a place, a date or a number
+            // ("[גן]", "[תאריך]") says nothing about whom the age is.
+            let base = tag
+                .trim_start_matches('[')
+                .split(']')
+                .next()
+                .unwrap_or_default()
+                .trim_end_matches(|c: char| c.is_ascii_digit())
+                .trim_end_matches('_');
+            if PERSON_TAGS.contains(&base) {
+                return true;
+            }
+            continue;
+        }
+        let bare = w.trim_matches(|c: char| !c.is_alphanumeric());
+        let named = |x: &str| FAMILY.contains(&x);
+        if named(bare)
+            || ["ו", "ש", "ל", "וה", "שה"]
+                .iter()
+                .any(|p| bare.strip_prefix(p).is_some_and(named))
+        {
+            return true;
+        }
+    }
+    false
 }
 
 /// "המכון להתפתחות הילד", "שם הילד:": the words name a place or a form's field, not her.
@@ -408,6 +561,26 @@ mod tests {
         );
     }
 
+    /// DOMAIN-5: a milestone ("בגיל 1:2") is earlier than today, so only a later one is noted.
+    #[test]
+    fn a_milestone_age_is_not_the_age_now() {
+        for text in [
+            "החל ללכת בגיל 1:2 ואמר מילים ראשונות בגיל 2:0.",
+            "אובחן לראשונה בגיל 3:6.",
+            "מגיל 2:6 משולב בגן תקשורת.",
+            "עד גיל 1:6 לא הצביע.",
+        ] {
+            assert!(check_age(text, AGE).is_empty(), "{text}");
+        }
+        assert_eq!(check_age("שבגיל 6:2 החל לדבר.", AGE).len(), 1);
+        assert_eq!(check_age("עד גיל 6:2 לא הצביע.", AGE).len(), 1);
+        assert_eq!(
+            check_age("הילד, בן 4:2, הופנה.", AGE),
+            vec!["כתוב גיל 4:2, ובפרטי התיק 5:4".to_owned()]
+        );
+        assert_eq!(check_age("גיל האבחון: 4:2", AGE).len(), 1);
+    }
+
     #[test]
     fn without_an_age_in_the_details_nothing_is_said() {
         assert!(check_age("בן 6:2", None).is_empty());
@@ -429,6 +602,25 @@ mod tests {
             "only before an age"
         );
         assert!(check_gender("הילדה", None).is_empty());
+        // DOMAIN-4: the age of a sibling or a parent is about them, not her.
+        for text in [
+            "ל[ילד] אח בן 8 ואחות בת 3.",
+            "[אב], בן 40, עובד כמהנדס.",
+            "למשפחה שני ילדים: [ילד] ואח בן 8.",
+            "האב, בן 40, עובד כמהנדס.",
+            "יש לה אח בן 8.",
+        ] {
+            assert!(check_gender(text, girl).is_empty(), "{text}");
+        }
+        let boy = Some(GrammaticalGender::Male);
+        assert!(check_gender("האם, בת 38, ואחותו בת 3.", boy).is_empty());
+        assert!(check_gender("[אם], בת 38.", boy).is_empty());
+        // The child herself still is, also after a place or a date tag.
+        assert_eq!(check_gender("ב[גן] [תאריך], בן 5:4.", girl).len(), 1);
+        assert!(check_gender("[ילד_2] בן 8.", girl).is_empty());
+        assert!(check_gender("ו[אח_1], בן 8.", girl).is_empty());
+        assert_eq!(check_gender("[ילד], בן 5:4, שיתפה פעולה.", girl).len(), 1);
+        assert_eq!(check_gender("יש לה אח. [ילד] בן 5:4.", girl).len(), 1);
         // An institution's name and a form's field are no word for her (the real-corpus bench).
         assert!(
             check_gender("הוערכה במכון להתפתחות הילד. שם הילד: הדר.", girl).is_empty(),

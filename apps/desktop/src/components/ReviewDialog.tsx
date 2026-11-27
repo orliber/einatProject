@@ -23,6 +23,18 @@ const guidance: Record<string, string> = {
  * asking (D-042: no questions). Sending is possible only with an approval id (the gate
  * cleared this exact payload).
  */
+/** "שם אחד יוחלף בתפקיד", "3 שמות יוחלפו בתפקיד": what the filter does to the names of the case. */
+export function namesLine(n: number): string {
+  if (!n) return "אין שמות מהתיק בטקסט";
+  return n === 1 ? 'שם אחד יוחלף בתפקיד (למשל "הילד", "האם")' : `${n} שמות יוחלפו בתפקיד (למשל "הילד", "האם")`;
+}
+
+/** "פרט מזהה אחד יוחלף", "3 פרטים מזהים יוחלפו": dates, ids and phone numbers. */
+export function detailsLine(n: number): string {
+  if (!n) return 'אין ת"ז, טלפון או תאריך';
+  return n === 1 ? 'פרט מזהה אחד יוחלף (למשל תאריך ב"לפני כחודש")' : `${n} פרטים מזהים יוחלפו (למשל תאריך ב"לפני כחודש")`;
+}
+
 export function ReviewDialog(props: {
   title: string;
   caseId: string | null;
@@ -175,8 +187,8 @@ export function ReviewDialog(props: {
         <ErrorLine error={error} />
 
         <ul className="review-checks">
-          <li><span aria-hidden="true">✓</span>{c.declared_names ? `${c.declared_names} שמות יוחלפו בתפקיד ("הילד", "האם")` : "אין שמות מהתיק בטקסט"}</li>
-          <li><span aria-hidden="true">✓</span>{c.patterns ? `${c.patterns} פרטים מזהים יוחלפו (תאריך: "לפני כחודש")` : "אין ת\"ז, טלפון או תאריך"}</li>
+          <li><span aria-hidden="true">✓</span>{namesLine(c.declared_names)}</li>
+          <li><span aria-hidden="true">✓</span>{detailsLine(c.patterns)}</li>
           {prepared.approval_id && <li><span aria-hidden="true">✓</span>הבדיקה האחרונה עברה. אפשר לשלוח.</li>}
         </ul>
 

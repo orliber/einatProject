@@ -699,7 +699,7 @@ describe("money on the card", () => {
     const money = await region("כספים");
     await user.click(within(money).getByRole("button", { name: "הודעת תשלום" }));
     await user.click(await screen.findByRole("menuitem", { name: "רק להעתיק" }));
-    await waitFor(() => expect(notes).toEqual(["הודעת התשלום הועתקה ללוח המוגן, ואפשר להדביק אותה בהודעה. יימחק מהלוח בעוד דקה."]));
+    await waitFor(() => expect(notes).toEqual(["הודעת התשלום הועתקה ללוח המוגן, ואפשר להדביק אותה בהודעה. הלוח יתנקה בעוד דקה."]));
     const copied = calls.filter((c) => c.cmd === "copy_secret");
     expect(copied).toHaveLength(1);
     expect(String(copied[0]?.args.text)).toMatch(/^שלום ענת, היתרה לתשלום היא 1,?650 ₪\./);

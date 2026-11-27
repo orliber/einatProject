@@ -246,6 +246,11 @@ export function ScoresView(props: {
   /** A cut-off typed that is not a number: marked like a score, and not saved as "no cut-off". */
   const cutoffBad = key === "ados_2" && cutoff.trim() !== "" && parse(cutoff) === null;
   const filled = sheet?.entries.length ?? 0;
+  /** The scores that will be saved as they are: a score marked as impossible is not counted. */
+  const valid = instrument ? instrument.measures.filter((m) => {
+    const raw = entries[m.key]?.value ?? "";
+    return parse(raw) !== null && !isBad(m, raw);
+  }).length : 0;
   const missing = instrument ? missingOf(instrument, entries) : [];
   const isAdos = key === "ados_2";
   const charts = PROFILE_SCALES.flatMap((p) => {
@@ -260,6 +265,8 @@ export function ScoresView(props: {
   });
 
   function set(measure: string, patch: Partial<Entry>) {
+    // A changed score is a new try: the line about the last one steps aside for the count.
+    setError(null);
     setEntries((all) => ({ ...all, [measure]: { value: "", note: "", ...all[measure], ...patch } }));
   }
 
@@ -321,8 +328,16 @@ export function ScoresView(props: {
 
   async function save() {
     if (!sheet || filled === 0) return setError("עוד לא הוזנו ציונים.");
-    if (invalid.length) return setError("יש ציונים שלא אפשריים (מחוץ לטווח, או לא על הסולם). כדאי לבדוק את השורות המסומנות.");
-    if (cutoffBad) return setError("נקודת החתך צריכה להיות מספר. כדאי לבדוק את השדה המסומן.");
+    if (invalid.length) {
+      // The keyboard goes to the first marked score, in the table's order (the line is in the foot).
+      const first = order.find((m) => invalid.includes(m));
+      if (first) fields.current.get(first.key)?.focus();
+      return setError("יש ציונים שלא אפשריים (מחוץ לטווח, או לא על הסולם). כדאי לבדוק את השורות המסומנות.");
+    }
+    if (cutoffBad) {
+      document.getElementById("ados-cutoff")?.focus();
+      return setError("נקודת החתך צריכה להיות מספר. כדאי לבדוק את השדה המסומן.");
+    }
     setSaving(true);
     setError(null);
     try {
@@ -496,7 +511,6 @@ export function ScoresView(props: {
                 <label htmlFor="score-notes">הערות על ההעברה (שיתוף פעולה, קשב, תנאים)</label>
                 <textarea ref={notesRef} id="score-notes" className="textarea" rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} />
               </div>
-              <ErrorLine error={error} />
               <section className="scores-preview" aria-label="מה יישמר בתיק">
                 <h3>מה יישמר בתיק</h3>
                 <p className="small muted">הטקסט שיזין את הסעיפים.</p>
@@ -536,7 +550,12 @@ export function ScoresView(props: {
         </footer>
       ) : (
         <footer className="scores-foot">
-          <span className="small muted grow">{filled ? `${filled} ציונים הוזנו` : "ממלאים רק את מה שהועבר."}</span>
+          {/* What stops the save is said here, beside "שמירה בתיק", never far below the window. */}
+          {error && instruments ? (
+            <div className="grow scores-foot-error"><ErrorLine error={error} /></div>
+          ) : (
+            <span className="small muted grow">{valid === 1 ? "ציון אחד הוזן" : valid ? `${valid} ציונים הוזנו` : "ממלאים רק את מה שהועבר."}</span>
+          )}
           <button type="button" className="btn" onClick={close}>ביטול</button>
           <button type="button" className="btn btn-primary" disabled={saving || filled === 0} onClick={() => void save()}>
             {saving ? <><Spinner /> שומרת…</> : "שמירה בתיק"}

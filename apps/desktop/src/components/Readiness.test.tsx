@@ -192,6 +192,50 @@ describe("AI use and ceiling", () => {
     expect(await screen.findByText(/12 בקשות, עלות משוערת \$20\.50/)).toBeInTheDocument();
     expect(screen.getByText(/השליחה עצורה/)).toBeInTheDocument();
   });
+
+  it("a typo in the ceiling is said and nothing is saved; emptying a set ceiling asks first", async () => {
+    const calls: [string, unknown][] = [];
+    mockIPC((cmd, args) => {
+      calls.push([cmd, args]);
+      return cmd === "usage_summary" ? { month: "2026-10", requests: 0, input_tokens: 0, output_tokens: 0, estimated_cents: 0, cap_usd: 50, unpriced_models: [] } : null;
+    });
+    render(wrap(<UsageSettings />));
+    expect(await screen.findByText("החודש עוד לא נשלחו בקשות (תקרה: $50).")).toBeInTheDocument();
+    const field = screen.getByLabelText(/תקרה חודשית בדולרים/);
+    const save = () => fireEvent.click(within(field.closest(".field") as HTMLElement).getByRole("button", { name: "שמירה" }));
+    // "5o" is not read as 5, and "abc" is not read as no ceiling.
+    for (const typo of ["5o", "abc", "0", "12.5"]) {
+      fireEvent.change(field, { target: { value: typo } });
+      save();
+      expect(await screen.findByRole("alert")).toHaveTextContent("בספרות בלבד");
+    }
+    expect(calls.some(([c]) => c === "set_monthly_cap")).toBe(false);
+    // Emptied: she is asked, and "ביטול" keeps the ceiling.
+    fireEvent.change(field, { target: { value: "" } });
+    save();
+    const ask = await screen.findByRole("dialog", { name: "לבטל את התקרה החודשית?" });
+    fireEvent.click(within(ask).getByRole("button", { name: "ביטול" }));
+    expect(calls.some(([c]) => c === "set_monthly_cap")).toBe(false);
+    // The field shows the ceiling that stays, not an empty field that reads as none.
+    expect(field).toHaveValue("50");
+    fireEvent.change(field, { target: { value: "" } });
+    save();
+    fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "לבטל את התקרה" }));
+    await vi.waitFor(() => expect(calls.find(([c]) => c === "set_monthly_cap")?.[1]).toEqual({ capUsd: null }));
+  });
+
+  it("a ceiling typed in digits is saved", async () => {
+    const calls: [string, unknown][] = [];
+    mockIPC((cmd, args) => {
+      calls.push([cmd, args]);
+      return cmd === "usage_summary" ? { month: "2026-10", requests: 0, input_tokens: 0, output_tokens: 0, estimated_cents: 0, cap_usd: null, unpriced_models: [] } : null;
+    });
+    render(wrap(<UsageSettings />));
+    const field = await screen.findByLabelText(/תקרה חודשית בדולרים/);
+    fireEvent.change(field, { target: { value: " 40 " } });
+    fireEvent.keyDown(field, { key: "Enter" });
+    await vi.waitFor(() => expect(calls.find(([c]) => c === "set_monthly_cap")?.[1]).toEqual({ capUsd: 40 }));
+  });
 });
 
 describe("idle warning", () => {

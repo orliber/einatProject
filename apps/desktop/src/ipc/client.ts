@@ -165,7 +165,9 @@ async function run<K extends Command>(cmd: K, ...[args, options]: CallArgs<K>): 
 export type CoreEvent =
   | { kind: "locked" }
   | { kind: "idle_soon"; seconds: number }
-  | { kind: "backed_up" };
+  | { kind: "backed_up" }
+  /** The window is closing while the vault is open: hand over what is typed, then lock (D-218). */
+  | { kind: "closing" };
 
 /** Listen to the core's events. Resolves to the function that stops listening, or to null
  *  when events cannot reach the window (the browser preview, tests, or a refused grant): the

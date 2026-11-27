@@ -8,7 +8,7 @@ import { ageWords } from "../../components/AgeField";
 import { Segmented } from "../../components/Switch";
 import { PlusIcon, Skeleton } from "../../components/ui";
 import type { PatientRow } from "../../ipc/generated/PatientRow";
-import { useDebounced, usePatients, useReloadClinic, useToday } from "./clinicData";
+import { useDebounced, useNoteSearch, usePatients, useReloadClinic, useToday } from "./clinicData";
 import { CONTACT_ROLE_LABEL, formatDate, formatDateShort, formatTime, PATIENT_STATUS_LABEL, VISIT_KIND_LABEL } from "./format";
 import { EmptyState, Money, Pager, PatientName, ReadError, useClinicNav, useDiscreet, usePaged, useShownName } from "./parts";
 import { NotesFound } from "./NotesFound";
@@ -110,6 +110,9 @@ export function PatientsTab() {
     [found, filter, sort],
   );
   const paged = usePaged(list, PAGE);
+  // The same read as the notes' section below (one request, shared): when no card matches but
+  // a note does, the page does not say "not found" above what it found.
+  const noteHits = useNoteSearch(query, !discreet).data?.hits.length ?? 0;
 
   if (rows.error && !rows.data) return <ReadError error={rows.error.message} retry={reload} />;
   if (!rows.data) {
@@ -159,7 +162,9 @@ export function PatientsTab() {
             {list.length > 0 && elsewhere > 0 && query !== "" ? ` · ${elsewhere === 1 ? "עוד אחד נמצא" : `עוד ${elsewhere} נמצאו`} מחוץ לסינון הזה` : ""}
           </p>
 
-          {list.length === 0 ? (
+          {list.length === 0 && query !== "" && elsewhere === 0 && noteHits > 0 ? (
+            <p className="muted patients-notes-only">אין מטופל בשם הזה. החיפוש נמצא בסיכומים:</p>
+          ) : list.length === 0 ? (
             <EmptyState top title={query !== "" ? "לא נמצא מטופל כזה" : filter === "closed" ? "אין כרטיסים שהסתיימו" : "אין כרגע מטופלים בתהליך"}
               actions={query !== "" && elsewhere > 0
                 ? <button type="button" className="btn" onClick={() => { setFilter("all"); paged.setPage(0); }}>להציג את כולם</button>
@@ -169,6 +174,7 @@ export function PatientsTab() {
               <p>
                 {query !== "" && elsewhere > 0
                   ? (elsewhere === 1 ? "יש כרטיס אחד שמתאים לחיפוש, אבל הוא לא בסינון הזה (ברשימת ההמתנה או בין הכרטיסים שהסתיימו)." : `יש ${elsewhere} כרטיסים שמתאימים לחיפוש, אבל הם לא בסינון הזה.`)
+                  : query !== "" && discreet ? "אפשר לחפש לפי שם הילד, שם של אחד ההורים או מספר טלפון, וגם לפי מילה שנכתבה ברשומה של פגישה. במצב דיסקרטי לא מחפשים בתרשומות האישיות."
                   : query !== "" ? "אפשר לחפש לפי שם הילד, שם של אחד ההורים או מספר טלפון, וגם לפי מילה שנכתבה בסיכום פגישה."
                   : filter === "closed" ? "כרטיס שנסגר נשאר שמור, ומופיע כאן."
                   : "משפחות שעוד ממתינות נמצאות ברשימת ההמתנה."}

@@ -283,6 +283,12 @@ export function CasesScreen() {
     return { shownFolders, shownCases, statusOf };
   }, [allCases, allFolders, current, q, sort]);
   const st = (c: CaseSummary) => statusOf.get(c.id) ?? caseStatus(c);
+  // The search works in the recycle bin too: there it looks in the bin, and from the list a name
+  // found only in the bin says so, one click from it.
+  const trashShown = useMemo(() => {
+    const all = trash.data ?? [];
+    return q ? all.filter((c) => searchForm(c.child_name ?? "").includes(q) || searchForm(c.meta.code).includes(q)) : all;
+  }, [trash.data, q]);
 
   // "ד\"ר רותם בדויה" → "רותם": a title is not how anyone is greeted.
   const name = status.practitioner[0]?.split(" ").find((w) => w && !/^(ד["״']?ר|דר'|פרופ'|גב'|מר)$/.test(w));
@@ -299,7 +305,7 @@ export function CasesScreen() {
   // ---------------------------------------------------------------- moving
   // Discreet mode (D-192): initials in place of the child's name, in the list and in every notice.
   const caseName = (c: CaseSummary) => (c.child_name ? shown(c.child_name) : c.meta.code);
-  const placeName = (id: string | null) => (id ? `"${byId.get(id)?.name ?? ""}"` : "הרמה העליונה");
+  const placeName = (id: string | null) => (id ? `"${byId.get(id)?.name ?? ""}"` : "רשימת התיקים");
   /** Moves a case (never copies: a case has one folder), with "ביטול" on the notice. Throws when refused. */
   const moveCase = async (c: CaseSummary, to: string | null) => {
     const from = c.folder_id ?? null;
@@ -405,7 +411,7 @@ export function CasesScreen() {
   const caseItems = (c: CaseSummary): MenuItem[] => [
     { label: "פתיחה", run: () => go({ name: "case", id: c.id, view: "materials" }) },
     { label: "העברה לתיקייה…", run: () => setModal({ kind: "move-case", c }) },
-    { label: "אבחון מעקב לילד/ה הזה/ו", run: () => void followUp(c) },
+    { label: c.meta.child_gender === "female" ? "אבחון מעקב לילדה הזו" : c.meta.child_gender === "male" ? "אבחון מעקב לילד הזה" : "אבחון מעקב לילד/ה", run: () => void followUp(c) },
     { label: "העברה לסל המחזור", run: () => setModal({ kind: "delete-case", c }), danger: true },
   ];
   /** The right-click actions of the row under the pointer: one menu for the whole table. */
@@ -550,7 +556,7 @@ export function CasesScreen() {
                   <span className="crumbs" aria-hidden="true" />
                 )}
                 <input className="input search" type="search" placeholder="חיפוש בכל התיקים" aria-label="חיפוש תיקים"
-                  value={query} onChange={(e) => { setQuery(e.target.value); setInTrash(false); }} />
+                  value={query} onChange={(e) => setQuery(e.target.value)} />
                 {!inTrash && (
                   <label className="sort">
                     <select className="input" value={sort} onChange={(e) => setSort(e.target.value as Sort)} aria-label="מיון">
@@ -564,9 +570,9 @@ export function CasesScreen() {
               </div>
 
               {inTrash ? (
-                <TrashList cases={trash.data ?? []} pathOf={pathOf}
+                <TrashList cases={trashShown} searching={q !== ""} pathOf={pathOf}
                   onRestore={(c) => {
-                    const to = c.folder_id && byId.has(c.folder_id) ? placeName(c.folder_id) : "הרמה העליונה";
+                    const to = placeName(c.folder_id && byId.has(c.folder_id) ? c.folder_id : null);
                     void run(() => ipc.restoreCase(c.id), `התיק שוחזר אל ${to}.`).then((ok) => {
                       // The last case restored: back to the list, where it now is.
                       if (ok && (trash.data?.length ?? 0) <= 1) setInTrash(false);
@@ -677,9 +683,15 @@ export function CasesScreen() {
                   {emptyHere && (
                     <p className="muted empty-folder">{q ? "לא נמצא תיק או תיקייה בשם הזה." : "התיקייה ריקה. גוררים לכאן תיקים, או פותחים תיק חדש."}</p>
                   )}
+                  {q && shownCases.length === 0 && trashShown.length > 0 && (
+                    <p className="small empty-folder row wrap-row">
+                      <span>{trashShown.length === 1 ? "נמצא תיק אחד בשם הזה בסל המחזור." : `נמצאו ${trashShown.length} תיקים בשם הזה בסל המחזור.`}</span>
+                      <button type="button" className="btn btn-small" onClick={() => { setInTrash(true); closeTree(); }}>לסל המחזור</button>
+                    </p>
+                  )}
                   {cases.data && !emptyHere && (
                     <div className="explorer-foot small muted">
-                      <span>{shownCases.length === 1 ? "תיק אחד" : `${shownCases.length} תיקים`}{q ? " בכל התיקיות" : ""}</span>
+                      <span>{footLine(shownCases.length, q ? null : current === null ? allCases.length : countIn(current), q !== "")}</span>
                     </div>
                   )}
                 </>
@@ -746,10 +758,22 @@ export function CasesScreen() {
   );
 }
 
-function TrashList(props: { cases: CaseSummary[]; pathOf: (id: string | null) => string; onRestore: (c: CaseSummary) => void; onPurge: (c: CaseSummary) => void }) {
+/** The count under the table: the cases shown, and, when some are in folders below, all of them,
+ *  so the line agrees with the tree's count. `total` is null while searching. */
+export function footLine(shown: number, total: number | null, searching: boolean): string {
+  const n = (k: number) => (k === 1 ? "תיק אחד" : `${k} תיקים`);
+  if (searching) return `${n(shown)} בכל התיקיות`;
+  if (total === null || total === shown) return n(shown);
+  return `${n(shown)} כאן, ${n(total)} בסך הכול`;
+}
+
+function TrashList(props: { cases: CaseSummary[]; searching?: boolean; pathOf: (id: string | null) => string; onRestore: (c: CaseSummary) => void; onPurge: (c: CaseSummary) => void }) {
   const shown = useShownName();
   const [now] = useState(() => Date.now() / 1000);
   const daysLeft = (c: CaseSummary) => Math.max(0, TRASH_DAYS - Math.floor((now - (c.deleted_at ?? 0)) / 86_400));
+  if (!props.cases.length && props.searching) {
+    return <p className="muted empty-folder">אין בסל המחזור תיק בשם הזה.</p>;
+  }
   if (!props.cases.length) {
     return <p className="muted empty-folder">סל המחזור ריק. תיק שנמחק נשמר כאן {TRASH_DAYS} יום.</p>;
   }

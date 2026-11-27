@@ -2,7 +2,7 @@ import { act, fireEvent, render, renderHook, screen } from "@testing-library/rea
 import { mockIPC } from "@tauri-apps/api/mocks";
 import { AppContext, type AppApi } from "../App";
 import { status } from "../test/fixtures";
-import { forgetHold, holdNow, UnsavedNotice, useHoldUnsaved } from "./Unsaved";
+import { editSectionTitle, forgetHold, holdNow, openEdits, SECTION_PAGE, UnsavedNotice, useHoldUnsaved } from "./Unsaved";
 
 describe("an edit open when the vault locks", () => {
   it("goes to the core while she types, and is withdrawn when the editor closes", async () => {
@@ -112,9 +112,12 @@ describe("an edit open when the vault locks", () => {
     render(<AppContext.Provider value={api}><UnsavedNotice /></AppContext.Provider>);
     expect(await screen.findByDisplayValue("טקסט בדוי א")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "הבא (עוד 1)" }));
+    // Not copied: it asks before the text goes (UIA-3).
+    fireEvent.click(screen.getByRole("button", { name: "לסגור בלי לשמור" }));
     expect(screen.getByDisplayValue("טקסט בדוי ב")).toBeInTheDocument();
     const closers = screen.getAllByRole("button", { name: "סגירה" });
     fireEvent.click(closers[closers.length - 1] as HTMLElement);
+    fireEvent.click(screen.getByRole("button", { name: "לסגור בלי לשמור" }));
     expect(screen.queryByDisplayValue("טקסט בדוי ב")).toBeNull();
   });
 
@@ -133,10 +136,12 @@ describe("an edit open when the vault locks", () => {
     await act(async () => { await holdNow(); });
     expect(calls.at(-1)).toEqual([a, b]);
     fireEvent.click(screen.getByRole("button", { name: "הבא (עוד 1)" }));
+    fireEvent.click(screen.getByRole("button", { name: "לסגור בלי לשמור" }));
     await act(async () => { await holdNow(); });
     expect(calls.at(-1)).toEqual([b]);
     const closers = screen.getAllByRole("button", { name: "סגירה" });
     fireEvent.click(closers[closers.length - 1] as HTMLElement);
+    fireEvent.click(screen.getByRole("button", { name: "לסגור בלי לשמור" }));
     await act(async () => { await holdNow(); });
     expect(calls.at(-1)).toEqual([]);
     forgetHold();
@@ -149,7 +154,7 @@ describe("an edit open when the vault locks", () => {
           { case_id: "c2", place: "פסקה בתיק ב", view: "report", text: "טקסט בדוי ב" },
           { case_id: "c3", place: "פסקה בתיק ג", view: "report", text: "טקסט בדוי ג" },
         ]
-      : null));
+      : cmd === "copy_secret" ? 60 : null));
     const go = vi.fn();
     const api: AppApi = { status: status(), go, refresh: vi.fn(), notify: vi.fn(), fail: (e) => e.message, lockNow: vi.fn() };
     render(<AppContext.Provider value={api}><UnsavedNotice /></AppContext.Provider>);
@@ -158,20 +163,22 @@ describe("an edit open when the vault locks", () => {
     // it runs. Focus moves in from the effect just before, so once it is inside, Escape is heard.
     await vi.waitFor(() => expect(screen.getByRole("dialog")).toContainElement(document.activeElement as HTMLElement));
     fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+    // Not copied yet: Escape asks before the text is gone for good (UIA-3).
+    fireEvent.click(await screen.findByRole("button", { name: "לסגור בלי לשמור" }));
     expect(await screen.findByDisplayValue("טקסט בדוי ב")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "מעבר לתיק" }));
-    expect(go).toHaveBeenCalledWith({ name: "case", id: "c2", view: "report" });
+    fireEvent.click(screen.getByRole("button", { name: "העתקה ומעבר לתיק" }));
+    await vi.waitFor(() => expect(go).toHaveBeenCalledWith({ name: "case", id: "c2", view: "report" }));
     expect(screen.getByDisplayValue("טקסט בדוי ג")).toBeInTheDocument();
   });
 
   it("is offered back once after entering", async () => {
-    mockIPC((cmd) => (cmd === "take_unsaved" ? [{ case_id: "c1", place: "פסקה בסעיף \"רקע\"", text: "הטקסט שלא נשמר" }] : null));
+    mockIPC((cmd) => (cmd === "take_unsaved" ? [{ case_id: "c1", place: "פסקה בסעיף \"רקע\"", text: "הטקסט שלא נשמר" }] : cmd === "copy_secret" ? 60 : null));
     const go = vi.fn();
     const api: AppApi = { status: status(), go, refresh: vi.fn(), notify: vi.fn(), fail: (e) => e.message, lockNow: vi.fn() };
     render(<AppContext.Provider value={api}><UnsavedNotice /></AppContext.Provider>);
     expect(await screen.findByDisplayValue("הטקסט שלא נשמר")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "מעבר לתיק" }));
-    expect(go).toHaveBeenCalledWith({ name: "case", id: "c1", view: "report" });
+    fireEvent.click(screen.getByRole("button", { name: "העתקה ומעבר לתיק" }));
+    await vi.waitFor(() => expect(go).toHaveBeenCalledWith({ name: "case", id: "c1", view: "report" }));
     expect(screen.queryByDisplayValue("הטקסט שלא נשמר")).toBeNull();
   });
 
@@ -180,15 +187,28 @@ describe("an edit open when the vault locks", () => {
       ["materials", { name: "case", id: "c1", view: "materials" }],
       ["consult", { name: "consult", caseId: "c1" }],
     ] as const) {
-      mockIPC((cmd) => (cmd === "take_unsaved" ? [{ case_id: "c1", place: "רישום מפגש", view, text: `טקסט ${view}` }] : null));
+      mockIPC((cmd) => (cmd === "take_unsaved" ? [{ case_id: "c1", place: "רישום מפגש", view, text: `טקסט ${view}` }] : cmd === "copy_secret" ? 60 : null));
       const go = vi.fn();
       const api: AppApi = { status: status(), go, refresh: vi.fn(), notify: vi.fn(), fail: (e) => e.message, lockNow: vi.fn() };
       const { unmount } = render(<AppContext.Provider value={api}><UnsavedNotice /></AppContext.Provider>);
       await screen.findByDisplayValue(`טקסט ${view}`);
-      fireEvent.click(screen.getByRole("button", { name: "מעבר לתיק" }));
-      expect(go).toHaveBeenCalledWith(route);
+      fireEvent.click(screen.getByRole("button", { name: "העתקה ומעבר לתיק" }));
+      await vi.waitFor(() => expect(go).toHaveBeenCalledWith(route));
       unmount();
     }
+  });
+
+  it("a session note held at the lock goes back to the patient's card in the clinic, not to a case", async () => {
+    mockIPC((cmd) => (cmd === "take_unsaved" ? [{ case_id: "p7", place: "רשומה בסיכום (מפגש)", view: "clinic", text: "טקסט של מפגש" }] : cmd === "copy_secret" ? 60 : null));
+    const go = vi.fn();
+    const notify = vi.fn();
+    const api: AppApi = { status: status(), go, refresh: vi.fn(), notify, fail: (e) => e.message, lockNow: vi.fn() };
+    render(<AppContext.Provider value={api}><UnsavedNotice /></AppContext.Provider>);
+    await screen.findByDisplayValue("טקסט של מפגש");
+    expect(screen.queryByRole("button", { name: /מעבר לתיק/ })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "העתקה ומעבר לכרטיס" }));
+    await vi.waitFor(() => expect(go).toHaveBeenCalledWith({ name: "clinic", tab: "patients", patientId: "p7" }));
+    expect(notify).toHaveBeenCalledWith(expect.stringContaining("בכרטיס"));
   });
 
   it("copies the kept text with the protected clipboard only", async () => {
@@ -209,5 +229,76 @@ describe("an edit open when the vault locks", () => {
     expect(await screen.findByText(/הלוח יתנקה בעוד 60 שניות/)).toBeInTheDocument();
     expect(copies).toEqual(["טקסט בדוי עם שם בדוי"]);
     expect(ordinary).not.toHaveBeenCalled();
+  });
+
+  it("UIA-3: Escape on a text not copied asks first, and going to the case copies it before it goes", async () => {
+    const copies: unknown[] = [];
+    mockIPC((cmd, args) => {
+      if (cmd === "take_unsaved") return [{ case_id: "c1", place: "פסקה בסעיף \"רקע\"", view: "report", text: "טקסט בדוי שלא נשמר" }];
+      if (cmd === "copy_secret") {
+        copies.push((args as { text: string }).text);
+        return 45;
+      }
+      return null;
+    });
+    const go = vi.fn();
+    const notify = vi.fn();
+    const api: AppApi = { status: status(), go, refresh: vi.fn(), notify, fail: (e) => e.message, lockNow: vi.fn() };
+    render(<AppContext.Provider value={api}><UnsavedNotice /></AppContext.Provider>);
+    await screen.findByDisplayValue("טקסט בדוי שלא נשמר");
+    await vi.waitFor(() => expect(screen.getByRole("dialog")).toContainElement(document.activeElement as HTMLElement));
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+    expect(await screen.findByText(/לסגור בכל זאת/)).toBeInTheDocument();
+    // Still there: Escape only asked.
+    expect(screen.getByDisplayValue("טקסט בדוי שלא נשמר")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "להמשיך לערוך" }));
+    fireEvent.click(screen.getByRole("button", { name: "העתקה ומעבר לתיק" }));
+    await vi.waitFor(() => expect(go).toHaveBeenCalledWith({ name: "case", id: "c1", view: "report" }));
+    expect(copies).toEqual(["טקסט בדוי שלא נשמר"]);
+    expect(notify).toHaveBeenCalledWith(expect.stringContaining("הטקסט הועתק"));
+  });
+
+  it("UIA-3: when the copy fails, going to the case does not drop the text", async () => {
+    mockIPC((cmd) => {
+      if (cmd === "take_unsaved") return [{ case_id: "c1", place: "פסקה", view: "report", text: "טקסט בדוי" }];
+      if (cmd === "copy_secret") throw new Error("no clipboard");
+      return null;
+    });
+    const go = vi.fn();
+    const api: AppApi = { status: status(), go, refresh: vi.fn(), notify: vi.fn(), fail: (e) => e.message, lockNow: vi.fn() };
+    render(<AppContext.Provider value={api}><UnsavedNotice /></AppContext.Provider>);
+    fireEvent.click(await screen.findByRole("button", { name: "העתקה ומעבר לתיק" }));
+    expect(await screen.findByText(/ההעתקה לא הצליחה/)).toBeInTheDocument();
+    expect(go).not.toHaveBeenCalled();
+    expect(screen.getByDisplayValue("טקסט בדוי")).toBeInTheDocument();
+  });
+
+  it("an editor open on the report page and one on the section's own page are two open edits, not one", () => {
+    const { unmount } = renderHook(() => {
+      useHoldUnsaved("c1", "פסקה בסעיף \"רקע\"", "בעמוד הדוח");
+      useHoldUnsaved("c1", `פסקה בסעיף "רקע"${SECTION_PAGE}`, "בעמוד הסעיף");
+    });
+    const open = openEdits("c1");
+    expect(open.map((e) => e.text)).toEqual(["בעמוד הדוח", "בעמוד הסעיף"]);
+    expect(open.map((e) => editSectionTitle(e))).toEqual(["רקע", "רקע"]);
+    unmount();
+    forgetHold();
+  });
+
+  it("lists the report's paragraph editors open in a case, not her points, notes or texts offered back", () => {
+    const { unmount } = renderHook(() => {
+      useHoldUnsaved("c1", "פסקה בסעיף \"רקע\"", "טקסט בדוי");
+      useHoldUnsaved("c1", "הנקודות שלך לסעיף", "נקודה");
+      useHoldUnsaved("c1", "רישום מפגש", "רישום", "materials");
+      useHoldUnsaved("c2", "פסקה בסעיף \"רקע\"", "בתיק אחר");
+      useHoldUnsaved("c1", "פסקה בשלב הסיום", "  ");
+    });
+    const open = openEdits("c1");
+    expect(open.map((e) => e.place)).toEqual(["פסקה בסעיף \"רקע\""]);
+    expect(open[0] && editSectionTitle(open[0])).toBe("רקע");
+    expect(editSectionTitle({ case_id: "c1", place: "פסקה בשלב הסיום", view: "report", text: "x" })).toBeNull();
+    unmount();
+    forgetHold();
+    expect(openEdits("c1")).toEqual([]);
   });
 });

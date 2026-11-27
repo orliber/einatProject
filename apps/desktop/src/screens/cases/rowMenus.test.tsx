@@ -42,7 +42,7 @@ describe("the actions of a row", () => {
     const button = screen.getByRole("button", { name: "פעולות על התיק של נועם" });
     button.focus();
     await user.keyboard("{ArrowDown}");
-    expect(await labels()).toContain("אבחון מעקב לילד/ה הזה/ו");
+    expect(await labels()).toContain("אבחון מעקב לילד הזה");
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("menuitem")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "פעולות על התיק של נועם" })).toHaveFocus();
@@ -53,7 +53,7 @@ describe("the actions of a row", () => {
     const table = screen.getByRole("table");
     const caseRow = rowOf(within(table).getByRole("button", { name: /בתיק של נועם$/ }));
     fireEvent.contextMenu(within(caseRow).getByText("נועם", { exact: false, selector: ".case-name" }));
-    expect(await labels()).toEqual(["פתיחה", "העברה לתיקייה…", "אבחון מעקב לילד/ה הזה/ו", "העברה לסל המחזור"]);
+    expect(await labels()).toEqual(["פתיחה", "העברה לתיקייה…", "אבחון מעקב לילד הזה", "העברה לסל המחזור"]);
     fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
     await vi.waitFor(() => expect(screen.queryByRole("menuitem")).not.toBeInTheDocument());
 

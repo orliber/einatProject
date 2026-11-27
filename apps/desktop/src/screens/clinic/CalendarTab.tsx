@@ -19,6 +19,7 @@ import type { Scope } from "../../ipc/generated/Scope";
 import type { Today } from "../../ipc/generated/Today";
 import type { Visit } from "../../ipc/generated/Visit";
 import type { VisitKind } from "../../ipc/generated/VisitKind";
+import type { VisitStatus } from "../../ipc/generated/VisitStatus";
 import type { VisitView } from "../../ipc/generated/VisitView";
 import { TEXT_SIZE_EVENT } from "../../textSize";
 import {
@@ -33,7 +34,7 @@ import {
 import { NoteDialog } from "./NoteDialog";
 import { VisitPaymentDialog } from "./PaymentDialog";
 import { EmptyState, Pager, PatientName, ReadError, Section, StatusBadge, usePaged, useShownName, VisitRow } from "./parts";
-import { VisitActions } from "./VisitActions";
+import { MARKED, VisitActions } from "./VisitActions";
 import { VisitDialog, type VisitStart } from "./VisitDialog";
 import "./CalendarTab.css";
 
@@ -97,8 +98,17 @@ type Open =
   | { kind: "scope"; view: VisitView; by: MoveBy | null; refocus: boolean }
   | null;
 
-const markHeld = (v: VisitView, id: string): VisitView => (v.visit.id === id ? { ...v, visit: { ...v.visit, status: "held" } } : v);
-const countText = (n: number) => (n === 0 ? "אין פגישות" : n === 1 ? "פגישה אחת" : `${n} פגישות`);
+const markAs = (v: VisitView, id: string, status: VisitStatus): VisitView => (v.visit.id === id ? { ...v, visit: { ...v.visit, status } } : v);
+/** "3 פגישות וזמן שמור אחד": time she kept for herself is not counted as a visit. */
+export function countText(views: readonly VisitView[]): string {
+  const own = views.filter((v) => ownVisit(v.visit)).length;
+  const n = views.length - own;
+  const visits = n === 0 ? "אין פגישות" : n === 1 ? "פגישה אחת" : `${n} פגישות`;
+  if (own === 0) return visits;
+  const kept = own === 1 ? "זמן שמור אחד" : `${own} זמנים שמורים`;
+  // "ו" joins a word as it is, and a number with a hyphen: "וזמן שמור אחד", "ו-2 זמנים שמורים".
+  return n === 0 ? kept : `${visits} ו${own === 1 ? "" : "-"}${kept}`;
+}
 
 /** An arrow of the bar. In a right-to-left page the past is to the right: "previous" points there. */
 function Arrow({ to }: { to: "right" | "left" }) {
@@ -163,12 +173,19 @@ export function CalendarTab() {
   // The legend explains the kinds on the page: the days shown, or the month's whole page.
   const legendKinds = useMemo(() => kindsShown(views ?? NO_VISITS, view === "month" ? null : shown), [views, shown, view]);
 
-  // A visit marked "held" shows so at once.
-  const hold = useOptimistic<VisitView[], Visit>(
+  // A visit marked "held" (or "לא הגיעו") shows so at once; "ביטול" in the toast puts it back.
+  const mark = useOptimistic<VisitView[], { visit: Visit; status: VisitStatus }>(
     CALENDARS,
-    (cached, visit) => cached.map((v) => markHeld(v, visit.id)),
-    (visit) => clinicApi.saveVisit({ ...visit, status: "held", status_note: "", charge_missed: false }),
+    (cached, { visit, status }) => cached.map((v) => markAs(v, visit.id, status)),
+    ({ visit, status }) => clinicApi.saveVisit(status === "planned" ? visit : { ...visit, status, status_note: "", charge_missed: false }),
   );
+  async function markVisit(visit: Visit, status: "held" | "no_show") {
+    if (!(await mark({ visit, status }))) return;
+    notify(MARKED[status], {
+      label: "ביטול",
+      run: () => void mark({ visit, status: "planned" }).then((ok) => { if (ok) notify("הסימון בוטל"); }),
+    });
+  }
   // A visit that was moved is drawn in its new place at once, and goes back if the vault refuses.
   const move = useOptimistic<VisitView[], Move>(
     CALENDARS,
@@ -327,7 +344,7 @@ export function CalendarTab() {
         {stage}
         <DaySide bar={bar}>
           <Agenda key={anchor} date={anchor} now={now} visits={days.get(anchor) ?? NO_VISITS} onOpen={grid.open} onNew={() => newOn(anchor)}
-            onHold={(v) => void hold(v)} onNote={(patientId, visit, record) => setOpen({ kind: "note", patientId, visit, record })}
+            onHold={(v) => void markVisit(v, "held")} onNoShow={(v) => void markVisit(v, "no_show")} onNote={(patientId, visit, record) => setOpen({ kind: "note", patientId, visit, record })}
             onPay={(patientId, visit) => setOpen({ kind: "payment", patientId, visit })} />
         </DaySide>
       </div>
@@ -704,13 +721,13 @@ function DaySide({ bar, children }: { bar: ReactNode; children: ReactNode }) {
 
 /** The day as a list beside its grid. Each visit offers one step by the time and the rest under
  *  "⋯", as on the front page (`VisitActions`, D-204); her own time has neither. */
-function Agenda({ date, now, visits, onOpen, onNew, onHold, onNote, onPay }: {
+function Agenda({ date, now, visits, onOpen, onNew, onHold, onNoShow, onNote, onPay }: {
   date: string; now: Today; visits: VisitView[]; onOpen: (view: VisitView) => void; onNew: () => void;
-  onHold: (visit: Visit) => void; onNote: (patientId: string, visit: Visit, record?: boolean) => void; onPay: (patientId: string, visit: Visit) => void;
+  onHold: (visit: Visit) => void; onNoShow: (visit: Visit) => void; onNote: (patientId: string, visit: Visit, record?: boolean) => void; onPay: (patientId: string, visit: Visit) => void;
 }) {
   const { shown, page, pages, setPage } = usePaged(visits, 12);
   return (
-    <Section title="סדר היום" aside={<span className="muted small">{visits.length === 0 ? "" : countText(visits.length)}</span>}>
+    <Section title="סדר היום" aside={<span className="muted small">{visits.length === 0 ? "" : countText(visits)}</span>}>
       {visits.length === 0 ? (
         <EmptyState title="אין פגישות ביום הזה" actions={<button type="button" className="btn" onClick={onNew}>לקבוע פגישה</button>}>
           <p>{formatDateLong(date)} עוד פנוי. אפשר גם ללחוץ על שעה ביומן.</p>
@@ -726,7 +743,7 @@ function Agenda({ date, now, visits, onOpen, onNew, onHold, onNote, onPay }: {
               return (
                 <VisitRow key={v.id} view={view} onOpen={() => onOpen(view)}
                   actions={pid !== null
-                    ? <VisitActions view={view} patientId={pid} now={now} onHold={onHold} onNote={(x, record) => onNote(pid, x, record)} onOpen={() => onOpen(view)}
+                    ? <VisitActions view={view} patientId={pid} now={now} onHold={onHold} onNoShow={onNoShow} onNote={(x, record) => onNote(pid, x, record)} onOpen={() => onOpen(view)}
                         onPay={(x) => onPay(pid, x)} />
                     : undefined} />
               );
@@ -777,12 +794,12 @@ function MonthDay({ date, visits, today, outside, onDay }: { date: string; visit
           <span className="visually-hidden">{weekday(date) === 6 ? "" : "יום "}{dayName(date)},</span>
           {" "}
           <span className="num">{Number(date.slice(8, 10))}</span>
-          <span className="visually-hidden">.{Number(date.slice(5, 7))}.{date.slice(0, 4)}, {countText(visits.length)}</span>
+          <span className="visually-hidden">.{Number(date.slice(5, 7))}.{date.slice(0, 4)}, {countText(visits)}</span>
         </button>
         {today && <span className="chip">היום</span>}
         <span className="grow" />
         {more > 0 && (
-          <span className="muted small cal-month-more"><span dir="ltr">+{more}</span><span className="visually-hidden"> פגישות נוספות</span></span>
+          <span className="muted small cal-month-more"><span dir="ltr">+{more}</span><span className="visually-hidden">{more === 1 ? " נוספת" : " נוספות"}</span></span>
         )}
       </div>
       <HolidayNames date={date} className="cal-holiday cal-month-holiday" />

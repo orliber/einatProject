@@ -4,6 +4,8 @@ import { mockIPC } from "@tauri-apps/api/mocks";
 import { AppContext, type AppApi } from "../App";
 import { status } from "../test/fixtures";
 import { SecuritySettings } from "./SecuritySettings";
+import { rememberSendStopped } from "../sendStopped";
+import { TopBar } from "./TopBar";
 
 const api = (over: Partial<AppApi> = {}): AppApi => ({
   status: status(),
@@ -32,11 +34,15 @@ const view = (stopped: boolean) => ({
   yours: [layer("disk", "הצפנת הדיסק (BitLocker)", "warn", "לא נמצאה. כדאי להפעיל אותה ב-Windows.")],
 });
 
-function show(a: AppApi = api()) {
+beforeEach(() => rememberSendStopped(false));
+
+function show(a: AppApi = api(), withBar = false) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  localStorage.setItem("dv.updateAuto", "off");
   render(
     <QueryClientProvider client={qc}>
       <AppContext.Provider value={a}>
+        {withBar && <TopBar active="cases" />}
         <SecuritySettings />
       </AppContext.Provider>
     </QueryClientProvider>,
@@ -48,7 +54,7 @@ describe("the protection layers", () => {
     mockIPC(() => view(false));
     show();
     // Three of the program's and one of hers: 3 of 4 fine, the disk named (round 50's grid).
-    expect(await screen.findByRole("heading", { name: /3 מתוך 4 תקינות: הצפנת הדיסק/ })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /3 מתוך 4 תקינות\. לבדוק: הצפנת הדיסק/ })).toBeInTheDocument();
     expect(screen.getByText("נבדק עכשיו: השער חסם שם גלוי של ילד בדוי.")).toBeInTheDocument();
     expect(screen.getByText(/אחת תלויה בך/)).toBeInTheDocument();
     expect(screen.getByText("את")).toBeInTheDocument();
@@ -66,6 +72,26 @@ describe("the protection layers", () => {
     expect(await screen.findByRole("button", { name: /להפעיל שליחה מחדש/ })).toBeInTheDocument();
     expect(calls.find(([c]) => c === "set_send_stopped")?.[1]).toMatchObject({ stopped: true });
     expect(screen.getByText("השליחה כבויה עכשיו (עצירת חירום).")).toBeInTheDocument();
+  });
+
+  it("the stop is confirmed, and the top bar says sending is off on every page until it is turned back on", async () => {
+    let on = false;
+    mockIPC((cmd, args) => {
+      if (cmd === "set_send_stopped") on = (args as { stopped: boolean }).stopped;
+      return view(on);
+    });
+    const notify = vi.fn();
+    const go = vi.fn();
+    show(api({ notify, go }), true);
+    expect(screen.queryByRole("button", { name: "השליחה ל-AI כבויה" })).toBeNull();
+    fireEvent.click(await screen.findByRole("button", { name: /עצירת חירום/ }));
+    await vi.waitFor(() => expect(notify).toHaveBeenCalledWith("השליחה ל-AI כבויה, עד שתפעילי אותה מחדש כאן או עד שהתוכנה תיסגר."));
+    const sign = await screen.findByRole("button", { name: "השליחה ל-AI כבויה" });
+    fireEvent.click(sign);
+    expect(go).toHaveBeenCalledWith({ name: "settings", pane: "security" });
+    fireEvent.click(screen.getByRole("button", { name: /להפעיל שליחה מחדש/ }));
+    await vi.waitFor(() => expect(notify).toHaveBeenCalledWith("השליחה ל-AI פועלת שוב."));
+    expect(screen.queryByRole("button", { name: "השליחה ל-AI כבויה" })).toBeNull();
   });
 
   it("sending cannot be turned back on while the gate failed its check, and the stop is there while loading", async () => {
@@ -87,7 +113,7 @@ describe("the protection layers", () => {
     mockIPC(() => v);
     show();
     expect(await screen.findByRole("button", { name: "להפעלה" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: /3 מתוך 5 תקינות: הצפנת הדיסק \(BitLocker\), כניסה עם גוגל/ })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /3 מתוך 5 תקינות\. לבדוק: הצפנת הדיסק \(BitLocker\), כניסה עם גוגל/ })).toBeInTheDocument();
   });
 
   it("saves the same page as a PDF and says where", async () => {

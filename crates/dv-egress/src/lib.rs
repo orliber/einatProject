@@ -102,6 +102,10 @@ pub enum EgressError {
     LocalUnavailable,
     #[error("the secure connection failed; something on this computer may be intercepting encrypted traffic")]
     Tls,
+    /// The service's certificate is "expired" or "not valid yet" by this computer's clock:
+    /// most likely the computer's date or time is wrong (EGRESS-5). Nothing was sent.
+    #[error("the service's certificate is expired or not yet valid by this computer's clock")]
+    Clock,
     /// The service's certificate is valid but from an authority this version is not pinned
     /// to (D-077): a new version of the program is needed.
     #[error("the service's certificate is not from an authority this version trusts; an update is needed")]
@@ -238,9 +242,11 @@ pub(crate) fn capped(from: impl std::io::Read) -> std::io::Take<impl std::io::Re
 /// The whole (non-streamed) answer as text, refused past the limit.
 pub(crate) fn read_answer(from: impl std::io::Read) -> Result<String, EgressError> {
     let mut bytes = Vec::new();
-    capped(from)
-        .read_to_end(&mut bytes)
-        .map_err(|e| EgressError::Protocol(e.to_string()))?;
+    // A read that fails is the connection lost or out of time mid-answer, as on the streamed
+    // path: said by its kind only, never by its text (which can carry the URL) (EGRESS-4).
+    capped(from).read_to_end(&mut bytes).map_err(|e| {
+        EgressError::Interrupted(format!("while reading the answer ({:?})", e.kind()))
+    })?;
     if bytes.len() > MAX_ANSWER_BYTES {
         return Err(EgressError::Protocol(format!(
             "answer over {MAX_ANSWER_BYTES} bytes"
@@ -481,6 +487,8 @@ pub(crate) fn send_error(e: &reqwest::Error) -> EgressError {
     let refused = pinning::take_pin_refused();
     if text.contains(pinning::PIN_MARK) || (tls && refused) {
         EgressError::Pinned
+    } else if clock_refused(&text) {
+        EgressError::Clock
     } else if tls {
         EgressError::Tls
     } else if e.is_connect() {
@@ -490,6 +498,12 @@ pub(crate) fn send_error(e: &reqwest::Error) -> EgressError {
         // Connected, and then lost or out of time: not "no internet" (D-134).
         EgressError::Interrupted(cut_reason(e))
     }
+}
+
+/// A certificate refused by its dates (rustls's `Expired`, `NotValidYet` and their
+/// `…Context` forms), from the lower-case debug text of the error chain.
+fn clock_refused(text: &str) -> bool {
+    text.contains("invalidcertificate(expired") || text.contains("invalidcertificate(notvalidyet")
 }
 
 /// What cut a connection, in words fit for "copy details": the stage, and the system's error
@@ -766,6 +780,49 @@ mod tests {
     }
 
     use super::*;
+
+    /// EGRESS-5: a certificate refused by its dates points to the computer's clock.
+    #[test]
+    fn a_certificate_out_of_its_dates_is_told_from_an_interception() {
+        for e in [
+            rustls::Error::InvalidCertificate(rustls::CertificateError::Expired),
+            rustls::Error::InvalidCertificate(rustls::CertificateError::NotValidYet),
+        ] {
+            assert!(clock_refused(&format!("{e:?}").to_lowercase()), "{e:?}");
+        }
+        let other = rustls::Error::InvalidCertificate(rustls::CertificateError::UnknownIssuer);
+        assert!(!clock_refused(&format!("{other:?}").to_lowercase()));
+    }
+
+    /// EGRESS-4: a connection lost while a whole answer is read is an interruption (she is
+    /// offered to try again), not an unexpected answer to report.
+    #[test]
+    fn a_connection_lost_while_reading_a_whole_answer_is_an_interruption() {
+        struct Cut(bool);
+        impl std::io::Read for Cut {
+            fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+                if std::mem::replace(&mut self.0, true) {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::ConnectionReset,
+                        "https://api.example/v1 reset",
+                    ));
+                }
+                buf[..2].copy_from_slice(b"{\"");
+                Ok(2)
+            }
+        }
+        assert_eq!(
+            read_answer(Cut(false)),
+            Err(EgressError::Interrupted(
+                "while reading the answer (ConnectionReset)".to_owned()
+            ))
+        );
+        // Invalid text is still an unexpected answer.
+        assert!(matches!(
+            read_answer(&[0xff_u8, 0xfe][..]),
+            Err(EgressError::Protocol(_))
+        ));
+    }
 
     #[test]
     fn the_stop_switched_on_during_the_wait_ends_the_retries() {

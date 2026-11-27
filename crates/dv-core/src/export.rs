@@ -2,6 +2,11 @@
 
 use super::*;
 
+/// The date line at the top of the report.
+const REPORT_DATE_LABEL: &str = "תאריך הדוח";
+/// The same line at the top of a letter (EXPORT-8).
+const LETTER_DATE_LABEL: &str = "תאריך המכתב";
+
 impl Core {
     /// Whether a file is exactly one this vault exported (its fingerprint is in the audit log):
     /// when, or `None` for a file that was changed or not made here.
@@ -115,7 +120,19 @@ impl Core {
             .filter(|p| p.status == DraftStatus::Approved)
             .map(|p| p.text)
             .collect();
-        let info = std::mem::take(&mut report.info);
+        // The lines at the top, said of a letter: it is dated as a letter, the day it is made,
+        // never as "the report's date" (EXPORT-8). The age at the assessment stays: the letter
+        // speaks of that assessment, and the reader (a teacher, the parents) is told the age it
+        // describes, not an age now.
+        let info = std::mem::take(&mut report.info)
+            .into_iter()
+            .map(|mut line| {
+                if line.label == REPORT_DATE_LABEL {
+                    line.label = LETTER_DATE_LABEL.to_owned();
+                }
+                line
+            })
+            .collect();
         let signature = std::mem::take(&mut report.signature);
         // Only the lines at the top and the signature are taken from the report.
         report.wipe();
@@ -513,7 +530,7 @@ impl Core {
             });
         }
         info.push(dv_export::InfoLine {
-            label: "תאריך הדוח".to_owned(),
+            label: REPORT_DATE_LABEL.to_owned(),
             value: format!("{d}.{m}.{y}"),
         });
 

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { AgeField, ageError, ageProblem, parseAge } from "../../components/AgeField";
 import { DateField, isoToHe, todayIso } from "../../components/DateField";
 import { useApp } from "../../App";
@@ -16,6 +17,7 @@ import { CONSENT_FORM_VERSION, consentToSave, olderFormNote } from "../../consen
 /** The case's details, consent and the names hidden before every send. */
 export function DetailsView({ api }: { api: CaseApi }) {
   const { fail, notify, go } = useApp();
+  const qc = useQueryClient();
   const ai = useAi();
   const { detail, caseId, reload } = api;
   const m = detail.meta;
@@ -122,6 +124,9 @@ export function DetailsView({ api }: { api: CaseApi }) {
     setBusy(true);
     try {
       await ipc.deleteCase(caseId);
+      // The list she goes back to, and the recycle bin, are read again: the case is not left
+      // in the list (or in "להמשיך") as if it were still open.
+      await Promise.all(["cases", "trash"].map((k) => qc.invalidateQueries({ queryKey: [k] })));
       notify("התיק הועבר לסל המחזור (30 יום לשחזור).");
       // The case is gone: nothing here is left to save.
       guard.current = { dirty: false, save };

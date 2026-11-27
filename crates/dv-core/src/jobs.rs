@@ -300,6 +300,18 @@ impl BackupTask {
         job: dv_vault::BackupJob,
         dest: &Path,
     ) -> Result<(dv_vault::BackupWritten, Vec<u8>), CoreError> {
+        // The file is prepared, and later opened for its check, in a scratch folder next to
+        // the vault, on the computer's own disk: a failure there is not the chosen folder's
+        // (OPS-5).
+        let local_disk = || {
+            CoreError::Needs(
+                "לא הצלחתי להכין את הגיבוי בדיסק של המחשב, שבו נמצאת הכספת. ייתכן שהדיסק של \
+                 המחשב מלא: כדאי לפנות בו מקום ולנסות שוב. הכספת עצמה לא נפגעה."
+                    .to_owned(),
+                ErrorAction::retry(),
+            )
+        };
+        let job = job.seal().map_err(|_| local_disk())?;
         // Under a `.part` name until it is read back and opens: a backup that failed its check
         // is not left under a backup's name, nor over an earlier good one.
         job.write_part(dest)
@@ -312,13 +324,23 @@ impl BackupTask {
                 )
             })
             .and_then(|w| {
-                w.verify_keeping_file().map_err(|_| {
-                    CoreError::Needs(
+                w.verify_keeping_file().map_err(|e| match e {
+                    // Reading the file back fills no disk: a full disk here is the check's
+                    // scratch copy, next to the vault.
+                    VaultError::Io(io)
+                        if matches!(
+                            io.kind(),
+                            std::io::ErrorKind::StorageFull | std::io::ErrorKind::QuotaExceeded
+                        ) =>
+                    {
+                        local_disk()
+                    }
+                    _ => CoreError::Needs(
                         "הגיבוי נכתב, אבל בבדיקה הוא לא נפתח כמו שצריך. כדאי לנסות שוב, ואם זה \
                          חוזר, לנסות דיסק אחר."
                             .to_owned(),
                         ErrorAction::retry(),
-                    )
+                    ),
                 })
             })
     }
@@ -524,6 +546,17 @@ pub struct Exported {
     letter: Option<&'static str>,
     /// The report as a file, wiped if it is dropped unsaved (it landed after a lock).
     bytes: Result<Zeroizing<Vec<u8>>, CoreError>,
+}
+
+/// An export taken from the core and not yet recorded (see [`Core::take_export`]): what goes
+/// into the audit log once its file is written. Holds no words of the report, only the
+/// case's id and the file's fingerprint.
+#[derive(Debug)]
+pub struct ExportRecord {
+    session: u64,
+    case_id: String,
+    meta: serde_json::Value,
+    letter: bool,
 }
 
 pub(crate) fn export_error(e: dv_export::ExportError) -> CoreError {
@@ -1369,10 +1402,24 @@ impl Core {
     /// Record the export with the file's fingerprint (Word, PDF or letter alike, so "check
     /// the original" knows every file she gave out, D-120) and learn from the final report.
     /// Returns the file's bytes and the check, whose file name has no child's name in it.
+    /// For callers that write no file themselves; one that does takes the bytes with
+    /// [`Core::take_export`] and records with [`Core::record_export`] once the file is saved.
     pub fn finish_export(
         &mut self,
         exported: Exported,
     ) -> Result<(Vec<u8>, crate::ExportCheck), CoreError> {
+        let (bytes, check, record) = self.take_export(exported)?;
+        self.record_export(record)?;
+        Ok((bytes, check))
+    }
+
+    /// The file's bytes and the check, with nothing recorded yet: an export is written to the
+    /// audit log, and learned from, only once its file is on the disk (EXPORT-6, JOBS-5), by
+    /// [`Core::record_export`].
+    pub fn take_export(
+        &mut self,
+        exported: Exported,
+    ) -> Result<(Vec<u8>, crate::ExportCheck, ExportRecord), CoreError> {
         self.same_session(exported.session)?;
         // Moved out, not copied: no second copy is left to wipe.
         let bytes = std::mem::take(&mut *exported.bytes?);
@@ -1397,13 +1444,30 @@ impl Core {
                 "parents": exported.parents,
             }),
         };
-        self.vault_mut()?
-            .record(dv_vault::AuditEvent::Export, Some(&exported.case_id), &meta)?;
+        let record = ExportRecord {
+            session: exported.session,
+            case_id: exported.case_id,
+            meta,
+            letter: exported.letter.is_some(),
+        };
+        Ok((bytes, exported.check, record))
+    }
+
+    /// After the file was written: the export goes into the audit log with its fingerprint,
+    /// and a report (not a letter) is learned from as final. Refused when the vault locked
+    /// since [`Core::take_export`]; the caller then removes the file it wrote.
+    pub fn record_export(&mut self, record: ExportRecord) -> Result<(), CoreError> {
+        self.same_session(record.session)?;
+        self.vault_mut()?.record(
+            dv_vault::AuditEvent::Export,
+            Some(&record.case_id),
+            &record.meta,
+        )?;
         // A letter is not the report: its paragraphs teach nothing about her style.
-        if exported.letter.is_none() {
-            self.learn_from_final(&exported.case_id);
+        if !record.letter {
+            self.learn_from_final(&record.case_id);
         }
-        Ok((bytes, exported.check))
+        Ok(())
     }
 
     pub fn export_report(

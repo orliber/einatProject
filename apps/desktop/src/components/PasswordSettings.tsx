@@ -50,7 +50,11 @@ function ChangePasswordDialog({ onClose }: { onClose: () => void }) {
 
   async function save(e?: FormEvent) {
     e?.preventDefault();
+    // Enter pressed again while the vault is being encrypted anew is not a second change (UIA-10);
+    // and with no current password there is nothing to send, as the button says.
+    if (busy) return;
     setError(null);
+    if (!current) return setError(withRecovery ? "צריך להקליד את ערכת השחזור מהדף המודפס." : "צריך להקליד את הסיסמה הנוכחית.");
     if (pw.length < 12) return setError("הסיסמה החדשה צריכה להיות באורך 12 תווים לפחות. מומלץ משפט של כמה מילים.");
     if (pw !== pw2) return setError("שתי הסיסמאות החדשות לא זהות.");
     setBusy(true);
@@ -99,7 +103,7 @@ function ChangePasswordDialog({ onClose }: { onClose: () => void }) {
           <li className={pw.length >= 12 ? "met" : undefined}>{pw.length >= 12 ? "✓" : "○"} 12 תווים לפחות</li>
           <li className={pw2.length > 0 && pw === pw2 ? "met" : undefined}>{pw2.length > 0 && pw === pw2 ? "✓" : "○"} שתי הסיסמאות זהות</li>
         </ul>
-        <button type="submit" hidden />
+        <button type="submit" hidden disabled={busy} />
         {busy && <WaitLine task="rekey" speed="password" label="מצפינה את הכספת מחדש בסיסמה החדשה" />}
         <ErrorLine error={error} />
       </form>
@@ -119,6 +123,7 @@ function NewKitDialog({ onClose }: { onClose: () => void }) {
 
   async function issue(e?: FormEvent) {
     e?.preventDefault();
+    if (busy || !current) return;
     setBusy(true);
     setError(null);
     try {
@@ -243,6 +248,7 @@ function RetireKitDialog({ onClose }: { onClose: () => void }) {
 
   async function retire(e?: FormEvent) {
     e?.preventDefault();
+    if (busy || !current) return;
     setBusy(true);
     setError(null);
     try {

@@ -1,6 +1,6 @@
 // A patient's card as a form: a new family (active, or onto the waiting list) and the details
 // of one that exists. Names and phones stay in the vault; nothing here is sent anywhere.
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useApp } from "../../App";
 import { ageFrom, ageOf } from "../../components/AgeField";
 import { DateField } from "../../components/DateField";
@@ -11,7 +11,7 @@ import type { ContactRole } from "../../ipc/generated/ContactRole";
 import type { Patient } from "../../ipc/generated/Patient";
 import type { PatientStatus } from "../../ipc/generated/PatientStatus";
 import { useSavePatient, useToday } from "./clinicData";
-import { CONTACT_ROLE_LABEL, CONTACT_ROLES, optionsWith, parseMoney, PATIENT_STATUS_LABEL } from "./format";
+import { CONTACT_ROLE_LABEL, CONTACT_ROLES, emailReachable, optionsWith, parseMoney, PATIENT_STATUS_LABEL, phoneReachable } from "./format";
 import { CheckField, Field, MoneyField, moneyProblem, moneyText, SelectField, TextAreaField, TextField } from "./parts";
 
 export interface PatientDialogProps {
@@ -31,9 +31,12 @@ type Gender = "" | "male" | "female";
 interface Form {
   name: string;
   birth: string;
+  /** A birth date typed but not a real date: never saved as "no date". */
+  birthBad: boolean;
   gender: Gender;
   status: PatientStatus;
   waitingSince: string;
+  waitingBad: boolean;
   urgent: boolean;
   contacts: Contact[];
   framework: string;
@@ -51,17 +54,22 @@ export function PatientDialog({ patient, waiting = false, onClose, onSaved }: Pa
   const save = useSavePatient();
   const [first] = useState<Form>(() => patient
     ? {
-      name: patient.name, birth: patient.birth_date ?? "", gender: patient.gender ?? "", status: patient.status,
-      waitingSince: patient.waiting_since ?? "", urgent: patient.urgent, contacts: patient.contacts, framework: patient.framework,
+      name: patient.name, birth: patient.birth_date ?? "", birthBad: false, gender: patient.gender ?? "", status: patient.status,
+      waitingSince: patient.waiting_since ?? "", waitingBad: false, urgent: patient.urgent, contacts: patient.contacts, framework: patient.framework,
       referredBy: patient.referred_by, reason: patient.reason, notes: patient.notes, fee: moneyText(patient.session_fee),
     }
     : {
-      name: "", birth: "", gender: "", status: waiting ? "waiting" : "active", waitingSince: waiting ? now.date : "", urgent: false,
+      name: "", birth: "", birthBad: false, gender: "", status: waiting ? "waiting" : "active", waitingSince: waiting ? now.date : "", waitingBad: false, urgent: false,
       contacts: [emptyContact("mother")], framework: "", referredBy: "", reason: "", notes: "", fee: "",
     });
   const [form, setForm] = useState(first);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  /** She pressed save: what is missing or wrong shows by its field, not only at the foot. */
+  const [tried, setTried] = useState(false);
+  /** The contact boxes she has left: a phone or an email that cannot be reached shows then. */
+  const [left, setLeft] = useState<ReadonlySet<string>>(new Set());
+  const form_ = useRef<HTMLDivElement>(null);
   const set = (patch: Partial<Form>) => setForm((f) => ({ ...f, ...patch }));
   const setContact = (i: number, patch: Partial<Contact>) => set({ contacts: form.contacts.map((c, j) => (j === i ? { ...c, ...patch } : c)) });
   const dirty = JSON.stringify(form) !== JSON.stringify(first);
@@ -70,9 +78,38 @@ export function PatientDialog({ patient, waiting = false, onClose, onSaved }: Pa
   // "הסתיים" is where a card goes, not where it starts.
   const statuses: PatientStatus[] = patient ? ["active", "waiting", "closed"] : ["active", "waiting"];
 
+  const nameProblem = tried && form.name.trim() === "" ? "צריך לכתוב את שם הילד או הילדה." : null;
+  const onList = form.status === "waiting";
+  /** Warnings only: a card may keep a number she will fix later; messages to it will not open. */
+  const phoneWarning = (c: Contact, i: number) => (tried || left.has(`contact-${i}-phone`)) && c.phone.trim() !== "" && !phoneReachable(c.phone)
+    ? "המספר לא נראה תקין, ולא תהיה אפשרות לשלוח אליו הודעה." : null;
+  const emailWarning = (c: Contact, i: number) => (tried || left.has(`contact-${i}-email`)) && c.email.trim() !== "" && !emailReachable(c.email)
+    ? "הכתובת לא נראית תקינה, ולא תהיה אפשרות לשלוח אליה מייל." : null;
+
+  /** Moves to a field that needs her, and shows it on the screen. */
+  function toField(id: string) {
+    const box = form_.current?.querySelector<HTMLElement>(`#${id}`);
+    box?.focus();
+    box?.scrollIntoView?.({ block: "center" });
+  }
+
   async function submit() {
+    setTried(true);
     if (form.name.trim() === "") {
-      setError("צריך לכתוב את שם הילד או הילדה.");
+      setError(null);
+      toField("patient-name");
+      return;
+    }
+    // A wrong date is not "no date": saving it would erase the date the card had. The field
+    // says what is wrong ("תאריך לא תקין"), and the focus goes to it.
+    if (form.birthBad) {
+      setError(null);
+      toField("patient-birth");
+      return;
+    }
+    if (onList && form.waitingBad) {
+      setError(null);
+      toField("patient-waiting-since");
       return;
     }
     const fee = form.fee.trim() === "" ? null : parseMoney(form.fee);
@@ -82,7 +119,6 @@ export function PatientDialog({ patient, waiting = false, onClose, onSaved }: Pa
     }
     setBusy(true);
     setError(null);
-    const onList = form.status === "waiting";
     try {
       const saved = await save.mutateAsync({
         id: patient?.id ?? "",
@@ -119,9 +155,10 @@ export function PatientDialog({ patient, waiting = false, onClose, onSaved }: Pa
         <button type="button" className="btn" onClick={close}>ביטול</button>
         <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void submit()}>{patient ? "שמירה" : "הוספה"}</button>
       </>}>
-      <div className="stack clinic-form">
+      <div className="stack clinic-form" ref={form_}>
         <div className="clinic-form-row">
           <TextField id="patient-name" label="שם הילד או הילדה" value={form.name} maxLength={120} autoFocus={!patient} className="grow"
+            problem={nameProblem}
             onChange={(name) => set({ name })} />
           <SelectField<Gender> id="patient-gender" label="מין" value={form.gender} onChange={(gender) => set({ gender })}
             options={[{ value: "", label: "לא צוין" }, { value: "male", label: "בן" }, { value: "female", label: "בת" }]} />
@@ -129,19 +166,19 @@ export function PatientDialog({ patient, waiting = false, onClose, onSaved }: Pa
 
         <div className="clinic-form-row">
           <Field id="patient-birth" label="תאריך לידה">
-            <DateField id="patient-birth" value={form.birth} onChange={(birth) => set({ birth })} notAfterToday />
+            <DateField id="patient-birth" value={form.birth} onChange={(birth, birthBad) => set({ birth, birthBad })} notAfterToday checked={tried} />
           </Field>
           <p className="clinic-age" role="status">{age ? `היום: ${ageOf(age, form.gender === "" ? null : form.gender)}` : ""}</p>
         </div>
 
         <div className="field">
           <span className="label">איפה המשפחה עכשיו</span>
-          <Segmented label="איפה המשפחה עכשיו" value={form.status} onChange={(status) => set({ status })}
+          <Segmented label="איפה המשפחה עכשיו" value={form.status} onChange={(status) => set({ status, waitingBad: false })}
             options={statuses.map((s) => ({ value: s, label: PATIENT_STATUS_LABEL[s] }))} />
           {form.status === "waiting" && (
             <div className="clinic-form-row">
               <Field id="patient-waiting-since" label="ממתינים מאז" hint="ריק: מהיום.">
-                <DateField id="patient-waiting-since" value={form.waitingSince} onChange={(waitingSince) => set({ waitingSince })} notAfterToday />
+                <DateField id="patient-waiting-since" value={form.waitingSince} onChange={(waitingSince, waitingBad) => set({ waitingSince, waitingBad })} notAfterToday checked={tried} />
               </Field>
               <CheckField id="patient-urgent" label="דחוף: להכניס ראשונים" checked={form.urgent} onChange={(urgent) => set({ urgent })} />
             </div>
@@ -154,12 +191,13 @@ export function PatientDialog({ patient, waiting = false, onClose, onSaved }: Pa
           <legend className="label">אנשי קשר</legend>
           {form.contacts.length === 0 && <p className="hint">עוד אין אנשי קשר בכרטיס.</p>}
           {form.contacts.map((c, i) => (
-            <div key={i} className="clinic-contact" role="group" aria-label={`איש קשר ${i + 1}`}>
+            <div key={i} className="clinic-contact" role="group" aria-label={`איש קשר ${i + 1}`}
+              onBlur={(e) => { const id = e.target.id; if (id && !left.has(id)) setLeft(new Set(left).add(id)); }}>
               <SelectField<ContactRole> id={`contact-${i}-role`} label="קשר" value={c.role} onChange={(role) => setContact(i, { role })}
                 options={optionsWith(CONTACT_ROLES, CONTACT_ROLE_LABEL, c.role)} />
               <TextField id={`contact-${i}-name`} label="שם" value={c.name} maxLength={120} onChange={(name) => setContact(i, { name })} />
-              <TextField id={`contact-${i}-phone`} label="טלפון" value={c.phone} maxLength={200} dir="ltr" inputMode="tel" onChange={(phone) => setContact(i, { phone })} />
-              <TextField id={`contact-${i}-email`} label="מייל" value={c.email} maxLength={200} dir="ltr" inputMode="email" onChange={(email) => setContact(i, { email })} />
+              <TextField id={`contact-${i}-phone`} label="טלפון" value={c.phone} maxLength={200} dir="ltr" inputMode="tel" problem={phoneWarning(c, i)} onChange={(phone) => setContact(i, { phone })} />
+              <TextField id={`contact-${i}-email`} label="מייל" value={c.email} maxLength={200} dir="ltr" inputMode="email" problem={emailWarning(c, i)} onChange={(email) => setContact(i, { email })} />
               <button type="button" className="btn icon-btn" aria-label={`הסרת איש קשר ${i + 1}`}
                 onClick={() => set({ contacts: form.contacts.filter((_, j) => j !== i) })}><CloseIcon /></button>
             </div>

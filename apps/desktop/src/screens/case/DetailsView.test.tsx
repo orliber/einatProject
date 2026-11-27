@@ -1,9 +1,10 @@
 // The case's consent keeps the form version it was signed on (D-115): saving other details does
 // not relabel it, and only her "signed again on today's form" puts it on the current version.
 // All names are invented.
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { mockIPC } from "@tauri-apps/api/mocks";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AppContext, type AppApi } from "../../App";
 import { status } from "../../test/fixtures";
 import { FakeCore } from "../../web/fakeCore";
@@ -34,7 +35,8 @@ async function openOnOldForm() {
   const detail = (await core.handle("case_detail", { caseId })) as CaseDetail;
   const app: AppApi = { status: status(), go: vi.fn(), refresh: vi.fn(async () => undefined), notify: vi.fn(), fail: (e) => e.message, lockNow: vi.fn(async () => undefined) };
   const api = { caseId, detail, reload: vi.fn(async () => undefined) } as unknown as CaseApi;
-  render(<AppContext.Provider value={app}><DetailsView api={api} /></AppContext.Provider>);
+  const qc = new QueryClient();
+  render(<QueryClientProvider client={qc}><AppContext.Provider value={app}><DetailsView api={api} /></AppContext.Provider></QueryClientProvider>);
   const version = () => (updates.at(-1)?.meta as { consent: { form_version: string } }).consent.form_version;
   return { updates, version, user: userEvent.setup() };
 }
@@ -77,9 +79,10 @@ async function openDemo() {
   const detail = (await core.handle("case_detail", { caseId })) as CaseDetail;
   const app: AppApi = { status: status(), go: vi.fn(), refresh: vi.fn(async () => undefined), notify: vi.fn(), fail: (e) => e.message, lockNow: vi.fn(async () => undefined) };
   const api = { caseId, detail, reload: vi.fn(async () => undefined) } as unknown as CaseApi;
-  render(<AppContext.Provider value={app}><DetailsView api={api} /></AppContext.Provider>);
+  const qc = new QueryClient();
+  render(<QueryClientProvider client={qc}><AppContext.Provider value={app}><DetailsView api={api} /></AppContext.Provider></QueryClientProvider>);
   const identities = async () => ((await core.handle("case_detail", { caseId })) as CaseDetail).identities;
-  return { calls, identities, user: userEvent.setup() };
+  return { calls, identities, user: userEvent.setup(), app, qc };
 }
 
 describe("saving the details twice", () => {
@@ -186,3 +189,21 @@ describe("the save button is the only thing that saves here", () => {
   });
 });
 
+
+describe("deleting the case", () => {
+  it("reads the cases and the recycle bin again before going back to the list (walk: sample case stayed listed)", async () => {
+    const { user, app, qc, calls } = await openDemo();
+    const read = vi.spyOn(qc, "invalidateQueries");
+    await user.click(screen.getByRole("button", { name: "מחיקת התיק…" }));
+    const ask = await screen.findByRole("dialog", { name: "מחיקת התיק" });
+    await user.type(within(ask).getByLabelText("קוד התיק"), "תיק-בדיקה");
+    await user.click(within(ask).getByRole("button", { name: "מחיקה" }));
+    await waitFor(() => expect(app.go).toHaveBeenCalledWith({ name: "cases" }));
+    expect(calls.some((c) => c.cmd === "delete_case")).toBe(true);
+    expect(read).toHaveBeenCalledWith({ queryKey: ["cases"] });
+    expect(read).toHaveBeenCalledWith({ queryKey: ["trash"] });
+    // Read again before she gets there, not after.
+    const order = read.mock.invocationCallOrder[0] ?? Infinity;
+    expect(order).toBeLessThan(vi.mocked(app.go).mock.invocationCallOrder[0] ?? 0);
+  });
+});

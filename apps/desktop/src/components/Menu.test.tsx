@@ -34,6 +34,46 @@ function Screen({ kind }: { kind: "actions" | "add" }) {
 
 const trigger = () => screen.getByRole("button", { name: "עוד פעולות" });
 
+/** A menu whose item opens a dialog with a field that takes the focus (a new name, a password). */
+function FieldScreen({ kind }: { kind: "actions" | "add" | "right" }) {
+  const [open, setOpen] = useState(false);
+  const items: MenuItem[] = [{ label: "שינוי שם", run: () => setOpen(true) }];
+  return (
+    <div>
+      {kind === "actions" ? <ActionsMenu items={items} label="עוד פעולות" />
+        : kind === "add" ? <AddMenu items={items} label="עוד פעולות">+</AddMenu>
+        : <RightClick items={items}><button type="button">תיקייה בדויה</button></RightClick>}
+      {open && (
+        <Dialog title="שם חדש" onClose={() => setOpen(false)}>
+          <input aria-label="השם החדש" autoFocus />
+        </Dialog>
+      )}
+    </div>
+  );
+}
+
+describe.each(["actions", "add", "right"] as const)("a dialog with a field, opened from a menu (%s, UID-5)", (kind) => {
+  it("the field keeps the focus after the menu has closed, and typing goes into it", async () => {
+    const user = userEvent.setup();
+    render(<FieldScreen kind={kind} />);
+    if (kind === "right") {
+      const row = screen.getByRole("button", { name: "תיקייה בדויה" });
+      row.focus();
+      fireEvent.contextMenu(row);
+    } else {
+      await user.click(trigger());
+    }
+    await user.click(await screen.findByRole("menuitem", { name: "שינוי שם" }));
+    const field = await screen.findByRole("textbox", { name: "השם החדש" });
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+    await new Promise((r) => setTimeout(r, 30));
+    expect(field).toHaveFocus();
+    await user.keyboard("שם בדוי");
+    expect(field).toHaveValue("שם בדוי");
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+});
+
 describe.each(["actions", "add"] as const)("a menu with a button (%s)", (kind) => {
   it("a dialog opened from an item gives the focus back to the menu's button when it closes", async () => {
     const user = userEvent.setup();

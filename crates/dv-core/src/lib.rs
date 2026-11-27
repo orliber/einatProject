@@ -104,8 +104,9 @@ pub use history::{
 };
 pub use instruments::{CriticalValuesView, InstrumentApproval, InstrumentStatus};
 pub use jobs::{
-    BackupRun, BackupTask, DocumentRead, DrillJob, Drilled, ExportJob, Exported, PasswordCheckJob,
-    PasswordChecked, ReadJob, RestoreJob, Restored, SlotJob, SlotMade, UnlockJob, Unlocked,
+    BackupRun, BackupTask, DocumentRead, DrillJob, Drilled, ExportJob, ExportRecord, Exported,
+    PasswordCheckJob, PasswordChecked, ReadJob, RestoreJob, Restored, SlotJob, SlotMade, UnlockJob,
+    Unlocked,
 };
 pub use layers::SecurityLayer;
 pub use library::TRASH_DAYS;
@@ -544,7 +545,10 @@ fn egress_action(e: &EgressError) -> ErrorAction {
         | EgressError::Policy(_)
         | EgressError::Tls
         | EgressError::Protocol(_) => ErrorAction::Report,
-        EgressError::TooLarge | EgressError::DailyLimit => ErrorAction::Dismiss,
+        // Her computer's date or time is wrong: fixed there, and only then tried again.
+        EgressError::TooLarge | EgressError::DailyLimit | EgressError::Clock => {
+            ErrorAction::Dismiss
+        }
     }
 }
 
@@ -621,6 +625,9 @@ fn egress_he(e: &EgressError, ai: &str) -> String {
             "החיבור המאובטח נכשל. ייתכן שתוכנה במחשב (למשל אנטי-וירוס) מיירטת תעבורה מוצפנת."
                 .to_owned()
         }
+        EgressError::Clock => format!(
+            "החיבור המאובטח ל-{ai} לא הושלם, ושום דבר לא נשלח. לפי השעון של המחשב, התעודה של השירות פגה או עוד לא בתוקף, ובדרך כלל זה אומר שהתאריך או השעה במחשב לא נכונים. כדאי לבדוק ולתקן את התאריך והשעה בהגדרות של המחשב, ואז לנסות שוב."
+        ),
         EgressError::Pinned => format!(
             "החיבור ל-{ai} נעצר ושום דבר לא נשלח: התעודה שלו היא מגורם שהגרסה הזו של התוכנה לא סומכת עליו. צריך לעדכן את התוכנה (בהגדרות, באודות)."
         ),

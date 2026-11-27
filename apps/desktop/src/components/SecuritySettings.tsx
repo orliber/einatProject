@@ -4,11 +4,12 @@
 // each layer does and against what, and the same list as a PDF. The texts come from the core,
 // which makes the PDF from the same list, so the page and the paper say the same thing.
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ipc, type SecurityLayer, type SecurityStatus } from "../ipc/client";
 import { useApp } from "../App";
 import { ErrorLine } from "./ui";
 import { timed, WaitLine } from "./Progress";
+import { rememberSendStopped } from "../sendStopped";
 
 const COUNT = ["אפס", "אחת", "שתיים", "שלוש", "ארבע", "חמש", "שש", "שבע", "שמונה", "תשע", "עשר", "אחת-עשרה", "שתים-עשרה", "שלוש-עשרה", "ארבע-עשרה"];
 const count = (n: number) => COUNT[n] ?? String(n);
@@ -53,7 +54,10 @@ export function SecuritySettings() {
   async function stop(stopped: boolean) {
     setError(null);
     try {
-      qc.setQueryData<SecurityStatus>(["security"], await ipc.setSendStopped(stopped));
+      const now = await ipc.setSendStopped(stopped);
+      qc.setQueryData<SecurityStatus>(["security"], now);
+      rememberSendStopped(now.send_stopped);
+      notify(now.send_stopped ? "השליחה ל-AI כבויה, עד שתפעילי אותה מחדש כאן או עד שהתוכנה תיסגר." : "השליחה ל-AI פועלת שוב.");
     } catch (e) {
       setError(fail(e as never));
     }
@@ -73,11 +77,14 @@ export function SecuritySettings() {
   }
 
   const s = q.data;
+  useEffect(() => {
+    if (s) rememberSendStopped(s.send_stopped);
+  }, [s]);
   const all = s ? [...s.layers, ...s.yours] : [];
   const bad = all.filter((l) => l.state === "warn");
   const title = !s ? "שכבות ההגנה"
     : bad.length === 0 ? `${count(all.length)} שכבות הגנה, כולן תקינות`
-      : `${all.length - bad.length} מתוך ${all.length} תקינות: ${bad.map((l) => l.title).join(", ")}`;
+      : `${all.length - bad.length} מתוך ${all.length} תקינות. לבדוק: ${bad.map((l) => l.title).join(", ")}`;
   // The stop is always there, also while the list loads or failed to load (review of
   // stage 5, U7). Sending cannot be turned back on while the gate or the rules fail (U1).
   const stopped = s?.send_stopped ?? false;
@@ -99,7 +106,7 @@ export function SecuritySettings() {
       </div>
       <div className="row">
         <p className="hint grow">
-          {s ? `עצירת חירום מכבה כל שליחה ל-AI עד שמדליקים אותה מחדש כאן. עד ${s.daily_limit} בקשות ביום, ולא יותר מ-${s.max_request_kb} KB לבקשה.` : "עצירת חירום מכבה כל שליחה ל-AI."}
+          {s ? `עצירת חירום מכבה כל שליחה ל-AI עד שמדליקים אותה מחדש כאן, או עד שהתוכנה נסגרת. עד ${s.daily_limit} בקשות ביום, ולא יותר מ-${s.max_request_kb} KB לבקשה.` : "עצירת חירום מכבה כל שליחה ל-AI."}
         </p>
         <button type="button" className={stopped ? "btn" : "btn btn-danger"} disabled={stopped && broken}
           title={stopped && broken ? "השער או כללי השליחה לא עברו את הבדיקה, ולכן אי אפשר להפעיל שליחה." : undefined}

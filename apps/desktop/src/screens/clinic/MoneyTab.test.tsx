@@ -276,10 +276,10 @@ describe("open balances", () => {
     await user.click(within(within(list).getByRole("group", { name: "פעולות עבור יובל" })).getByRole("button", { name: "הודעת תשלום" }));
     await user.click(await screen.findByRole("menuitem", { name: "רק להעתיק" }));
     await waitFor(() => expect(notes).toHaveLength(1));
-    expect(notes[0]).toBe("הודעת התשלום הועתקה ללוח המוגן, ואפשר להדביק אותה בהודעה. יימחק מהלוח בעוד דקה.");
+    expect(notes[0]).toBe("הודעת התשלום הועתקה ללוח המוגן, ואפשר להדביק אותה בהודעה. הלוח יתנקה בעוד דקה.");
     const copied = calls.filter((c) => c.cmd === "copy_secret");
     expect(copied).toHaveLength(1);
-    expect(String(copied[0]?.args.text)).toMatch(/^שלום ענת, היתרה לתשלום היא [\d.]+ ₪\. תודה רבה, /);
+    expect(String(copied[0]?.args.text)).toMatch(/^שלום ענת, היתרה לתשלום היא [\d.,]+ ₪\. תודה רבה, /);
     // The toast never carries the message, and the default text leaves the child's name out.
     expect(String(copied[0]?.args.text)).not.toContain("יובל");
   });

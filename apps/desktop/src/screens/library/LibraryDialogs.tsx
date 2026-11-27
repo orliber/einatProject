@@ -3,6 +3,9 @@ import { useState } from "react";
 import type { Folder } from "../../ipc/client";
 import { Dialog, ErrorLine } from "../../components/ui";
 
+/** The longest folder name; the core keeps the same limit. */
+const NAME_MAX = 60;
+
 export function FolderNameDialog(props: { title: string; initial?: string; onClose: () => void; onSave: (name: string) => Promise<void> }) {
   const [name, setName] = useState(props.initial ?? "");
   const [busy, setBusy] = useState(false);
@@ -26,7 +29,12 @@ export function FolderNameDialog(props: { title: string; initial?: string; onClo
       <form className="stack" onSubmit={(e) => { e.preventDefault(); void save(); }}>
         <div className="field">
           <label htmlFor="folder-name">שם התיקייה</label>
-          <input id="folder-name" className="input" autoFocus maxLength={60} value={name} onChange={(e) => setName(e.target.value)} />
+          <input id="folder-name" className="input" autoFocus maxLength={NAME_MAX} value={name} aria-describedby="folder-name-count"
+            onChange={(e) => setName(e.target.value)} />
+          {/* The limit is said, so a long name (or a pasted one) is never cut without a word. */}
+          <span id="folder-name-count" className={name.length >= NAME_MAX ? "small warn-text" : "small muted"}>
+            {name.length >= NAME_MAX ? `הגעת ל-${NAME_MAX} תווים, האורך המרבי לשם.` : `${name.length} מתוך ${NAME_MAX} תווים`}
+          </span>
         </div>
         <p className="hint">השם נשמר מוצפן ולא נשלח לשום מקום.</p>
         <ErrorLine error={error} />
@@ -83,7 +91,7 @@ export function MoveDialog(props: { what: string; folders: Folder[]; current: st
       <div className="move-tree" role="radiogroup" aria-label="תיקיית היעד">
         <label className="check-row move-row">
           <input type="radio" name="move-target" checked={target === null} onChange={() => setTarget(null)} />
-          <span className="grow"><b>תיקים</b> (הרמה העליונה)</span>
+          <span className="grow"><b>תיקים</b> (לא בתוך תיקייה)</span>
         </label>
         {tree(null, 1)}
       </div>

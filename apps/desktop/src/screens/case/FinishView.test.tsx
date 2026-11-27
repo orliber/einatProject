@@ -2,15 +2,16 @@
 // and three folded lists (what stops the file, what is worth a look, proofreading). A note is a
 // card: fixed right here, opened in its section, or left as it is. Over the demo core; every
 // name and detail is invented.
-import { configure, render, screen, waitFor, within } from "@testing-library/react";
+import { configure, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { CaseDetail } from "../../ipc/client";
-import { clearKept } from "../../kept";
+import { clearKept, setKept } from "../../kept";
 import { a11yViolations } from "../../test/a11y";
 import { prepared } from "../../test/fixtures";
 import { appApi, CaseHost, Host, serve, type Override } from "../../test/host";
 import type { FakeCore } from "../../web/fakeCore";
 import { FinishView } from "./FinishView";
+import { forgetHold, useHoldUnsaved } from "../../components/Unsaved";
 import { excerptOf, needlesOf, NOTE_TITLE, noteWhy } from "./finishNotes";
 
 configure({ asyncUtilTimeout: 5000 });
@@ -78,13 +79,18 @@ describe("the finish page", () => {
   it("things worth a look: one line says so, the list that needs her is open, the file can be made; passes the accessibility check", async () => {
     const { side, user, onExport, view } = await openFinish();
     // The demo case: two notes on the background, one on the scores, sections still empty.
-    await waitFor(() => expect(status(side)).toHaveTextContent("אפשר להוציא. 5 דברים שכדאי לבדוק קודם."));
+    // A number unlike the score table is said first, in its own list, open; the file can still go.
+    await waitFor(() => expect(status(side)).toHaveTextContent("אפשר להוציא, אבל מספר אחד בדוח לא תואם את טבלת הציונים. כדאי לבדוק אותו קודם."));
     expect(within(side).getByText("אין שום דבר שעוצר את הקובץ.")).toBeInTheDocument();
     // Nothing stops the file: that list is not drawn at all.
     expect(head(side, /חייבים לתקן/)).toBeNull();
+    const scores = head(side, /מספרים שלא תואמים את טבלת הציונים/) as HTMLElement;
+    expect(scores).toHaveAttribute("aria-expanded", "true");
+    expect(count(scores)).toBe("1");
     const check = head(side, /כדאי לבדוק/) as HTMLElement;
-    expect(check).toHaveAttribute("aria-expanded", "true");
-    expect(count(check)).toBe("5");
+    expect(check).toHaveAttribute("aria-expanded", "false");
+    expect(count(check)).toBe("4");
+    await user.click(check);
     const polish = head(side, /ליטוש ניסוח/) as HTMLElement;
     expect(polish).toHaveAttribute("aria-expanded", "false");
     expect(count(polish)).toBe("2");
@@ -199,6 +205,7 @@ describe("the finish page", () => {
       const s = sectionOf(d, "kindergarten");
       s.paragraphs = [{ ...first(d, "referral"), id: "waiting-1", status: "proposed" }];
     }));
+    await user.click(await within(side).findByRole("button", { name: /כדאי לבדוק/ }));
     const card = cardOf(await within(side).findByText("טיוטות שעוד לא אושרו"));
     expect(card).toHaveTextContent("לא ייכנסו לקובץ: מסגרת חינוכית.");
     expect(produce()).toBeEnabled();
@@ -408,7 +415,8 @@ describe("the finish page", () => {
     const card = cardOf(await within(side).findByText("מקום שסומן להשלמה"));
     expect(within(card).getByText("מסגרת חינוכית")).toBeInTheDocument();
     expect(card.querySelector("mark")).toHaveTextContent("[חסר: כמה ילדים בקבוצה]");
-    expect(within(card).getByText("הקובץ יוצא גם כך: הסימון נשאר בו, ואפשר להשלים אותו בוורד.")).toBeInTheDocument();
+    // No promise of Word: a PDF cannot be completed afterwards.
+    expect(within(card).getByText("הקובץ יוצא גם כך, עם הסימון. בקובץ Word אפשר להשלים אותו אחר כך, ב-PDF אי אפשר.")).toBeInTheDocument();
     expect(produce()).toBeEnabled();
     await user.click(within(card).getByRole("button", { name: "לתקן כאן" }));
     const box = within(card).getByRole("textbox", { name: "תיקון הפסקה" });
@@ -498,6 +506,7 @@ describe("the finish page", () => {
       expect(scroll.mock.contexts[0]).toBe(lit);
       expect(card).toHaveClass("is-shown");
       // A card about sections lights the section.
+      await user.click(within(side).getByRole("button", { name: /כדאי לבדוק/ }));
       await user.click(cardOf(within(side).getByText(/סעיפ(ים|) מסכמ(ים|) שעוד ריק(ים|)/)).querySelector(".fin-quote") as HTMLElement);
       expect(preview.querySelector(".a4-section.is-shown")).not.toBeNull();
       expect(preview.querySelector(".a4-p.is-shown")).toBeNull();
@@ -584,5 +593,89 @@ describe("the finish page", () => {
     expect(within(side).queryByText("בודקת שהדוח מוכן להוצאה")).toBeNull();
     expect(status(side)).not.toHaveTextContent(/מוכן|אפשר להוציא/);
     expect(produce()).toBeDisabled();
+  });
+
+  it("a paragraph left open and unsaved on the report page stops the file, with the way back to it", async () => {
+    const served = await serve();
+    const { unmount } = renderHook(() => useHoldUnsaved(served.caseId, 'פסקה בסעיף "סיבת הפניה"', "טקסט בדוי עם תיקון חשוב"));
+    try {
+      const onOpen = vi.fn();
+      const user = userEvent.setup();
+      render(
+        <Host app={appApi()}>
+          <CaseHost caseId={served.caseId}>{(api) => <FinishView api={api} onExport={vi.fn()} onOpen={onOpen} />}</CaseHost>
+        </Host>,
+      );
+      const side = await screen.findByRole("region", { name: "לפני שהקובץ יוצא" });
+      await waitFor(() => expect(status(side)).toHaveTextContent("נשאר דבר אחד שחייבים לתקן לפני ההוצאה."));
+      expect(within(side).queryByText("אין שום דבר שעוצר את הקובץ.")).toBeNull();
+      const card = cardOf(within(side).getByText("עריכה שלא נשמרה"));
+      expect(within(card).getByText("סיבת הפניה")).toBeInTheDocument();
+      expect(produce()).toBeDisabled();
+      await user.click(within(card).getByRole("button", { name: "לעבור לסעיף" }));
+      expect(onOpen).toHaveBeenCalledWith("referral");
+    } finally {
+      unmount();
+      forgetHold();
+    }
+  });
+
+  it("a paragraph of her own left open on the section's page leads back to that page", async () => {
+    const served = await serve();
+    const { unmount } = renderHook(() => useHoldUnsaved(served.caseId, 'פסקה בסעיף "סיבת הפניה"', "פסקה בדויה משלה"));
+    setKept<string | null>(`case:${served.caseId}:section:referral:own`, null)("פסקה בדויה משלה");
+    try {
+      const onOpen = vi.fn();
+      const app = appApi();
+      const user = userEvent.setup();
+      render(
+        <Host app={app}>
+          <CaseHost caseId={served.caseId}>{(api) => <FinishView api={api} onExport={vi.fn()} onOpen={onOpen} />}</CaseHost>
+        </Host>,
+      );
+      const side = await screen.findByRole("region", { name: "לפני שהקובץ יוצא" });
+      const card = cardOf(await within(side).findByText("עריכה שלא נשמרה"));
+      await user.click(within(card).getByRole("button", { name: "לעבור לסעיף" }));
+      expect(onOpen).not.toHaveBeenCalled();
+      expect(app.go).toHaveBeenCalledWith({ name: "case", id: served.caseId, view: "referral" });
+    } finally {
+      unmount();
+      forgetHold();
+    }
+  });
+
+  it("UIC-7: a double click on 'שמירה' saves once, and says nothing about another wording", async () => {
+    let release: () => void = () => undefined;
+    const shaped = reshape(bare);
+    const { side, user, calls, app } = await openFinish(async (cmd, args, core) => {
+      if (cmd === "edit_paragraph") await new Promise<void>((r) => { release = r; });
+      return shaped(cmd, args, core);
+    }, {
+      caseOf: async (c, noam) => {
+        await c.handle("add_own_paragraph", { caseId: noam, sectionKey: "kindergarten", text: "פסקה מומצאת. [חסר: פרט]" });
+        return noam;
+      },
+    });
+    const card = cardOf(await within(side).findByText("מקום שסומן להשלמה"));
+    await user.click(within(card).getByRole("button", { name: "לתקן כאן" }));
+    const box = within(card).getByRole("textbox", { name: "תיקון הפסקה" });
+    await user.type(box, " נוסף");
+    // While the editor is open the file waits for it.
+    expect(produce()).toBeDisabled();
+    const save = within(card).getByRole("button", { name: "שמירה" });
+    await user.dblClick(save);
+    expect(calls.filter((c) => c.cmd === "edit_paragraph")).toHaveLength(1);
+    expect(within(card).getByRole("button", { name: "בשמירה…" })).toBeDisabled();
+    release();
+    await waitFor(() => expect(within(side).queryByRole("textbox", { name: "תיקון הפסקה" })).toBeNull());
+    expect(calls.filter((c) => c.cmd === "edit_paragraph")).toHaveLength(1);
+    expect(app.notify).not.toHaveBeenCalled();
+  });
+
+  it("the preview names the child as the report page does, by the case's gender", async () => {
+    await openFinish();
+    const preview = screen.getByRole("region", { name: "תצוגה מקדימה של הקובץ" });
+    expect(await within(preview).findByText("שם הילד")).toBeInTheDocument();
+    expect(within(preview).queryByText("שם הילד/ה")).toBeNull();
   });
 });

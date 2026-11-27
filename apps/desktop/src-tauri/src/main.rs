@@ -13,6 +13,7 @@ mod secret_clipboard;
 mod win_platform;
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -46,8 +47,41 @@ struct AppState {
     prepared: Arc<Mutex<Option<dv_core::update::Downloaded>>>,
     /// Where the optional name model is downloaded (next to the vault, not inside it; D-053).
     models: PathBuf,
-    /// Bytes done and total while the name model downloads; held for the whole download.
+    /// Bytes done and total while the name model downloads: `Some` from the click until the
+    /// download ends, so a second click while it runs is refused (OPS-2).
     model_progress: Arc<Mutex<Option<(u64, u64)>>>,
+    /// The window's × was pressed while the vault was open: the page hands over what she was
+    /// typing and asks to lock, and that lock ends the program (D-218).
+    closing: Arc<AtomicBool>,
+    /// Reports being written and recorded now (`save_and_record`): closing waits for them.
+    exporting: Arc<AtomicUsize>,
+}
+
+/// One report file being written and then recorded, counted until it is done either way.
+struct Exporting(Arc<AtomicUsize>);
+
+impl Exporting {
+    fn start(count: &Arc<AtomicUsize>) -> Self {
+        count.fetch_add(1, Ordering::SeqCst);
+        Self(Arc::clone(count))
+    }
+}
+
+impl Drop for Exporting {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+/// The longest closing waits for a report being written and recorded to finish.
+const EXPORT_WAIT: Duration = Duration::from_secs(10);
+
+/// Wait (a bounded time) until no report is between its file and its record.
+fn wait_for_exports(count: &AtomicUsize) {
+    let until = std::time::Instant::now() + EXPORT_WAIT;
+    while count.load(Ordering::SeqCst) > 0 && std::time::Instant::now() < until {
+        std::thread::sleep(Duration::from_millis(50));
+    }
 }
 
 /// One answer on its way: how many words, and what was written (still tagged, as it came)
@@ -273,8 +307,61 @@ const IDLE_EVENT_SECONDS: u32 = 90;
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum CoreEvent {
     Locked,
-    IdleSoon { seconds: u32 },
+    IdleSoon {
+        seconds: u32,
+    },
     BackedUp,
+    /// The window is closing: hand over what is being typed, then lock (D-218).
+    Closing,
+}
+
+/// How long the page has to hand over her text and lock before the program locks and ends
+/// without it (a page that does not answer must not keep the window from closing).
+const CLOSE_WAIT: Duration = Duration::from_secs(3);
+
+/// One copy of the program at a time (SHELL-3, D-218). Two copies on one vault each hold
+/// their own copy of its header, so a password changed in one could be undone by the other.
+const INSTANCE_LOCK: &str = "instance.lock";
+
+/// Take the one-copy lock in the app's data folder, held until the process ends (the system
+/// lets go of it then, also after a crash). `Ok(None)` when another copy holds it. A folder
+/// where the lock cannot be taken at all (no such lock on that disk) does not stop the program.
+fn one_copy(data: &std::path::Path) -> std::io::Result<Option<std::fs::File>> {
+    std::fs::create_dir_all(data)?;
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(data.join(INSTANCE_LOCK))?;
+    match file.try_lock() {
+        Ok(()) => Ok(Some(file)),
+        Err(std::fs::TryLockError::WouldBlock) => Ok(None),
+        Err(std::fs::TryLockError::Error(e)) => Err(e),
+    }
+}
+
+/// The program ends: lock the vault (keeping what she typed, D-218) and take a copied secret
+/// off the clipboard (SHELL-2). Waits a little for a command still holding the core; a core
+/// that stays busy is left as it is, as a crash would leave it.
+fn lock_for_exit(core: &Mutex<Core>, clipboard: &secret_clipboard::SecretClipboard) {
+    clipboard.clear_now();
+    let until = std::time::Instant::now() + CLOSE_WAIT;
+    loop {
+        match core.try_lock() {
+            Ok(mut c) => {
+                c.lock_on_close();
+                return;
+            }
+            Err(std::sync::TryLockError::Poisoned(p)) => {
+                p.into_inner().lock_on_close();
+                return;
+            }
+            Err(std::sync::TryLockError::WouldBlock) if std::time::Instant::now() < until => {
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            Err(std::sync::TryLockError::WouldBlock) => return,
+        }
+    }
 }
 const CRASH_LOG_MAX: u64 = 64 * 1024;
 
@@ -362,6 +449,26 @@ fn main() {
     let result = tauri::Builder::default()
         .setup(move |app| {
             let data = app.path().app_local_data_dir()?;
+            // A second copy (the icon double-clicked again while the window is minimised or
+            // slow to appear) says so and ends before it touches the vault.
+            match one_copy(&data) {
+                Ok(Some(held)) => {
+                    // Held for the life of the process.
+                    std::mem::forget(held);
+                }
+                Ok(None) => {
+                    let _ = rfd::MessageDialog::new()
+                        .set_title("כספת האבחון")
+                        .set_description(
+                            "התוכנה כבר פתוחה. החלון שלה נמצא בשורת המשימות (או ב-Dock במק).",
+                        )
+                        .set_level(rfd::MessageLevel::Info)
+                        .set_buttons(rfd::MessageButtons::Ok)
+                        .show();
+                    std::process::exit(0);
+                }
+                Err(_) => {}
+            }
             remember_crashes(data.join(CRASH_LOG));
             // The window's own crash reports (WebView2 keeps them under its data folder) could
             // hold what was on screen. They are never sent; they are deleted at every start.
@@ -416,12 +523,11 @@ fn main() {
                     })
                     .unwrap_or((false, None));
                 // The computer was locked (Win+L): the vault locks with it. Asked without
-                // holding the core, and only while the vault is open.
-                if !locked && timer.lock().is_ok_and(|c| c.is_unlocked()) {
-                    let answer = os_lock::computer_locked();
-                    if computer.just_locked(answer) {
-                        locked = timer.lock().is_ok_and(|mut c| c.lock_with_computer());
-                    }
+                // holding the core, on every tick: asked only while the vault was open, a
+                // Win+L within 15 seconds of opening it was never seen as a change (SHELL-6).
+                let answer = os_lock::computer_locked();
+                if computer.just_locked(answer) && !locked {
+                    locked = timer.lock().is_ok_and(|mut c| c.lock_with_computer());
                 }
                 // A backup that is due goes by itself to the drive of the last one, on its
                 // own worker: the timer never waits for a slow drive (D-119).
@@ -476,8 +582,34 @@ fn main() {
                 prepared: Arc::default(),
                 models,
                 model_progress: Arc::default(),
+                closing: Arc::default(),
+                exporting: Arc::default(),
             });
             Ok(())
+        })
+        // The window's × (or Alt+F4) while the vault is open: the page hands over what she
+        // was typing and locks, and that lock ends the program (`lock`). A page that does not
+        // answer in time is not waited for: the vault locks with what the core already holds.
+        .on_window_event(|window, event| {
+            let tauri::WindowEvent::CloseRequested { api, .. } = event else {
+                return;
+            };
+            let Some(state) = window.try_state::<AppState>() else {
+                return;
+            };
+            let open = state.core.try_lock().map_or(true, |c| c.is_unlocked());
+            if !open || state.closing.swap(true, Ordering::SeqCst) {
+                return;
+            }
+            api.prevent_close();
+            let _ = window.emit(CORE_EVENT, CoreEvent::Closing);
+            let app = window.app_handle().clone();
+            let exporting = Arc::clone(&state.exporting);
+            std::thread::spawn(move || {
+                std::thread::sleep(CLOSE_WAIT);
+                wait_for_exports(&exporting);
+                app.exit(0);
+            });
         })
         .invoke_handler(tauri::generate_handler![
             ping,
@@ -676,8 +808,54 @@ fn main() {
             clinic,
             send_progress,
         ])
-        .run(tauri::generate_context!());
-    if result.is_err() {
+        .build(tauri::generate_context!());
+    let Ok(app) = result else {
         std::process::exit(1);
+    };
+    // However the program ends (the window, ⌘Q, Windows shutting down), the vault locks first.
+    app.run(|handle, event| {
+        if let tauri::RunEvent::Exit = event {
+            if let Some(state) = handle.try_state::<AppState>() {
+                wait_for_exports(&state.exporting);
+                lock_for_exit(&state.core, &state.clipboard);
+            }
+        }
+    });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{one_copy, wait_for_exports, Exporting};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    #[test]
+    fn closing_waits_for_a_report_between_its_file_and_its_record() {
+        let count = Arc::new(AtomicUsize::new(0));
+        let writing = Exporting::start(&count);
+        assert_eq!(count.load(Ordering::SeqCst), 1);
+        let done = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            drop(writing);
+        });
+        let started = std::time::Instant::now();
+        wait_for_exports(&count);
+        assert!(started.elapsed() >= std::time::Duration::from_millis(150));
+        assert_eq!(count.load(Ordering::SeqCst), 0);
+        done.join().unwrap();
+    }
+
+    #[test]
+    fn a_second_copy_of_the_program_is_refused_while_the_first_runs() {
+        let dir = std::env::temp_dir().join(format!("dv-one-copy-{}", std::process::id()));
+        let first = one_copy(&dir).unwrap();
+        assert!(first.is_some());
+        assert!(one_copy(&dir).unwrap().is_none(), "the first copy holds it");
+        drop(first);
+        assert!(
+            one_copy(&dir).unwrap().is_some(),
+            "the first copy ended: the next start opens"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

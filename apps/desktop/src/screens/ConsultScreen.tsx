@@ -95,8 +95,10 @@ function Typing({ since, approval, follow }: { since: number; approval: string |
       <div className={text ? "chat-bubble chat-bubble-ai chat-live" : "chat-bubble chat-bubble-ai chat-typing"}>
         <LiveText text={text} className="live-text-chat serif" rich />
         {!text && <span className="dots" aria-hidden="true"><i /><i /><i /></span>}
+        {/* A screen reader hears "כותב" once: the clock that moves every second is for the eyes
+            only, or it would be read again and again while she waits (UID-12). */}
         <span className="muted small">
-          {ai} כותב{elapsed >= 2000 ? ` · ${elapsedClock(elapsed)} · ${leftText(elapsed, estimate, known)}` : "…"}{words >= 5 ? ` · ${wordsSoFar(words)}` : ""}
+          {ai} כותב<span aria-hidden="true">{elapsed >= 2000 ? ` · ${elapsedClock(elapsed)} · ${leftText(elapsed, estimate, known)}` : "…"}{words >= 5 ? ` · ${wordsSoFar(words)}` : ""}</span>
         </span>
       </div>
     </div>
@@ -104,7 +106,7 @@ function Typing({ since, approval, follow }: { since: number; approval: string |
 }
 
 export function ConsultScreen({ caseId }: { caseId?: string | undefined }) {
-  const { fail, status } = useApp();
+  const { fail, status, go } = useApp();
   const shown = useShownName();
   const discreet = useDiscreet();
   const ai = useAi();
@@ -151,6 +153,8 @@ export function ConsultScreen({ caseId }: { caseId?: string | undefined }) {
     const cut = label.lastIndexOf(" · ");
     return cut > 0 ? `${shown(label.slice(0, cut))}${label.slice(cut)}` : label;
   };
+  const backCase = caseId !== undefined ? caseList.find((c) => c.id === caseId) : undefined;
+  const backName = backCase ? (backCase.child_name ? shown(backCase.child_name) : backCase.meta.code) : null;
   const savedOne = saved.data?.find((c) => c.id === conversation);
   const savedLabel = savedOne ? caseLabel(savedOne.case_id, savedOne.case_label) : null;
   const scopeLabel = scope === null
@@ -343,6 +347,13 @@ export function ConsultScreen({ caseId }: { caseId?: string | undefined }) {
         {/* The page's main, with no box of its own: the conversation keeps its name as a region. */}
         <div role="main" className="consult-main">
         <section className="card consult-chat" aria-label="השיחה" data-page-content="">
+          {/* Opened from a case: the way back to it, one click (the case's header and steps are
+              not on this screen). */}
+          {caseId !== undefined && (
+            <button type="button" className="link-btn align-start consult-back" onClick={() => go({ name: "case", id: caseId, view: "report" })}>
+              → חזרה לתיק{backName ? ` של ${backName}` : ""}
+            </button>
+          )}
           {turns.length > 0 && (
             <div className="consult-head">
               <strong className="consult-head-title">{titleOf(turns) || title}</strong>
